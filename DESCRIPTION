@@ -1,0 +1,36 @@
+Package: prosecnur
+Type: Package
+Title: Procesamiento y Validación de Reglas de Consistencia para ACNUR
+Version: 0.1.0
+Authors@R: c(
+    person(
+      "Gonzalo", "Almendariz",
+      email = "jane@example.com",
+      role = c("aut", "cre")
+    )
+  )
+Description: Herramientas para cargar el plan de validación desde Excel,
+    evaluar reglas de consistencia sobre datos tabulares y generar resúmenes
+    e informes legibles de inconsistencias. Incluye utilidades para
+    estandarizar nombres de columnas, parsear reglas escritas en el plan
+    y producir tablas por regla con variables de interés.
+License: MIT + file LICENSE
+Depends: R (>= 4.1)
+Encoding: UTF-8
+Imports:
+    dplyr,
+    purrr,
+    readxl,
+    stringi,
+    stringr,
+    tibble,
+    rlang
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+Config/testthat/edition: 3
+URL: https://github.com/tu-usuario/prosecnur
+BugReports: https://github.com/tu-usuario/prosecnur/issues
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
