@@ -17,7 +17,8 @@ suppressPackageStartupMessages({
   "2. Saltos de preguntas",
   "3. Preguntas de control",
   "7. Consistencia",
-  "9. Valores atípicos"
+  "9. Valores atípicos",
+  "Filtro de opciones"
 )
 
 .paletas_por_hue <- list(

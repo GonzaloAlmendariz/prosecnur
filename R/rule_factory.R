@@ -1445,7 +1445,7 @@ build_choice_filter_g <- function(x){
 
     tibble::tibble(
       ID = NA_character_,
-      `Tipo de observación`      = "7. Consistencia (choice_filter)",
+      `Tipo de observación`      = "Filtro de opciones",
       Objetivo                   = Objetivo_txt,
       `Variable 1`               = var,
       `Variable 1 - Etiqueta`    = lab,
