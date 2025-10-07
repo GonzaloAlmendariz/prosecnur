@@ -7,7 +7,7 @@
 generar_plan_limpieza(
   x,
   incluir = list(required = TRUE, other = TRUE, relevant = TRUE, constraint = TRUE,
-    calculate = TRUE, fecha_campo = TRUE),
+    calculate = TRUE, choice_filter = TRUE, fecha_campo = TRUE),
   fecha_var = "mand_Date",
   fecha_campo = Sys.Date()
 )

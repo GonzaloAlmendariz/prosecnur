@@ -7,34 +7,15 @@
 leer_xlsform_limpieza(path, lang = "es", prefer_label = NULL)
 }
 \arguments{
-\item{path}{Ruta al archivo XLSForm (.xlsx).}
+\item{path}{Ruta al archivo .xlsx}
 
-\item{lang}{Idioma preferido para detectar columnas de label (p.ej., "es").
-Sólo se usa para señalar cuál columna existe; no se reescriben labels.}
+\item{lang}{Código de idioma a preferir para label (p.ej., "es")}
 
-\item{prefer_label}{Nombre exacto de la columna de label a priorizar (opcional).
-Si existe, se registra como la elegida en meta, pero no se modifica el contenido.}
+\item{prefer_label}{Nombre exacto de la columna de label a priorizar (opcional)}
 }
 \value{
-Lista con:
-\itemize{
-\item \code{survey_raw}, \code{choices_raw}, \code{settings_raw}: hojas crudas (sólo saneo de encabezados).
-\item \code{survey}: preguntas (sin begin/end), con auxiliares:
-\code{type_base}, \code{list_name}, \code{list_norm}, \code{q_order},
-\code{group_name}, \code{group_label}, \code{relevant}, \code{constraint},
-\code{calculation}, \code{appearance}.
-\item \code{choices}: opciones (list_name, name, label si existe, list_norm).
-\item \code{meta}: lista con
-\code{label_col_survey}, \code{label_col_choices},
-\code{groups_detail} (rango begin/end, nivel, relevant, vars referenciadas),
-\code{lists_with_other}, \code{section_map}.
-}
+lista: survey_raw, choices_raw, settings_raw, survey, choices, meta
 }
 \description{
-Lee las hojas \code{survey}, \code{choices} y \code{settings} de un XLSForm
-y agrega únicamente auxiliares mínimos para fabricar reglas de limpieza, sin
-renombrar columnas visibles ni reescribir labels. Detecta grupos
-(\code{begin_group}/\code{end_group}), su anidación, \code{appearance}
-(p.ej., \code{field-list}), y la condición \code{relevant} que los abre
-(p.ej. \verb{${Consent} = 'Yes'} o expresiones compuestas con \code{selected()}).
+Leer XLSForm para limpieza (sin normalizar valores/labels)
 }

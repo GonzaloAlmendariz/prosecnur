@@ -63,6 +63,29 @@ nombre_regla_consistencia_g <- function(var1, var2 = NULL, pref = "cruce"){
   paste0(pref, "_", v1, "x", v2, "_G")
 }
 
+
+# -------------------------------------------------------------------
+# Wrapper compatible: reescribir_odk_fix() -> usa tu constraint_a_r()
+# Soporta el caso count-selected(.) reemplazando "." por var1
+# -------------------------------------------------------------------
+reescribir_odk_fix <- function(txt, var1 = NULL) {
+  if (is.null(txt) || is.na(txt) || !nzchar(txt)) return(NA_character_)
+  x <- as.character(txt)
+
+  # Reemplaza count-selected(.) por count-selected(var1) si corresponde
+  if (!is.null(var1) && nzchar(var1)) {
+    x <- gsub(
+      "count\\s*-\\s*selected\\s*\\(\\s*\\.\\s*\\)",
+      paste0("count-selected(", var1, ")"),
+      x, perl = TRUE
+    )
+  }
+
+  # Reutiliza tu traductor principal
+  constraint_a_r(x, var_name = var1)
+}
+
+
 # ------------------------------------------------------------------
 # Helper para armar gmap (G-aware) de forma robusta
 # ------------------------------------------------------------------
@@ -227,6 +250,84 @@ nombre_regla_consistencia_g <- function(var1, var2 = NULL, pref = "cruce"){
 
   survey$group_name <- dplyr::coalesce(as.character(survey$group_name %||% NA_character_), out)
   survey
+}
+
+
+
+# Normaliza choice_filter a "" (vacío) en vez de NA, tanto en survey como en el summary
+coalesce_choice_filter <- function(x) {
+  if ("survey" %in% names(x) && is.data.frame(x$survey)) {
+    if (!"choice_filter" %in% names(x$survey)) {
+      x$survey$choice_filter <- ""
+    } else {
+      x$survey$choice_filter <- ifelse(is.na(x$survey$choice_filter), "", x$survey$choice_filter)
+    }
+  }
+  if ("meta" %in% names(x) && is.list(x$meta) &&
+      "choice_filter_summary" %in% names(x$meta) &&
+      is.data.frame(x$meta$choice_filter_summary)) {
+    cfs <- x$meta$choice_filter_summary
+    if (!"choice_filter" %in% names(cfs)) {
+      cfs$choice_filter <- ""
+    } else {
+      cfs$choice_filter <- ifelse(is.na(cfs$choice_filter), "", cfs$choice_filter)
+    }
+    x$meta$choice_filter_summary <- cfs
+  }
+  x
+}
+
+
+# --- Helpers CF ---------------------------------------------------------------
+
+# Normaliza texto ligero (comillas y espacios)
+.cf_norm <- function(x){
+  x <- as.character(x %||% "")
+  x <- gsub("[\u00A0\u2007\u202F]", " ", x)
+  x <- gsub("\u201C|\u201D", "\"", x)
+  x <- gsub("\u2018|\u2019", "'",  x)
+  gsub("\\s+", " ", trimws(x))
+}
+
+# Traduce el choice_filter de una pregunta a una expresión R por Opción,
+# sustituyendo:
+#  - ${var}           -> as.character(var)
+#  - name             -> '<optname>'
+#  - columnas extra   -> '<valor_en_choices_para_esa_opción>'
+#  - and/or/not/=/!=  -> & | !  y  == / !=
+# Reemplaza la versión actual por esta
+.cf_expr_por_opcion <- function(cf_raw, opt_row, extra_cols_for_list){
+  if (is.null(cf_raw) || is.na(cf_raw) || !nzchar(cf_raw)) return("")
+
+  cf <- gsub("(?<!<|>|!|<-|=)=(?!=)", "==", cf_raw, perl = TRUE)
+  cf <- gsub("(?i)\\band\\b", "&", cf, perl = TRUE)
+  cf <- gsub("(?i)\\bor\\b",  "|", cf, perl = TRUE)
+
+  nm <- as.character(opt_row$name[[1]])
+  if (grepl("name\\s*==?\\s*'0'", cf, perl = TRUE) && identical(nm, "0")) return("TRUE")
+
+  used_cols <- unique({
+    m <- stringr::str_match_all(cf, "\\bfilter_([A-Za-z0-9_]+)\\b")[[1]]
+    if (nrow(m)) paste0("filter_", m[,2]) else character(0)
+  })
+
+  pieces <- character(0)
+  for (col in extra_cols_for_list) {
+    if (!length(used_cols) || !(col %in% used_cols)) next
+    if (!col %in% names(opt_row)) next
+    val <- as.character(opt_row[[col]][[1]])
+    if (!length(val) || is.na(val) || !nzchar(val)) next  # ← ignora vacíos
+    var_resp <- sub("^filter_", "", col)                  # filter_P14 → P14
+    val_q    <- paste0("'", gsub("'", "\\\\'", val), "'") # siempre texto
+    pieces   <- c(pieces, paste0("as.character(", var_resp, ") == ", val_q))
+  }
+  if (!length(pieces)) "" else paste(pieces, collapse = " | ") # OR entre columnas
+}
+
+# Une OR seguro ignorando vacíos
+.or_join <- function(parts){
+  parts <- parts[nzchar(parts)]
+  if (!length(parts)) "" else paste(parts, collapse = " | ")
 }
 
 
@@ -1231,6 +1332,139 @@ build_fecha_campo <- function(survey, section_map, label_col,
   )
 }
 
+
+# ---- CHOICE FILTER (select_one) — G-aware ------------------------------------
+build_choice_filter_g <- function(x){
+  # x: lista de leer_xlsform_limpieza()
+  stopifnot(is.list(x), all(c("survey","choices","meta") %in% names(x)))
+
+  survey      <- x$survey
+  choices     <- x$choices %||% tibble::tibble()
+  section_map <- x$meta$section_map %||% tibble::tibble()
+  ccols_map   <- x$meta$choice_cols_by_list %||% tibble::tibble(list_name=character(), extra_cols=list())
+  label_col   <- x$meta$label_col_survey %||% "label"
+
+  if (!nrow(survey)) return(tibble::tibble())
+
+  # G-map (relevant de begin_group) — si falla, sin G
+  gmap <- tryCatch(.make_gmap(x), error = function(e) tibble::tibble())
+
+  dat <- survey %>%
+    dplyr::mutate(
+      type_base     = tolower(trimws(sub("\\s.*$", "", .data$type))),
+      choice_filter = ifelse(is.na(.data$choice_filter), "", .data$choice_filter),
+      list_name     = as.character(.data$list_name)
+    ) %>%
+    dplyr::filter(type_base == "select_one", nzchar(choice_filter), nzchar(list_name))
+
+  if (!nrow(dat)) return(tibble::tibble())
+
+  purrr::pmap_dfr(dat, function(...){
+    row <- list(...)
+
+    var    <- row$name
+    lab    <- etq_pregunta(survey, label_col, var)
+    pref   <- prefijo_para(row$group_name, section_map)
+    ln     <- row$list_name
+    cf_raw <- row$choice_filter
+
+    # Condición efectiva: G del grupo + relevant del ítem
+    ginfo <- gmap[gmap$group_name == row$group_name, , drop = FALSE]
+    G_r   <- as_chr1(if (nrow(ginfo)) ginfo$G_expr[[1]]   else "")
+    rel_r <- as_chr1(tryCatch(
+      relevant_a_r_y_humano(as_chr1(row$relevant %||% ""), survey, choices, label_col)$expr_r,
+      error = function(e) ""
+    ))
+    cond_r <- if (nz1(G_r) && nz1(rel_r)) paste0("(", G_r, ") & (", rel_r, ")")
+    else if (nz1(G_r))          G_r
+    else if (nz1(rel_r))        rel_r
+    else                        ""
+
+    # columnas extra de esta lista que podrían participar en el filtro
+    extras <- ccols_map$extra_cols[[ match(ln, ccols_map$list_name) ]]
+    extras <- unique(extras)               # <- NO agregar "name"
+
+    # Subconjunto de choices de esta lista
+    ch_ln <- choices[choices$list_name == ln, , drop = FALSE]
+    if (!nrow(ch_ln)) return(tibble::tibble())
+
+    # Para cada opción, construir (var == 'op') & ( cf(op) )
+    terms <- ch_ln %>%
+      dplyr::group_by(name) %>%
+      dplyr::summarise(
+        cond = {
+          # Opción '0' (placeholder) siempre visible: no impone filtro
+          if (identical(as.character(first(name)), "0")) {
+            "TRUE"
+          } else {
+            piezas <- list()
+            for (col in extras) {
+              if (!col %in% names(cur_data_all())) next
+              vals <- unique(na.omit(as.character(cur_data_all()[[col]])))
+              vals <- vals[nzchar(vals)]
+              if (length(vals)) {
+                var_resp <- sub("^filter_", "", col)                # filter_P14 -> P14
+                vals_q   <- paste0("'", gsub("'", "\\\\'", vals), "'")
+                piezas   <- c(piezas, paste0("as.character(", var_resp, ") %in% c(", paste(vals_q, collapse=","), ")"))
+              }
+            }
+            if (!length(piezas)) "TRUE" else paste(piezas, collapse = " | ")  # OR entre columnas
+          }
+        },
+        .groups = "drop"
+      ) %>%
+      dplyr::mutate(
+        expr = paste0("((", var, " == '", gsub("'", "\\\\'", name), "') & (", cond, "))")
+      ) %>%
+      dplyr::pull(expr)
+
+    allowed_expr <- .or_join(terms)
+    if (!nzchar(allowed_expr)) return(tibble::tibble())
+
+    # Procesamiento: si aplica, debe estar vacío o en el conjunto permitido
+    nombre  <- paste0("cruce_", var, "_choicefilter")
+    base_ok <- paste0("(is.na(", var, ") | trimws(", var, ") == \"\") | (", allowed_expr, ")")
+    proc    <- if (nz1(cond_r)) {
+      paste0(nombre, " <- ( !(", cond_r, ") | (", base_ok, ") )")
+    } else {
+      paste0(nombre, " <- (", base_ok, ")")
+    }
+
+    # Variable 2 (primer driver del filtro si existe)
+    cf_vars <- row$vars_in_choicefilter %||% character(0)
+    cf_vars <- cf_vars[nzchar(cf_vars)]
+    var2    <- if (length(cf_vars)) as_chr1(cf_vars[1]) else NA_character_
+    var2lab <- if (!is.na(var2)) etq_pregunta(survey, label_col, var2) else NA_character_
+
+    # Objetivo (humano y conciso)
+    Objetivo_txt <- paste0(
+      "Si la pregunta aplica, «", lab, "» debe estar entre las opciones que el formulario mostró",
+      if (length(cf_vars)) paste0(" (filtradas por respuestas previas en: ", paste(cf_vars, collapse = ", "), ")") else "",
+      "."
+    )
+
+    tibble::tibble(
+      ID = NA_character_,
+      `Tipo de observación`      = "7. Consistencia (choice_filter)",
+      Objetivo                   = Objetivo_txt,
+      `Variable 1`               = var,
+      `Variable 1 - Etiqueta`    = lab,
+      `Variable 2`               = var2,
+      `Variable 2 - Etiqueta`    = var2lab,
+      `Variable 3`               = NA_character_,
+      `Variable 3 - Etiqueta`    = NA_character_,
+      `Nombre de regla`          = nombre,
+      `Procesamiento`            = proc,
+      .pref = pref,
+      .gord = section_map$.gord[match(row$group_name, section_map$group_name)],
+      .qord = row$.qord
+    )
+  })
+}
+
+
+
+
 # =============================================================================
 # Roxygen (export principal)
 # =============================================================================
@@ -1246,18 +1480,19 @@ build_fecha_campo <- function(survey, section_map, label_col,
 generar_plan_limpieza <- function(
     x,
     incluir = list(
-      required   = TRUE,
-      other      = TRUE,
-      relevant   = TRUE,
-      constraint = TRUE,
-      calculate  = TRUE,
-      fecha_campo= TRUE
+      required      = TRUE,
+      other         = TRUE,
+      relevant      = TRUE,
+      constraint    = TRUE,
+      calculate     = TRUE,
+      choice_filter = TRUE,
+      fecha_campo   = TRUE
     ),
     fecha_var   = "mand_Date",
     fecha_campo = Sys.Date()
 ){
   stopifnot(all(c("survey","meta") %in% names(x)))
-
+  x <- coalesce_choice_filter(x)
   safe <- .columna_label_segura(x)
   labelcol <- safe$labelcol
   survey   <- safe$survey
@@ -1286,13 +1521,13 @@ generar_plan_limpieza <- function(
 
   # ----- construir bloques -----
   bloques <- list()
-  if (isTRUE(incluir$required))   bloques$required   <- build_required_g(survey, section_map, labelcol, gmap)
-  if (isTRUE(incluir$other))      bloques$other      <- build_other_g(survey, section_map, labelcol, gmap)
-  if (isTRUE(incluir$relevant))   bloques$relevant   <- build_relevant_g(survey, section_map, labelcol, choices, gmap)
-  if (isTRUE(incluir$constraint)) bloques$constraint <- build_constraint_g(survey, section_map, labelcol, gmap)
-  if (isTRUE(incluir$calculate))  bloques$calculate  <- build_calculate_g(survey, section_map, labelcol, gmap)
-  if (isTRUE(incluir$fecha_campo))bloques$fecha      <- build_fecha_campo(survey, section_map, labelcol, fecha_var, fecha_campo)
-
+  if (isTRUE(incluir$required))      bloques$required      <- build_required_g(survey, section_map, labelcol, gmap)
+  if (isTRUE(incluir$other))         bloques$other         <- build_other_g(survey, section_map, labelcol, gmap)
+  if (isTRUE(incluir$relevant))      bloques$relevant      <- build_relevant_g(survey, section_map, labelcol, choices, gmap)
+  if (isTRUE(incluir$constraint))    bloques$constraint    <- build_constraint_g(survey, section_map, labelcol, gmap)
+  if (isTRUE(incluir$calculate))     bloques$calculate     <- build_calculate_g(survey, section_map, labelcol, gmap)
+  if (isTRUE(incluir$choice_filter)) bloques$choicefilter  <- build_choice_filter_g(x)
+  if (isTRUE(incluir$fecha_campo))   bloques$fecha         <- build_fecha_campo(survey, section_map, labelcol, fecha_var, fecha_campo)
   plan <- bind_rows(bloques)
 
   if (nrow(plan) == 0) {
