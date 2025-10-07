@@ -512,196 +512,153 @@ relevant_a_r_y_humano <- function(rel_raw, survey, choices, label_col) {
 # -------------------------------------------------------------------
 # Constraint ODK -> R (con soporte count-selected para select_multiple)
 # -------------------------------------------------------------------
-constraint_a_r <- function(txt, var_name) {
-  if (is.null(txt) || is.na(txt) || !nzchar(txt)) return(NA_character_)
-  out <- as.character(txt)
 
-  # comillas “ ” y ‘ ’ -> normales
-  out <- gsub("\u201C|\u201D", "\"", out, perl = TRUE)
-  out <- gsub("\u2018|\u2019", "'",  out, perl = TRUE)
 
-  # "=" suelto -> "=="
-  out <- gsub("(?<!<|>|!|<-|=)=(?!=)", "==", out, perl = TRUE)
-  out <- gsub("={3,}", "==", out, perl = TRUE)
 
-  # NOT (...) -> !(...)
-  out <- gsub("(?i)\\bnot\\s*\\(", "!(", out, perl = TRUE)
+# --- FIX: ODK -> R, respetando "." como variable actual -----------------------
+constraint_a_r <- function(txt, var_name = NULL) {
+  if (is.null(txt) || !nzchar(trimws(txt))) return(NA_character_)
+  x <- as.character(txt)
 
-  # ---- count-selected(.)  /  count-selected(var) ----
-  # Primero, si viene el punto, sustitúyelo por el nombre de la variable:
+  # 0) Sustituye "." por la variable actual
   if (!is.null(var_name) && nzchar(var_name)) {
-    out <- gsub(
-      "count\\s*-\\s*selected\\s*\\(\\s*\\.\\s*\\)",
-      paste0("count-selected(", var_name, ")"),
-      out, perl = TRUE
-    )
+    x <- gsub("(?<=\\W)\\.\\b", var_name, x, perl = TRUE)
+    x <- gsub("^\\.", var_name, x, perl = TRUE)
   }
 
-  # Luego, toda forma count-selected(X) -> 1 + str_count(X, "\\s+")
-  out <- stringr::str_replace_all(
-    out,
-    stringr::regex("count\\s*-\\s*selected\\s*\\(\\s*([A-Za-z0-9_]+)\\s*\\)"),
-    function(m) {
-      v <- sub("count\\s*-\\s*selected\\s*\\(\\s*([A-Za-z0-9_]+)\\s*\\).*", "\\1", m, perl = TRUE)
-      paste0(
-        "ifelse(is.na(", v, ") | trimws(", v, ") == \"\", 0, 1 + stringr::str_count(", v, ", \"\\\\s+\"))"
-      )
-    }
+  # 1) ${var} -> var
+  x <- gsub("\\$\\{([A-Za-z0-9_]+)\\}", "\\1", x, perl = TRUE)
+
+  # 2) Operadores lógicos
+  x <- gsub("(?i)\\band\\b", "&", x, perl = TRUE)
+  x <- gsub("(?i)\\bor\\b",  "|", x, perl = TRUE)
+  x <- gsub("(?i)\\bnot\\b", "!", x,  perl = TRUE)
+
+  # 3) selected(var,'opt') -> grepl("(^|\\s)opt(\\s|$)", var)
+  x <- gsub(
+    "selected\\s*\\(\\s*([A-Za-z0-9_]+)\\s*,\\s*'([^']+)'\\s*\\)",
+    'grepl("(^|\\\\s)\\2(\\\\s|$)", \\1)', x, perl = TRUE
   )
 
-  # selected(var, 'opt')  y  selected(var, "opt")
-  out <- stringr::str_replace_all(
-    out,
-    stringr::regex("selected\\s*\\(\\s*([A-Za-z0-9_]+)\\s*,\\s*'([^']+)'\\s*\\)"),
-    function(m) {
-      v <- sub("selected\\s*\\(\\s*([A-Za-z0-9_]+)\\s*,\\s*'([^']+)'\\s*\\)", "\\1", m, perl = TRUE)
-      o <- sub("selected\\s*\\(\\s*([A-Za-z0-9_]+)\\s*,\\s*'([^']+)'\\s*\\)", "\\2", m, perl = TRUE)
-      paste0('grepl("(^|\\\\s)', o, '(\\\\s|$)", ', v, ')')
-    }
-  )
-  out <- stringr::str_replace_all(
-    out,
-    stringr::regex('selected\\s*\\(\\s*([A-Za-z0-9_]+)\\s*,\\s*"([^"]+)"\\s*\\)'),
-    function(m) {
-      v <- sub('selected\\s*\\(\\s*([A-Za-z0-9_]+)\\s*,\\s*"([^"]+)"\\s*\\)', "\\1", m, perl = TRUE)
-      o <- sub('selected\\s*\\(\\s*([A-Za-z0-9_]+)\\s*,\\s*"([^"]+)"\\s*\\)', "\\2", m, perl = TRUE)
-      paste0('grepl("(^|\\\\s)', o, '(\\\\s|$)", ', v, ')')
-    }
+  # 4) regex(var,'pat') -> stringr::str_detect(var, 'pat')
+  x <- gsub(
+    "regex\\s*\\(\\s*([A-Za-z0-9_]+)\\s*,\\s*'([^']+)'\\s*\\)",
+    "stringr::str_detect(\\1, '\\2')", x, perl = TRUE
   )
 
-  # Coerción numérica segura en comparaciones var <num>
-  wrap_num <- function(v) paste0("suppressWarnings(as.numeric(trimws(", v, ")))")
-  out <- stringr::str_replace_all(
-    out,
-    stringr::regex("(?<![A-Za-z0-9_])(\\w+)\\s*(<=|>=|<|>)\\s*([0-9]+(?:\\.[0-9]+)?)"),
-    function(m) {
-      var <- sub("(?<![A-Za-z0-9_])(\\w+)\\s*(?:<=|>=|<|>)\\s*[0-9.]+", "\\1", m, perl = TRUE)
-      op  <- sub("(?<![A-Za-z0-9_])\\w+\\s*([<>]=?)\\s*[0-9.]+", "\\1", m, perl = TRUE)
-      num <- sub("(?<![A-Za-z0-9_])\\w+\\s*[<>]=?\\s*([0-9.]+)", "\\1", m, perl = TRUE)
-      paste0(wrap_num(var), " ", op, " ", num)
-    }
-  )
-  out <- stringr::str_replace_all(
-    out,
-    stringr::regex("([0-9]+(?:\\.[0-9]+)?)\\s*(<=|>=|<|>)\\s*(\\w+)(?![A-Za-z0-9_])"),
-    function(m) {
-      num <- sub("^([0-9.]+)\\s*[<>]=?\\s*\\w+$", "\\1", m, perl = TRUE)
-      op  <- sub("^[0-9.]+\\s*([<>]=?)\\s*\\w+$", "\\1", m, perl = TRUE)
-      var <- sub("^[0-9.]+\\s*[<>]=?\\s*(\\w+)$", "\\1", m, perl = TRUE)
-      paste0(num, " ", op, " ", wrap_num(var))
-    }
+  # 5) count-selected(var)
+  x <- gsub(
+    "count-selected\\s*\\(\\s*([A-Za-z0-9_]+)\\s*\\)",
+    "ifelse(is.na(\\1)|trimws(\\1)==\"\",0,1+stringr::str_count(\\1,\"\\\\s+\"))",
+    x, perl = TRUE
   )
 
-  out
+  # 6) Limpieza
+  gsub("\\s+", " ", trimws(x))
 }
 
+# Wrapper: reescribir_odk_fix() → ahora normaliza "." y luego traduce a R
+reescribir_odk_fix <- function(txt, var1 = NULL) {
+  if (is.null(txt) || is.na(txt) || !nzchar(txt)) return(NA_character_)
+  x <- as.character(txt)
+
+  # Primero: sustituir el "." por var1 en funciones y comparaciones comunes
+  x <- ._swap_dot_with_var1(x, var1)
+
+  # Luego: tu traductor principal a R
+  constraint_a_r(x, var_name = var1)
+}
+
+# --- Helper: detecta rangos de año a partir de patrón regex clásico -----------
+.range_from_year_regex <- function(pat) {
+  # Busca subpatrones como 19[8-9][0-9], 200[0-9], 201[0-6], 202[0-4], etc.
+  frags <- unlist(regmatches(pat, gregexpr("(19\\[\\d-\\d\\]\\[\\d\\]|19\\d\\[\\d\\]|200\\[\\d\\]|201\\[\\d\\]|202\\[\\d\\])", pat)))
+  # fallback: también acepta bloques '19[8-9][0-9]' completos o '201[0-6]'
+  if (!length(frags)) frags <- unlist(regmatches(pat, gregexpr("(19\\[\\d-\\d\\]\\d|20\\d\\[\\d\\])", pat)))
+
+  # Método práctico: prueba todos los años razonables y qué años acepta el patrón
+  years <- 1900:2100
+  ok <- grepl(paste0("^", pat, "$"), as.character(years))
+  if (any(ok)) {
+    rng <- range(years[ok])
+    return(rng)
+  }
+  NULL
+}
+
+# --- NLG: Explicación en español a partir de la expresión R -------------------
 constraint_a_es <- function(expr_r, var_lab) {
   if (is.null(expr_r) || is.na(expr_r) || !nzchar(expr_r)) {
     return(paste0("El valor registrado en «", var_lab, "» respeta la regla del formulario."))
   }
-
   x <- expr_r
 
-  # 1) Rango: as.numeric(...) >= a & as.numeric(...) <= b
+  # 1) Rango numérico: a <= var <= b
   m <- stringr::str_match(x,
-                          "as\\.numeric\\([^\\)]+\\)\\s*>?=\\s*([0-9\\.]+)\\s*&\\s*as\\.numeric\\([^\\)]+\\)\\s*<=\\s*([0-9\\.]+)")
+                          "as\\.numeric\\([^\\)]+\\)\\s*>=\\s*([0-9\\.]+)\\s*&\\s*as\\.numeric\\([^\\)]+\\)\\s*<=\\s*([0-9\\.]+)"
+  )
   if (!any(is.na(m))) {
     return(paste0("El valor de «", var_lab, "» debe estar entre ", m[2], " y ", m[3], "."))
   }
 
-  # 2) Cota superior: as.numeric(...) <= b
+  # 2) Cotas simples
   m <- stringr::str_match(x, "as\\.numeric\\([^\\)]+\\)\\s*<=\\s*([0-9\\.]+)")
-  if (!any(is.na(m))) {
-    return(paste0("El valor de «", var_lab, "» no debe superar ", m[2], "."))
-  }
-
-  # 3) Cota inferior: as.numeric(...) >= a
+  if (!any(is.na(m))) return(paste0("El valor de «", var_lab, "» no debe superar ", m[2], "."))
   m <- stringr::str_match(x, "as\\.numeric\\([^\\)]+\\)\\s*>=\\s*([0-9\\.]+)")
-  if (!any(is.na(m))) {
-    return(paste0("El valor de «", var_lab, "» no debe ser menor que ", m[2], "."))
-  }
+  if (!any(is.na(m))) return(paste0("El valor de «", var_lab, "» no debe ser menor que ", m[2], "."))
 
-  # 4) Igualdad textual simple var == 'X'
+  # 3) Igualdad textual simple: var == 'X'
   m <- stringr::str_match(x, "(\\b[A-Za-z0-9_]+\\b)\\s*==\\s*'([^']+)'")
   if (!any(is.na(m))) {
     return(paste0("El valor de «", var_lab, "» debe ser «", m[3], "»."))
   }
 
-  # 5) Pertenencia a conjunto: var %in% c('A','B',...)
+  # 4) Pertenencia a conjunto: var %in% c('A','B',...)
   m <- stringr::str_match(x, "(\\b[A-Za-z0-9_]+\\b)\\s*%in%\\s*c\\(([^\\)]*)\\)")
   if (!any(is.na(m))) {
-    # lista de opciones tal cual dentro de c(...)
-    lista_raw <- m[1, 3]  # <- OJO: columna 3 de la primera fila
-
-    # separar por comas y limpiar comillas/espacios por token
-    elems <- strsplit(lista_raw, ",")[[1]]
-    elems <- trimws(elems)
-    # quita comillas simples o dobles a cada token (al inicio/fin)
-    elems <- gsub("^['\"]|['\"]$", "", elems)
-    # opcional: normalizar comillas tipográficas si llegan a colarse
-    elems <- gsub("[‘’“”]", "", elems)
-
+    elems <- strsplit(m[3], ",")[[1]] |> trimws() |> gsub("^['\"]|['\"]$", "", x = _)
     elems <- elems[nzchar(elems)]
     if (length(elems)) {
       return(paste0("El valor de «", var_lab, "» debe pertenecer a {", paste(elems, collapse = ", "), "}."))
     }
   }
 
-  # 6) selected(var,'opt') → ya traducido a grepl("(^|\\s)opt(\\s|$)", var)
+  # 5) selected(var,'opt') -> grepl("(^|\\s)opt(\\s|$)", var)
   m <- stringr::str_match(x, 'grepl\\("\\(\\^\\|\\\\s\\)([^"]+)\\(\\\\s\\|\\$\\)",\\s*([A-Za-z0-9_]+)\\)')
-  # Nota: por cómo traducimos, puede aparecer con comillas simples o dobles;
-  # el patrón de arriba busca la versión con comillas dobles.
   if (!any(is.na(m))) {
     opt <- m[2]
-    return(paste0("Debe marcar «", opt, "» en «", var_lab, "»."))
+    return(paste0("Debe estar marcada la opción «", opt, "» en «", var_lab, "»."))
   }
 
-  # 7) count-selected(var) <= K (nuestra traducción a R)
-  # ifelse(is.na(var)|trimws(var)=="", 0, 1 + str_count(var, "\\s+")) <= K
+  # 6) count-selected(var) [op] K
   m <- stringr::str_match(
     x,
     'ifelse\\(is\\.na\\((\\w+)\\)\\s*\\|\\s*trimws\\(\\1\\)\\s*==\\s*""\\,\\s*0\\,\\s*1\\s*\\+\\s*stringr::str_count\\(\\1\\,\\s*"\\\\\\\\s\\+"\\)\\)\\s*(<=|<|>=|>)\\s*([0-9]+)'
   )
   if (!any(is.na(m))) {
-    var <- m[2]; op <- m[3]; k <- m[4]
+    op <- m[3]; k <- m[4]
     texto <- switch(op,
-      "<=" = paste0("como máximo ", k, " selección(es)"),
-      "<"  = paste0("menos de ", k, " selección(es)"),
-      ">=" = paste0("al menos ", k, " selección(es)"),
-      ">"  = paste0("más de ", k, " selección(es)"),
-      paste0("la condición de cantidad (", op, " ", k, ")")
+                    "<=" = paste0("como máximo ", k, " selección(es)"),
+                    "<"  = paste0("menos de ", k, " selección(es)"),
+                    ">=" = paste0("al menos ", k, " selección(es)"),
+                    ">"  = paste0("más de ", k, " selección(es)")
     )
     return(paste0("En «", var_lab, "» se permite ", texto, "."))
   }
 
+  # 7) stringr::str_detect(var, '...') — intenta detectar patrón de año
+  m <- stringr::str_match(x, "stringr::str_detect\\((\\w+)\\s*,\\s*'([^']+)'\\)")
+  if (!any(is.na(m))) {
+    pat <- m[3]
+    rng <- .range_from_year_regex(pat)
+    if (!is.null(rng)) {
+      return(paste0("El año en «", var_lab, "» debe estar entre ", rng[1], " y ", rng[2], "."))
+    }
+    return(paste0("El valor de «", var_lab, "» debe cumplir el formato definido."))
+  }
+
   # 8) Fallback genérico
   paste0("El valor registrado en «", var_lab, "» respeta la regla del formulario.")
-}
-
-calculate_a_r <- function(txt) {
-  if (is.null(txt) || !nzchar(trimws(txt))) return(txt)
-  x <- txt
-  x <- gsub("\\$\\{([A-Za-z0-9_]+)\\}", "as.numeric(\\1)", x, perl = TRUE)
-  x <- gsub("(?i)\\band\\b", "&", x, perl = TRUE)
-  x <- gsub("(?i)\\bor\\b",  "|", x, perl = TRUE)
-  x <- gsub("(?i)\\bnot\\b", "!", x,  perl = TRUE)
-  x <- gsub("(?i)\\bif\\s*\\(", "ifelse(", x, perl = TRUE)
-  gsub("\\s+", " ", trimws(x))
-}
-
-normalizar_proc <- function(x) {
-  if (is.null(x)) return(x)
-  x <- as.character(x)
-  x <- gsub("\u201C|\u201D", "\"", x, perl = TRUE)
-  x <- gsub("\u2018|\u2019", "'",  x, perl = TRUE)
-  x <- gsub("(?<!<|>|!|<-|=)=(?!=)", "==", x, perl = TRUE)
-  x <- gsub("={3,}", "==", x, perl = TRUE)
-  x <- gsub("[\u00A0\u2007\u202F]", " ", x, perl = TRUE)
-  n_open  <- stringr::str_count(x, "\\(")
-  n_close <- stringr::str_count(x, "\\)")
-  need <- n_open > n_close
-  x[need] <- paste0(x[need], strrep(")", n_open[need] - n_close[need]))
-  x
 }
 
 # =============================================================================
@@ -768,7 +725,7 @@ build_required_g <- function(survey, section_map, label_col, gmap){
 
       return(tibble::tibble(
         ID = NA_character_,
-        `Tipo de observación`   = "3. Preguntas de control",
+        `Tipo de observación`   = "Preguntas de control",
         Objetivo                = c(obj1, obj2),
         `Variable 1`            = c(var, var),
         `Variable 1 - Etiqueta` = c(lab, lab),
@@ -788,7 +745,7 @@ build_required_g <- function(survey, section_map, label_col, gmap){
     nombre <- nombre_regla_simple(var)
     tibble::tibble(
       ID = NA_character_,
-      `Tipo de observación`   = "3. Preguntas de control",
+      `Tipo de observación`   = "Preguntas de control",
       Objetivo                = paste0("**DEBE** responder «", lab, "»."),
       `Variable 1`            = var,
       `Variable 1 - Etiqueta` = lab,
@@ -879,7 +836,7 @@ build_other_g <- function(survey, section_map, label_col, gmap){
 
       return(tibble(
         ID = NA_character_,
-        `Tipo de observación` = "2. Saltos de preguntas",
+        `Tipo de observación` = "Saltos de preguntas",
         Objetivo = c(obj1, obj2, obj3),
         `Variable 1` = c(parent_var, parent_var, parent_var),
         `Variable 1 - Etiqueta` = c(labP, labP, labP),
@@ -1050,7 +1007,7 @@ build_relevant_g <- function(survey, section_map, label_col, choices, gmap){
 
     tibble::tibble(
       ID                         = NA_character_,
-      `Tipo de observación`      = "2. Saltos de preguntas",
+      `Tipo de observación`      = "Saltos de preguntas",
       Objetivo                   = c(obj1, obj2),
       `Variable 1`               = c(var, var),
       `Variable 1 - Etiqueta`    = c(var_lab, var_lab),
@@ -1069,6 +1026,31 @@ build_relevant_g <- function(survey, section_map, label_col, choices, gmap){
 
 
 # ---- CONSISTENCIA (constraint) — G-aware, variable gatilladora real, ODK→R con "." ----
+
+# Reemplaza el "." por var1 en los casos típicos de ODK
+._swap_dot_with_var1 <- function(x, var1) {
+  if (is.null(var1) || !nzchar(var1)) return(x)
+
+  # 1) Funciones con punto como primer argumento
+  x <- gsub("(selected\\s*\\(\\s*)\\.\\s*,",           paste0("\\1", var1, ","), x, perl = TRUE)
+  x <- gsub("(regex\\s*\\(\\s*)\\.\\s*,",              paste0("\\1", var1, ","), x, perl = TRUE)
+  x <- gsub("(count\\s*-?\\s*selected\\s*\\(\\s*)\\.\\s*\\)", paste0("\\1", var1, ")"), x, perl = TRUE)
+
+  # 2) Comparaciones con operador + .
+  #    op .  -> op var1
+  x <- gsub("(==|!=|<=|>=|<|>|%in%)\\s*\\.", paste0("\\1 ", var1), x, perl = TRUE)
+  #    . op  -> var1 op
+  x <- gsub("\\.\\s*(==|!=|<=|>=|<|>|%in%)", paste0(var1, " \\1"), x, perl = TRUE)
+
+  # 3) Punto “suelto” al inicio o tras un no-alfa-num subiendo var1
+  #    (ej. ". != '0'" o " (.) " como token)
+  x <- gsub("(^|[^A-Za-z0-9_])\\.(?=\\b)", paste0("\\1", var1), x, perl = TRUE)
+
+  x
+}
+
+
+
 build_constraint_g <- function(survey, section_map, label_col, gmap){
   dat <- survey %>%
     dplyr::mutate(type_base = tolower(trimws(sub("\\s.*$", "", .data$type)))) %>%
@@ -1160,7 +1142,7 @@ build_constraint_g <- function(survey, section_map, label_col, gmap){
 
     tibble::tibble(
       ID = NA_character_,
-      `Tipo de observación`      = "7. Consistencia",
+      `Tipo de observación`      = "Consistencia",
       Objetivo                   = objetivo,
       `Variable 1`               = var,
       `Variable 1 - Etiqueta`    = lab,
@@ -1178,6 +1160,55 @@ build_constraint_g <- function(survey, section_map, label_col, gmap){
 }
 
 # ---- CALCULATE — G-aware, variable gatilladora real --------------------------
+
+# Traduce expresiones de calculation ODK → R
+calculate_a_r <- function(txt) {
+  if (is.null(txt) || !nzchar(trimws(txt))) return(NA_character_)
+  x <- as.character(txt)
+
+  # ${var} → as.numeric(var) (por defecto tratamos como numérico)
+  x <- gsub("\\$\\{([A-Za-z0-9_]+)\\}", "as.numeric(\\1)", x, perl = TRUE)
+
+  # Operadores lógicos de ODK
+  x <- gsub("(?i)\\band\\b", "&", x, perl = TRUE)
+  x <- gsub("(?i)\\bor\\b",  "|", x, perl = TRUE)
+  x <- gsub("(?i)\\bnot\\b", "!", x,  perl = TRUE)
+
+  # if( … , … , … ) → ifelse( … , … , … )
+  x <- gsub("(?i)\\bif\\s*\\(", "ifelse(", x, perl = TRUE)
+
+  # Limpieza
+  x <- gsub("\\s+", " ", trimws(x))
+  x
+}
+
+# Limpia y “normaliza” el texto de Procesamiento
+normalizar_proc <- function(x) {
+  if (is.null(x)) return(x)
+  x <- as.character(x)
+
+  # Comillas tipográficas → comillas ASCII
+  x <- gsub("\u201C|\u201D", "\"", x, perl = TRUE)
+  x <- gsub("\u2018|\u2019", "'",  x, perl = TRUE)
+
+  # "=" suelto → "==" (sin tocar <=, >=, !=)
+  x <- gsub("(?<!<|>|!|<-|=)=(?!=)", "==", x, perl = TRUE)
+  # Si alguien dejó "===" o más, redúcelo a "=="
+  x <- gsub("={3,}", "==", x, perl = TRUE)
+
+  # Espacios raros (no-break) → espacio normal
+  x <- gsub("[\u00A0\u2007\u202F]", " ", x, perl = TRUE)
+
+  # Balanceo de paréntesis por si quedaron desparejos
+  n_open  <- stringr::str_count(x, "\\(")
+  n_close <- stringr::str_count(x, "\\)")
+  need <- n_open > n_close
+  x[need] <- paste0(x[need], strrep(")", n_open[need] - n_close[need]))
+
+  x
+}
+
+
 build_calculate_g <- function(survey, section_map, label_col, gmap){
   dat <- survey %>%
     dplyr::mutate(type_base = tolower(trimws(sub("\\s.*$", "", .data$type)))) %>%
@@ -1247,7 +1278,7 @@ build_calculate_g <- function(survey, section_map, label_col, gmap){
 
       return(tibble::tibble(
         ID = NA_character_,
-        `Tipo de observación`   = "7. Consistencia",
+        `Tipo de observación`   = "Consistencia",
         Objetivo                = objetivo,
         `Variable 1`            = var,
         `Variable 1 - Etiqueta` = lab,
@@ -1282,7 +1313,7 @@ build_calculate_g <- function(survey, section_map, label_col, gmap){
 
     tibble::tibble(
       ID = NA_character_,
-      `Tipo de observación`   = "7. Consistencia",
+      `Tipo de observación`   = "Valores atípicos",
       Objetivo                = objetivo,
       `Variable 1`            = var,
       `Variable 1 - Etiqueta` = lab,
@@ -1427,12 +1458,11 @@ build_choice_filter_g <- function(x){
 
       # ---------------------- OBJETIVO ----------------------
       objetivo_drv <- paste0(
-        "Esta regla valida que la respuesta en «", lab, "» sea coherente con «", drv_lab, "». ",
-        "Si la persona respondió «", drv_lab, "», entonces las opciones visibles en «", lab,
-        "» dependen de esa respuesta. ",
-        "Por tanto, se revisa que la opción elegida en «", lab,
-        "» esté dentro de las opciones que el formulario mostró ",
-        "cuando «", drv_lab, "» toma valores en ", vals_human, "."
+        "Valida la coherencia entre «", lab, "» y «", drv_lab, "». ",
+        "Si la pregunta aplica y «", drv_lab, "» tiene una respuesta válida, ",
+        "la opción marcada en «", lab, "» debe encontrarse entre las opciones que el formulario muestra ",
+        "cuando «", drv_lab, "» toma los valores ", vals_human, ". ",
+        "En caso contrario, la respuesta en «", lab, "» se considera inconsistente."
       )
 
       tibble::tibble(

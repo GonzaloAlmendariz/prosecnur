@@ -14,10 +14,10 @@ suppressPackageStartupMessages({
 
 # ---------- Paletas / niveles ya usados en tu export ----------
 .tipo_levels <- c(
-  "2. Saltos de preguntas",
-  "3. Preguntas de control",
-  "7. Consistencia",
-  "9. Valores atípicos",
+  "Saltos de preguntas",
+  "Preguntas de control",
+  "Consistencia",
+  "Valores atípicos",
   "Filtro de opciones"
 )
 
