@@ -1889,10 +1889,14 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
   # ===== 4) DICCIONARIO =====
   st_dic <- add_sheet("DICCIONARIO")
   dic <- plantilla$diccionario
-  if (!is.null(inst) && !is.null(inst$survey_raw)){
-    col_span <- grep("^label::spanish", tolower(names(inst$survey_raw)), value = TRUE)[1]
-    if (!is.na(col_span)){
-      s_min <- inst$survey_raw %>% dplyr::select(name, label_es_dic = !!rlang::sym(col_span))
+
+  if (!is.null(inst) && !is.null(inst$survey_raw)) {
+    nms <- names(inst$survey_raw)
+    idx <- which(grepl("^label::spanish", tolower(nms)))[1]
+    if (!is.na(idx)) {
+      col_span <- nms[idx]  # <- usa el nombre ORIGINAL, no el tolower
+      s_min <- inst$survey_raw %>%
+        dplyr::select(name, label_es_dic = !!rlang::sym(col_span))
       dic <- dic %>%
         dplyr::left_join(s_min, by = c("variable" = "name")) %>%
         dplyr::mutate(etiqueta = dplyr::coalesce(label_es_dic, etiqueta)) %>%
