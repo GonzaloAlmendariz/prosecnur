@@ -1364,7 +1364,7 @@ build_fecha_campo <- function(survey, section_map, label_col,
 }
 
 
-# ---- CHOICE FILTER (select_one) — G-aware, una fila por driver con redacción clara ----
+# ---- CHOICE FILTER (select_one) — G-aware, 1 fila por driver, objetivo claro ----
 build_choice_filter_g <- function(x){
   stopifnot(is.list(x), all(c("survey","choices","meta") %in% names(x)))
 
@@ -1394,11 +1394,13 @@ build_choice_filter_g <- function(x){
     ln       <- row$list_name
 
     # Condición de aplicación (G del grupo + relevant del ítem)
-    ginfo   <- gmap[gmap$group_name == row$group_name, , drop = FALSE]
-    G_r     <- as_chr1(if (nrow(ginfo)) ginfo$G_expr[[1]]   else "")
-    rel_r   <- as_chr1(tryCatch(relevant_a_r_y_humano(as_chr1(row$relevant %||% ""), survey, choices, label_col)$expr_r,
-                                error = function(e) ""))
-    cond_r  <- if (nz1(G_r) && nz1(rel_r)) paste0("(", G_r, ") & (", rel_r, ")")
+    ginfo <- gmap[gmap$group_name == row$group_name, , drop = FALSE]
+    G_r   <- as_chr1(if (nrow(ginfo)) ginfo$G_expr[[1]]   else "")
+    rel_r <- as_chr1(tryCatch(
+      relevant_a_r_y_humano(as_chr1(row$relevant %||% ""), survey, choices, label_col)$expr_r,
+      error = function(e) ""
+    ))
+    cond_r <- if (nz1(G_r) && nz1(rel_r)) paste0("(", G_r, ") & (", rel_r, ")")
     else if (nz1(G_r))          G_r
     else if (nz1(rel_r))        rel_r
     else                        ""
@@ -1417,66 +1419,47 @@ build_choice_filter_g <- function(x){
       if (!drv %in% survey$name) return(tibble::tibble())
       drv_lab <- etq_pregunta(survey, label_col, drv)
 
-      # Condiciones por opción según ese driver
-      terms_drv <- ch_ln %>%
-        dplyr::group_by(name) %>%
-        dplyr::summarise(
-          cond = {
-            vals <- unique(na.omit(as.character(cur_data_all()[[colf]])))
-            vals <- vals[nzchar(vals)]
-            if (!length(vals)) "" else {
-              vals_q <- paste0("'", gsub("'", "\\\\'", vals), "'")
-              paste0("as.character(", drv, ") %in% c(", paste(vals_q, collapse=","), ")")
-            }
-          },
-          .groups = "drop"
-        ) %>%
-        dplyr::filter(nzchar(cond)) %>%
-        dplyr::mutate(
-          expr = paste0("((", var, " == '", gsub("'", "\\\\'", name), "') & (", cond, "))")
-        ) %>%
-        dplyr::pull(expr)
+      # --- 1) identificar opción del var (p. ej. P21) que depende del driver actual ---
+      opt_names <- unique(na.omit(as.character(ch_ln$name)))
+      vals_ok <- unique(na.omit(as.character(ch_ln[[colf]])))
+      vals_ok <- vals_ok[nzchar(vals_ok)]
 
-      if (!length(terms_drv)) return(tibble::tibble())
+      # Si no hay valores definidos, saltamos
+      if (!length(vals_ok)) return(tibble::tibble())
 
-      allowed_expr_drv <- .or_join(terms_drv)
+      # Determinamos la opción que corresponde (la que activa ese driver)
+      # Ejemplo: colf = filter_P14 → driver P14 → opción 1 de P21
+      op_match <- which(paste0("filter_", drv) == extras)
+      opt_id   <- if (length(op_match) && op_match <= length(opt_names)) opt_names[op_match] else opt_names[1]
 
-      drv_presente <- paste0("(!is.na(", drv, ") & trimws(", drv, ") != \"\")")
-      base_ok_drv  <- paste0("(is.na(", var, ") | trimws(", var, ") == \"\") | (", allowed_expr_drv, ")")
+      vals_q <- paste0("'", gsub("'", "\\\\'", vals_ok), "'")
+      cond_ok <- paste0("trimws(as.character(", drv, ")) %in% c(", paste(vals_q, collapse=","), ")")
 
+      # --- 2) Regla lógica: solo si var == opción correspondiente ---
       nombre_drv <- paste0("cruce_", var, "_cf_", drv)
-      proc_drv <- if (nz1(cond_r)) {
-        paste0(nombre_drv, " <- ( !(", cond_r, ") | !(", drv_presente, ") | (", base_ok_drv, ") )")
-      } else {
-        paste0(nombre_drv, " <- ( !(", drv_presente, ") | (", base_ok_drv, ") )")
-      }
+      base_expr <- paste0(
+        nombre_drv, " <- ( !(", cond_r, ") | trimws(as.character(", var, ")) != '", opt_id,
+        "' | (", cond_ok, ") )"
+      )
 
-      # Valores posibles para descripción
-      vals_presentes <- ch_ln[[colf]] |> as.character() |> unique() |> na.omit()
-      vals_presentes <- vals_presentes[nzchar(vals_presentes)]
-      vals_human <- if (length(vals_presentes)) paste0("{", paste(vals_presentes, collapse = ", "), "}") else "—"
-
-      # ---------------------- OBJETIVO ----------------------
+      # --- 3) Texto de objetivo ---
+      vals_human <- if (length(vals_ok) == 1) vals_ok else paste0(paste(vals_ok[-length(vals_ok)], collapse = ", "), " o ", vals_ok[length(vals_ok)])
       objetivo_drv <- paste0(
         "Valida la coherencia entre «", lab, "» y «", drv_lab, "». ",
-        "Si la pregunta aplica y «", drv_lab, "» tiene una respuesta válida, ",
-        "la opción marcada en «", lab, "» debe encontrarse entre las opciones que el formulario muestra ",
-        "cuando «", drv_lab, "» toma los valores ", vals_human, ". ",
-        "En caso contrario, la respuesta en «", lab, "» se considera inconsistente."
+        "Solo se evalúa si la opción elegida en «", lab, "» corresponde a «", drv_lab, "» (", opt_id, "). ",
+        "En ese caso, «", drv_lab, "» debe estar en ", vals_human, "."
       )
 
       tibble::tibble(
         ID = NA_character_,
-        `Tipo de observación`      = "Filtro de opciones",
-        Objetivo                   = objetivo_drv,
-        `Variable 1`               = var,
-        `Variable 1 - Etiqueta`    = lab,
-        `Variable 2`               = drv,
-        `Variable 2 - Etiqueta`    = drv_lab,
-        `Variable 3`               = NA_character_,
-        `Variable 3 - Etiqueta`    = NA_character_,
-        `Nombre de regla`          = nombre_drv,
-        `Procesamiento`            = proc_drv,
+        `Tipo de observación`   = "Filtro de opciones",
+        Objetivo                = objetivo_drv,
+        `Variable 1`            = var,
+        `Variable 1 - Etiqueta` = lab,
+        `Variable 2`            = drv,
+        `Variable 2 - Etiqueta` = drv_lab,
+        `Nombre de regla`       = nombre_drv,
+        `Procesamiento`         = base_expr,
         .pref = pref,
         .gord = section_map$.gord[match(row$group_name, section_map$group_name)],
         .qord = row$.qord
@@ -1484,7 +1467,6 @@ build_choice_filter_g <- function(x){
     })
   })
 }
-
 
 
 # =============================================================================
