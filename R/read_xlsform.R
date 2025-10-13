@@ -1,5 +1,5 @@
 # ============================================================
-# LECTOR "SIN NORMALIZAR" PARA REGLAS / PLAN DE LIMPIEZA — ONE-FILE v2.2
+# LECTOR "SIN NORMALIZAR" PARA REGLAS / PLAN DE LIMPIEZA — ONE-FILE v2.3
 # - Soporta begin_group/end_group y begin_repeat/end_repeat
 # - Captura choice_filter y variables referenciadas
 # - groups_detail con glabel (label del begin_group; cae en gname si falta)
@@ -10,13 +10,156 @@
 # - Validaciones suaves (warnings)
 # ============================================================
 
+# Helpers:
+
+# Simplifica texto: quita acentos y deja solo [A-Za-z0-9_], espacios -> _
+.slugify_es <- function(x) {
+  x <- as.character(x)
+  x <- iconv(x, to = "ASCII//TRANSLIT")        # quita acentos
+  x <- gsub("[^A-Za-z0-9]+", "_", x)           # no alfanumérico -> _
+  x <- gsub("_+", "_", x)                      # colapsa
+  x <- gsub("^_|_$", "", x)                    # recorta _ extremos
+  x
+}
+
+# Abrevia en modo "heurístico" (3-4 letras): toma la primera palabra significativa
+.abreviar_heuristico <- function(lbl, max_len = 4) {
+  if (is.na(lbl) || !nzchar(lbl)) return("GEN")
+  # Limpia prefijos comunes tipo "S1:", "Parte 2.", etc.
+  txt <- gsub("^\\s*(S\\d+\\s*[:.-]|Parte\\s*\\d+\\s*[:.-])\\s*", "", lbl, ignore.case = TRUE)
+  # Toma palabras y omite stopwords simples
+  toks <- unlist(strsplit(txt, "\\s+"))
+  stopw <- c("de","del","la","el","los","las","y","en","para","por","a","al","lo","un","una","uno")
+  toks <- toks[!tolower(toks) %in% stopw]
+  base <- if (length(toks)) toks[1] else txt
+  base <- gsub("[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", "", base)
+  if (!nzchar(base)) base <- "GEN"
+  # Normaliza a ASCII y toma primeras letras
+  base <- .slugify_es(base)
+  base <- toupper(substr(base, 1, max(1, max_len)))
+  base
+}
+
+# Aplica transformación solicitada al prefijo base
+.transformar_según_modo <- function(x, modo = c("mayúsculas","tal_cual","simplificar")) {
+  modo <- match.arg(modo)
+  if (modo == "mayúsculas") return(toupper(x))
+  if (modo == "simplificar") return(toupper(.slugify_es(x)))
+  x
+}
+
+
+
+
 #' Leer XLSForm para limpieza (sin normalizar valores/labels)
-#' @param path Ruta al archivo .xlsx
-#' @param lang Código de idioma a preferir para label (p.ej., "es")
-#' @param prefer_label Nombre exacto de la columna de label a priorizar (opcional)
-#' @return lista: survey_raw, choices_raw, settings_raw, survey, choices, meta
+#'
+#' Lee un XLSForm (hojas `survey`, `choices`, `settings`) y devuelve
+#' objetos listos para generar el Plan de Limpieza (ACNUR), sin alterar
+#' los valores originales. Detecta grupos y repeticiones, choice filters,
+#' listas dinámicas (select_* ${var}), y arma un mapa de secciones con
+#' prefijos configurables.
+#'
+#' @param path Ruta al archivo `.xlsx`.
+#' @param lang Código de idioma a preferir para la etiqueta (p. ej., `"es"`).
+#' @param prefer_label Nombre exacto de la columna de label a priorizar (opcional),
+#'   p. ej. `"label::Spanish (ES)"`. Si no se encuentra, se intentan variantes
+#'   comunes y finalmente `label`.
+#' @param origen_prefijo Estrategia para generar el prefijo de sección en `meta$section_map$prefix`.
+#'   Valores: \itemize{
+#'     \item `"deducir"`: (por defecto) deduce un prefijo corto a partir de la etiqueta
+#'       del grupo (o del nombre si no hay etiqueta). Útil cuando se buscan siglas
+#'       cortas tipo `DOC_`, `MOV_`, `PAR_`.
+#'     \item `"nombre_grupo"`: usa exactamente el `name` del `begin_group` / `begin_repeat`
+#'       como base del prefijo (p. ej., `group_consent_`).
+#'     \item `"etiqueta_grupo"`: usa el `label` del grupo como base del prefijo
+#'       (p. ej., `CONSENTIMIENTO_`).
+#'   }
+#' @param transformar_prefijo Transformación a aplicar al texto base del prefijo.
+#'   Valores: \itemize{
+#'     \item `"mayúsculas"` (por defecto): convierte a mayúsculas.
+#'     \item `"tal_cual"`: no modifica el texto.
+#'     \item `"simplificar"`: quita acentos y deja solo \code{[A-Za-z0-9_]}.
+#'   }
+#' @param sufijo_prefijo Cadena a añadir al final del prefijo (por defecto, `"_”`).
+#' @param max_longitud_prefijo Longitud máxima del prefijo \strong{solo cuando}
+#'   \code{origen_prefijo = "deducir"} (por defecto, 4). No se aplica en
+#'   `"nombre_grupo"` ni `"etiqueta_grupo"`.
+#' @param asegurar_unicidad Si \code{TRUE} (por defecto), garantiza prefijos únicos
+#'   añadiendo sufijos numéricos estables en caso de colisiones.
+#'
+#' @return Una \strong{lista} con elementos:
+#'   \itemize{
+#'     \item \code{survey_raw}: hoja \code{survey} tal cual (nombres saneados).
+#'     \item \code{choices_raw}: hoja \code{choices} tal cual (nombres saneados).
+#'     \item \code{settings_raw}: hoja \code{settings} (si existe).
+#'     \item \code{survey}: preguntas (excluye begin/end) con metadatos útiles:
+#'       \itemize{
+#'         \item \code{type_base}, \code{list_name}, \code{list_norm}
+#'         \item \code{group_name}, \code{group_label}
+#'         \item \code{required}, \code{relevant}, \code{constraint}, \code{calculation}
+#'         \item \code{choice_filter}
+#'         \item \code{dyn_ref}: referencia de \emph{lista dinámica} si el tipo es \code{select_* ${var}}
+#'         \item \code{vars_in_*}: variables referenciadas en \code{relevant/constraint/choice_filter/calculation}
+#'       }
+#'     \item \code{choices}: catálogo con \code{list_name}, \code{list_norm}, \code{name}, \code{label} (columna elegida).
+#'     \item \code{meta}: lista con resúmenes y mapas:
+#'       \itemize{
+#'         \item \code{label_col_survey}, \code{label_col_choices}: columnas de label efectivamente usadas.
+#'         \item \code{groups_detail}: detalle de grupos/repeats (incluye \code{is_repeat}, \code{relevant} y, si existe, \code{repeat_count}).
+#'         \item \code{section_map}: mapa de secciones con \code{prefix}, \code{is_conditional}, \code{is_repeat}, \code{group_relevant}.
+#'         \item \code{lists_with_other}: listas con opción “Otro/Other”.
+#'         \item \code{choice_cols_by_list}: columnas no vacías por lista (útiles para \code{choice_filter}).
+#'         \item \code{choice_filter_summary}: por pregunta con filtro, qué columnas del catálogo y variables del formulario intervienen.
+#'       }
+#'   }
+#'
+#' @details
+#' \itemize{
+#'   \item Los nombres de columnas vacíos/NA se renombran como \code{generico_#};
+#'         las columnas completamente vacías y sin nombre se eliminan con aviso.
+#'   \item \code{origen_prefijo = "deducir"} usa una abreviación corta (longitud controlada
+#'         por \code{max_longitud_prefijo}). En los otros modos no se recorta.
+#'   \item Las preguntas \emph{select} con \emph{lista dinámica} (\code{select_* ${var}})
+#'         no exigen \code{choices$list_name} literal; por eso no generan falsos
+#'         avisos de “lista faltante”.
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' # Prefijos deducidos (comportamiento por defecto)
+#' inst <- leer_xlsform_limpieza(
+#'   path = "RMS_instrumento.xlsx",
+#'   lang = "es",
+#'   prefer_label = "label::Español (es)"
+#' )
+#'
+#' # Prefijo igual al nombre del grupo, sin modificar
+#' inst2 <- leer_xlsform_limpieza(
+#'   path = "RMS_instrumento.xlsx",
+#'   origen_prefijo = "nombre_grupo",
+#'   transformar_prefijo = "tal_cual",
+#'   sufijo_prefijo = "_"
+#' )
+#'
+#' # Prefijo desde la etiqueta del grupo, simplificado (sin acentos, A-Z0-9_)
+#' inst3 <- leer_xlsform_limpieza(
+#'   path = "RMS_instrumento.xlsx",
+#'   origen_prefijo = "etiqueta_grupo",
+#'   transformar_prefijo = "simplificar"
+#' )
+#' }
+#'
 #' @export
-leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
+leer_xlsform_limpieza <- function(path,
+                                  lang = "es",
+                                  prefer_label = NULL,
+                                  origen_prefijo = c("deducir", "nombre_grupo", "etiqueta_grupo"),
+                                  transformar_prefijo = c("mayúsculas", "tal_cual", "simplificar"),
+                                  sufijo_prefijo = "_",
+                                  max_longitud_prefijo = 4,
+                                  asegurar_unicidad = TRUE) {
+  origen_prefijo      <- match.arg(origen_prefijo)
+  transformar_prefijo <- match.arg(transformar_prefijo)
   stopifnot(file.exists(path))
 
   suppressPackageStartupMessages({
@@ -36,12 +179,39 @@ leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
   }
   .fix_names <- function(df) {
     if (is.null(df) || nrow(df) == 0) return(df)
-    cn <- .trim(names(df))
-    dupl <- duplicated(tolower(cn))
-    if (any(dupl)) {
-      idx <- ave(seq_along(cn), tolower(cn), FUN = seq_along)
-      cn <- ifelse(idx > 1, paste0(cn, "_", idx), cn)
+
+    cn <- names(df)
+    cn[is.na(cn)] <- ""
+    cn <- .trim(cn)
+
+    # Detecta columnas totalmente vacías (todas las celdas NA o "")
+    is_all_empty <- function(v) {
+      vv <- as.character(v)
+      all(is.na(vv) | !nzchar(.trim(vv)))
     }
+
+    drop_cols <- which(!nzchar(cn) & vapply(df, is_all_empty, logical(1)))
+    if (length(drop_cols)) {
+      df <- df[, -drop_cols, drop = FALSE]
+      cn <- names(df)
+      cn[is.na(cn)] <- ""
+      cn <- .trim(cn)
+      message(sprintf("Aviso: eliminadas %d columnas sin nombre y vacías (survey/choices).", length(drop_cols)))
+    }
+
+    # Asigna nombres a encabezados vacíos restantes
+    if (any(!nzchar(cn))) {
+      idx_empty <- which(!nzchar(cn))
+      cn[idx_empty] <- paste0("generico_", seq_along(idx_empty))
+    }
+
+    # Resuelve duplicados (case-insensitive) sin perder grafía original
+    low <- tolower(cn)
+    dupl <- duplicated(low)
+    if (any(dupl)) {
+      cn <- make.unique(cn, sep = "_")
+    }
+
     names(df) <- cn
     df
   }
@@ -49,6 +219,7 @@ leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
     if (is.null(df) || nrow(df) == 0) return(df)
     dplyr::mutate(df, dplyr::across(dplyr::everything(), ~ .trim(.)))
   }
+
   .pick_label_col <- function(cols, lang = "es", prefer_label = NULL) {
     if (!is.null(prefer_label) && prefer_label %in% cols) return(prefer_label)
     low <- tolower(cols)
@@ -56,6 +227,10 @@ leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
       paste0("label::", lang),
       paste0("label::", lang, " (", toupper(lang), ")"),
       paste0("label::", toupper(lang), " (", toupper(lang), ")"),
+      "label::spanish (es)", "label::spanish(es)", "label::spanish_es",
+      "label_spanish_es", "label::spanish", "label::es",
+      "label::español (es)", "label::espanol (es)",
+      "label::español", "label::espanol",
       "label"
     )
     for (ex in exacts) {
@@ -68,17 +243,24 @@ leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
     if (length(hit)) return(cols[hit[1]])
     NA_character_
   }
+
   .parse_type_scalar <- function(type) {
     type <- .trim(type)
-    if (!nzchar(type)) return(list(base = "", list_name = ""))
-    if (stringr::str_detect(type, "^begin_group"))  return(list(base = "begin_group",  list_name = ""))
-    if (stringr::str_detect(type, "^end_group"))    return(list(base = "end_group",    list_name = ""))
-    if (stringr::str_detect(type, "^begin_repeat")) return(list(base = "begin_repeat", list_name = ""))
-    if (stringr::str_detect(type, "^end_repeat"))   return(list(base = "end_repeat",   list_name = ""))
-    m <- stringr::str_match(type, "^(select_one|select_multiple)\\s+(.+)$")
-    if (!any(is.na(m))) return(list(base = m[,2], list_name = .trim(m[,3])))
-    list(base = type, list_name = "")
+    if (!nzchar(type)) return(list(base = "", list_name = "", dyn_ref = ""))
+    if (stringr::str_detect(type, "^begin_group"))  return(list(base = "begin_group",  list_name = "", dyn_ref = ""))
+    if (stringr::str_detect(type, "^end_group"))    return(list(base = "end_group",    list_name = "", dyn_ref = ""))
+    if (stringr::str_detect(type, "^begin_repeat")) return(list(base = "begin_repeat", list_name = "", dyn_ref = ""))
+    if (stringr::str_detect(type, "^end_repeat"))   return(list(base = "end_repeat",   list_name = "", dyn_ref = ""))
+    m1 <- stringr::str_match(type, "^(select_one|select_multiple)\\s+([^\\s]+)$")
+    if (!any(is.na(m1))) {
+      base <- m1[,2]; rhs <- .trim(m1[,3])
+      m2 <- stringr::str_match(rhs, "^\\$\\{([^}]+)\\}$")
+      if (!any(is.na(m2))) return(list(base = base, list_name = "", dyn_ref = .trim(m2[,2])))
+      return(list(base = base, list_name = rhs, dyn_ref = ""))
+    }
+    list(base = type, list_name = "", dyn_ref = "")
   }
+
   .norm_list_name <- function(x){
     x <- tolower(trimws(as.character(x)))
     x <- gsub("\\s+", "_", x)
@@ -164,12 +346,13 @@ leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
 
   survey <- survey_raw |>
     dplyr::mutate(
-      type_base    = purrr::map_chr(parsed, "base"),
-      list_name    = purrr::map_chr(parsed, "list_name"),
-      q_order      = dplyr::row_number(),
-      list_norm    = .norm_list_name(list_name),
-      is_begin     = type_base %in% c("begin_group","begin_repeat"),
-      is_end       = type_base %in% c("end_group","end_repeat")
+      type_base = purrr::map_chr(parsed, "base"),
+      list_name = purrr::map_chr(parsed, "list_name"),
+      dyn_ref   = purrr::map_chr(parsed, "dyn_ref"),
+      q_order   = dplyr::row_number(),
+      list_norm = .norm_list_name(list_name),
+      is_begin  = type_base %in% c("begin_group","begin_repeat"),
+      is_end    = type_base %in% c("end_group","end_repeat")
     )
 
   # init
@@ -242,8 +425,23 @@ leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
                    end_row=integer(), depth=integer(), is_repeat=logical(),
                    relevant=character(), appearance=character(), relevant_vars=list())
 
-  # ---- survey preguntas (excluye begin/end) + vars referenciadas
-  if (!"choice_filter" %in% names(survey)) survey$choice_filter <- ""
+  repeat_count_vec <- if ("repeat_count" %in% names(survey_raw)) survey_raw$repeat_count else rep(NA_character_, nrow(survey_raw))
+
+  if (nrow(groups_detail_df)) {
+    groups_detail_df$repeat_count <- NA_character_
+    groups_detail_df$repeat_count_vars <- vector("list", nrow(groups_detail_df))
+    for (i in seq_len(nrow(groups_detail_df))) {
+      if (isTRUE(groups_detail_df$is_repeat[i])) {
+        br <- groups_detail_df$begin_row[i]
+        rc <- repeat_count_vec[br]
+        groups_detail_df$repeat_count[i] <- ifelse(is.na(rc) || !nzchar(rc), NA_character_, rc)
+        groups_detail_df$repeat_count_vars[[i]] <- .vars_in_expr(groups_detail_df$repeat_count[i] %||% "")
+      } else {
+        groups_detail_df$repeat_count_vars[[i]] <- character(0)
+      }
+    }
+  }
+
   survey_questions <- survey |>
     dplyr::filter(!(type_base %in% c("begin_group","end_group","begin_repeat","end_repeat"))) |>
     dplyr::mutate(
@@ -253,11 +451,10 @@ leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
       vars_in_choicefilter = lapply(choice_filter,.vars_in_expr)
     ) |>
     dplyr::select(
-      type, type_base, list_name, list_norm,
+      type, type_base, list_name, list_norm, dyn_ref,
       name, dplyr::any_of(c("label")),
       required, relevant, constraint, calculation,
-      choice_filter,
-      appearance, hint,
+      choice_filter, appearance, hint,
       group_name, group_label,
       q_order,
       vars_in_relevant, vars_in_constraint, vars_in_calc, vars_in_choicefilter,
@@ -284,8 +481,20 @@ leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
   if (nrow(vac_svy)) warning(sprintf("Preguntas en survey con 'name' vacío: %d", nrow(vac_svy)))
   vac_ch  <- choices |> dplyr::filter(!nzchar(list_name) | !nzchar(name))
   if (nrow(vac_ch)) warning(sprintf("Filas en choices con 'list_name' o 'name' vacío: %d", nrow(vac_ch)))
-  ln_needed <- survey_questions |> dplyr::filter(type_base %in% c("select_one","select_multiple")) |> dplyr::pull(list_name) |> unique()
-  ln_have   <- unique(choices$list_name)
+  ln_needed <- survey_questions |>
+    dplyr::filter(
+      type_base %in% c("select_one","select_multiple"),
+      (is.na(dyn_ref) | !nzchar(dyn_ref)),              # no dinámicas
+      nzchar(list_name)                                  # con nombre real
+    ) |>
+    dplyr::pull(list_name) |> unique()
+
+  ln_have <- unique(choices$list_name)
+  miss_ln <- setdiff(ln_needed, ln_have)
+  if (length(miss_ln)) {
+    warning(sprintf("Listas referidas en survey sin definir en choices: %s",
+                    paste(miss_ln, collapse = ", ")))
+  }
   miss_ln   <- setdiff(ln_needed, ln_have)
   if (length(miss_ln)) warning(sprintf("Listas referidas en survey sin definir en choices: %s", paste(miss_ln, collapse=", ")))
   col_norm <- aggregate(list_name ~ list_norm, choices, function(v) length(unique(v)))
@@ -297,7 +506,7 @@ leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
   # ---- meta: columnas no-vacías por lista (potenciales filtros)
   choice_cols_by_list <- .nonempty_cols_by_list(choices)
 
-  # ---- section_map (prefijo, condicionalidad e is_repeat) dentro de la función
+  # ---- section_map (prefijo configurable, condicionalidad e is_repeat)
   if (nrow(groups_detail_df)) {
     base_map <- tibble::tibble(
       group_name     = as.character(groups_detail_df$gname),
@@ -314,21 +523,66 @@ leer_xlsform_limpieza <- function(path, lang = "es", prefer_label = NULL) {
       is_repeat      = as.logical(groups_detail_df$is_repeat),
       .gord          = rank(groups_detail_df$begin_row, ties.method = "first") |> as.integer()
     )
-    # prefijos heurísticos (respetar previos si hubiera)
-    pref <- rep(NA_character_, nrow(base_map))
-    need_pref <- is.na(pref) | !nzchar(pref)
-    if (any(need_pref)) {
-      gn  <- base_map$group_name[need_pref]
-      src <- base_map$group_label[need_pref]
-      idx_empty <- is.na(src) | !nzchar(src)
-      if (any(idx_empty)) src[idx_empty] <- gn[idx_empty]
-      heur <- toupper(gsub("[^A-Za-z]", "", substr(src, 1, 3)))
-      heur[!nzchar(heur)] <- "GEN"
-      pref[need_pref] <- paste0(heur, "_")
+
+    # Generación del prefijo según parámetros
+    pref <- character(nrow(base_map))
+
+    if (origen_prefijo == "deducir") {
+      # Usa etiqueta si existe; si no, cae a nombre de grupo
+      fuente <- ifelse(is.na(base_map$group_label) | !nzchar(base_map$group_label),
+                       base_map$group_name, base_map$group_label)
+      pref <- vapply(fuente, .abreviar_heuristico, character(1), max_len = max_longitud_prefijo)
+      pref <- .transformar_según_modo(pref, transformar_prefijo)
     }
+
+    if (origen_prefijo == "nombre_grupo") {
+      pref <- base_map$group_name
+      pref <- .transformar_según_modo(pref, transformar_prefijo)
+      # En "nombre_grupo" NO aplicamos recorte por longitud (se mantiene tal cual)
+    }
+
+    if (origen_prefijo == "etiqueta_grupo") {
+      # Si no hay etiqueta, cae a nombre de grupo
+      fuente <- ifelse(is.na(base_map$group_label) | !nzchar(base_map$group_label),
+                       base_map$group_name, base_map$group_label)
+      pref <- .transformar_según_modo(fuente, transformar_prefijo)
+      # En "etiqueta_grupo" NO recortamos por longitud (mantén lectura amigable)
+    }
+
+    # Asegurar que el prefijo no quede vacío
+    pref[!nzchar(pref)] <- "GEN"
+
+    # Añadir sufijo (p. ej., "_")
+    pref <- paste0(pref, sufijo_prefijo %||% "")
+
+    # Asegurar unicidad si se solicita
+    if (isTRUE(asegurar_unicidad)) {
+      # make.unique añade sufijos .1, .2; los cambiamos a _2, _3 manteniendo sufijo_prefijo final
+      tmp <- make.unique(pref, sep = "")
+      if (!identical(tmp, pref)) {
+        # Detecta los que se alteraron y formatea sufijos como _2, _3...
+        pattern <- paste0("^(", gsub("([\\W])", "\\\\\\1", pref), ")(\\.)(\\d+)$")
+        for (i in seq_along(tmp)) {
+          if (grepl("\\.\\d+$", tmp[i])) {
+            # extrae base sin .n
+            base <- sub("\\.\\d+$", "", tmp[i])
+            num  <- sub("^.*\\.(\\d+)$", "\\1", tmp[i])
+            # Si ya termina con sufijo_prefijo, añade número; si no, respeta el sufijo existente
+            if (endsWith(base, sufijo_prefijo)) {
+              tmp[i] <- paste0(base, num)
+            } else {
+              tmp[i] <- paste0(base, sufijo_prefijo, num)
+            }
+          }
+        }
+        pref <- tmp
+      }
+    }
+
     base_map$prefix <- pref
     base_map <- dplyr::distinct(base_map, .data$group_name, .keep_all = TRUE)
     section_map <- base_map
+
   } else {
     section_map <- tibble::tibble(
       group_name     = character(),

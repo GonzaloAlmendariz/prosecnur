@@ -4,18 +4,121 @@
 \alias{leer_xlsform_limpieza}
 \title{Leer XLSForm para limpieza (sin normalizar valores/labels)}
 \usage{
-leer_xlsform_limpieza(path, lang = "es", prefer_label = NULL)
+leer_xlsform_limpieza(
+  path,
+  lang = "es",
+  prefer_label = NULL,
+  origen_prefijo = c("deducir", "nombre_grupo", "etiqueta_grupo"),
+  transformar_prefijo = c("mayúsculas", "tal_cual", "simplificar"),
+  sufijo_prefijo = "_",
+  max_longitud_prefijo = 4,
+  asegurar_unicidad = TRUE
+)
 }
 \arguments{
-\item{path}{Ruta al archivo .xlsx}
+\item{path}{Ruta al archivo \code{.xlsx}.}
 
-\item{lang}{Código de idioma a preferir para label (p.ej., "es")}
+\item{lang}{Código de idioma a preferir para la etiqueta (p. ej., \code{"es"}).}
 
-\item{prefer_label}{Nombre exacto de la columna de label a priorizar (opcional)}
+\item{prefer_label}{Nombre exacto de la columna de label a priorizar (opcional),
+p. ej. \code{"label::Spanish (ES)"}. Si no se encuentra, se intentan variantes
+comunes y finalmente \code{label}.}
+
+\item{origen_prefijo}{Estrategia para generar el prefijo de sección en \code{meta$section_map$prefix}.
+Valores: \itemize{
+\item \code{"deducir"}: (por defecto) deduce un prefijo corto a partir de la etiqueta
+del grupo (o del nombre si no hay etiqueta). Útil cuando se buscan siglas
+cortas tipo \code{DOC_}, \code{MOV_}, \code{PAR_}.
+\item \code{"nombre_grupo"}: usa exactamente el \code{name} del \code{begin_group} / \code{begin_repeat}
+como base del prefijo (p. ej., \code{group_consent_}).
+\item \code{"etiqueta_grupo"}: usa el \code{label} del grupo como base del prefijo
+(p. ej., \code{CONSENTIMIENTO_}).
+}}
+
+\item{transformar_prefijo}{Transformación a aplicar al texto base del prefijo.
+Valores: \itemize{
+\item \code{"mayúsculas"} (por defecto): convierte a mayúsculas.
+\item \code{"tal_cual"}: no modifica el texto.
+\item \code{"simplificar"}: quita acentos y deja solo \code{[A-Za-z0-9_]}.
+}}
+
+\item{sufijo_prefijo}{Cadena a añadir al final del prefijo (por defecto, \verb{"_”}).}
+
+\item{max_longitud_prefijo}{Longitud máxima del prefijo \strong{solo cuando}
+\code{origen_prefijo = "deducir"} (por defecto, 4). No se aplica en
+\code{"nombre_grupo"} ni \code{"etiqueta_grupo"}.}
+
+\item{asegurar_unicidad}{Si \code{TRUE} (por defecto), garantiza prefijos únicos
+añadiendo sufijos numéricos estables en caso de colisiones.}
 }
 \value{
-lista: survey_raw, choices_raw, settings_raw, survey, choices, meta
+Una \strong{lista} con elementos:
+\itemize{
+\item \code{survey_raw}: hoja \code{survey} tal cual (nombres saneados).
+\item \code{choices_raw}: hoja \code{choices} tal cual (nombres saneados).
+\item \code{settings_raw}: hoja \code{settings} (si existe).
+\item \code{survey}: preguntas (excluye begin/end) con metadatos útiles:
+\itemize{
+\item \code{type_base}, \code{list_name}, \code{list_norm}
+\item \code{group_name}, \code{group_label}
+\item \code{required}, \code{relevant}, \code{constraint}, \code{calculation}
+\item \code{choice_filter}
+\item \code{dyn_ref}: referencia de \emph{lista dinámica} si el tipo es \code{select_* ${var}}
+\item \code{vars_in_*}: variables referenciadas en \code{relevant/constraint/choice_filter/calculation}
+}
+\item \code{choices}: catálogo con \code{list_name}, \code{list_norm}, \code{name}, \code{label} (columna elegida).
+\item \code{meta}: lista con resúmenes y mapas:
+\itemize{
+\item \code{label_col_survey}, \code{label_col_choices}: columnas de label efectivamente usadas.
+\item \code{groups_detail}: detalle de grupos/repeats (incluye \code{is_repeat}, \code{relevant} y, si existe, \code{repeat_count}).
+\item \code{section_map}: mapa de secciones con \code{prefix}, \code{is_conditional}, \code{is_repeat}, \code{group_relevant}.
+\item \code{lists_with_other}: listas con opción “Otro/Other”.
+\item \code{choice_cols_by_list}: columnas no vacías por lista (útiles para \code{choice_filter}).
+\item \code{choice_filter_summary}: por pregunta con filtro, qué columnas del catálogo y variables del formulario intervienen.
+}
+}
 }
 \description{
-Leer XLSForm para limpieza (sin normalizar valores/labels)
+Lee un XLSForm (hojas \code{survey}, \code{choices}, \code{settings}) y devuelve
+objetos listos para generar el Plan de Limpieza (ACNUR), sin alterar
+los valores originales. Detecta grupos y repeticiones, choice filters,
+listas dinámicas (select_* ${var}), y arma un mapa de secciones con
+prefijos configurables.
+}
+\details{
+\itemize{
+\item Los nombres de columnas vacíos/NA se renombran como \code{generico_#};
+las columnas completamente vacías y sin nombre se eliminan con aviso.
+\item \code{origen_prefijo = "deducir"} usa una abreviación corta (longitud controlada
+por \code{max_longitud_prefijo}). En los otros modos no se recorta.
+\item Las preguntas \emph{select} con \emph{lista dinámica} (\code{select_* ${var}})
+no exigen \code{choices$list_name} literal; por eso no generan falsos
+avisos de “lista faltante”.
+}
+}
+\examples{
+\dontrun{
+# Prefijos deducidos (comportamiento por defecto)
+inst <- leer_xlsform_limpieza(
+  path = "RMS_instrumento.xlsx",
+  lang = "es",
+  prefer_label = "label::Español (es)"
+)
+
+# Prefijo igual al nombre del grupo, sin modificar
+inst2 <- leer_xlsform_limpieza(
+  path = "RMS_instrumento.xlsx",
+  origen_prefijo = "nombre_grupo",
+  transformar_prefijo = "tal_cual",
+  sufijo_prefijo = "_"
+)
+
+# Prefijo desde la etiqueta del grupo, simplificado (sin acentos, A-Z0-9_)
+inst3 <- leer_xlsform_limpieza(
+  path = "RMS_instrumento.xlsx",
+  origen_prefijo = "etiqueta_grupo",
+  transformar_prefijo = "simplificar"
+)
+}
+
 }
