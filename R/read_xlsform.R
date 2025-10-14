@@ -787,6 +787,17 @@ leer_xlsform_limpieza <- function(path,
 # GRAFICACIÓN DE SECCIONES — paleta estilo Tableau + leyenda interna
 # ============================================================
 
+# --- Compatibilidad ggplot2: rectángulos con/es sin 'radius' ------------------
+.geom_rect_round <- function(..., radius_pt = 6) {
+  args <- list(...)
+  # 'radius' sólo existe desde ggplot2 3.5.0
+  has_radius <- tryCatch(utils::packageVersion("ggplot2") >= "3.5.0", error = function(e) FALSE)
+  if (isTRUE(has_radius)) {
+    args$radius <- ggplot2::unit(radius_pt, "pt")
+  }
+  do.call(ggplot2::geom_rect, args)
+}
+
 .nz1 <- function(x) is.character(x) && length(x) == 1 && !is.na(x) && nzchar(x)
 
 .fmt_name_label_vec <- function(name, label) {
@@ -1041,16 +1052,29 @@ GraficarSecciones <- function(inst,
   }
 
   g <- ggplot2::ggplot() +
-    ggplot2::geom_rect(
-      data=df_sec,
-      ggplot2::aes(xmin=x-w/2, xmax=x+w/2, ymin=y-h/2, ymax=y+h/2, fill=tipo),
-      color=col_borde, linewidth=0.3, radius=ggplot2::unit(6,"pt")
+    .geom_rect_round(
+      data = df_sec,
+      ggplot2::aes(
+        xmin = x - w/2,
+        xmax = x + w/2,
+        ymin = y - h/2,
+        ymax = y + h/2,
+        fill = tipo
+      ),
+      color = col_borde,
+      linewidth = 0.3,
+      radius_pt = 6   # opcional: ajusta el radio de esquina en puntos
     ) +
-    ggplot2::geom_text(data=df_sec, ggplot2::aes(x=x, y=y, label=label), size=tam_seccion) +
+    ggplot2::geom_text(
+      data = df_sec,
+      ggplot2::aes(x = x, y = y, label = label),
+      size = tam_seccion
+    ) +
     ggplot2::scale_fill_manual(
-      name=NULL, values=fill_secciones,
-      breaks=c("normal","condicional","repeat_seccion"),
-      labels=c("Sección normal","Sección condicional","Sección repeat")
+      name = NULL,
+      values = fill_secciones,
+      breaks = c("normal", "condicional", "repeat_seccion"),
+      labels = c("Sección normal", "Sección condicional", "Sección reiterativa")
     ) +
     ggnewscale::new_scale_fill()
 
@@ -1194,7 +1218,7 @@ GraficarSecciones <- function(inst,
 #'
 #' @return Un objeto `ggplot` con el waffle de preguntas y reglas.
 #' @export
-GraficarWaffleCuestionario <- function(inst,
+GraficarPreguntas <- function(inst,
                                        titulo = "Waffle de preguntas y reglas",
                                        incluir_genericos = TRUE,
                                        n_columnas  = 14,
@@ -1441,3 +1465,8 @@ GraficarWaffleCuestionario <- function(inst,
       fill = ggplot2::guide_legend(nrow = 1, byrow = TRUE, title.position = "top")
     )
 }
+
+
+
+
+
