@@ -1161,7 +1161,283 @@ GraficarSecciones <- function(inst,
 
 
 
+#' Waffle de preguntas y reglas (coloreado por sección + chips de reglas)
+#'
+#' @description
+#' Cada celda representa una fila del `survey`. El **relleno** de la celda indica
+#' la **sección** (`group_name`). El **borde** comunica estructura:
+#' - Negro grueso (sólido): begin/end de grupos/repeats de nivel 1
+#' - Negro más fino (segmentado): begin/end de grupos/repeats anidados (profundidad > 1)
+#' - Gris oscuro fino: el resto.
+#'
+#' Dentro de cada celda se dibujan **chips** para reglas detectadas:
+#' `calculation`, `required`, `constraint`, `relevant`, `choice_filter`.
+#'
+#' El texto muestra el `name` recortado a `max_caracteres` (sin “…”).
+#' La **leyenda (arriba)** es **solo** para tipos de **regla**.
+#'
+#' @param inst Lista devuelta por `leer_xlsform_limpieza()`, con `inst$survey`.
+#' @param titulo Título del gráfico.
+#' @param incluir_genericos Si `TRUE`, incluye todas las filas (grupos, notas, cálculos, etc.).
+#'   Si `FALSE`, solo muestra preguntas habituales (select_one/multiple, text, integer, decimal, date, etc.).
+#' @param n_columnas Número de columnas del waffle.
+#' @param ancho_celda,alto_celda Tamaño de cada celda (unidades de datos).
+#' @param espacio_x,espacio_y Separaciones horizontal y vertical entre celdas.
+#' @param tam_texto Tamaño de texto del nombre dentro de la celda.
+#' @param max_caracteres Máximo de caracteres del nombre (se corta sin “…”).
+#' @param tam_chip Tamaño (lado) de cada chip.
+#' @param chip_gap_x Separación horizontal entre chips.
+#' @param max_chips_por_fila Máximo de chips por fila dentro de la celda.
+#' @param mostrar_leyenda Si `TRUE`, muestra la leyenda de tipos de regla (arriba).
+#' @param paleta_secciones Vector de colores (opcional) para colorear secciones por `group_name`.
+#'   Si es `NULL`, se usa una paleta profesional y clara distinta a la de chips.
+#'
+#' @return Un objeto `ggplot` con el waffle de preguntas y reglas.
+#' @export
+GraficarWaffleCuestionario <- function(inst,
+                                       titulo = "Waffle de preguntas y reglas",
+                                       incluir_genericos = TRUE,
+                                       n_columnas  = 14,
+                                       ancho_celda = 1.2,
+                                       alto_celda  = 1.2,
+                                       espacio_x   = 0.18,
+                                       espacio_y   = 0.18,
+                                       tam_texto   = 3.1,
+                                       max_caracteres = 12,
+                                       tam_chip    = 0.16,
+                                       chip_gap_x  = 0.06,
+                                       max_chips_por_fila = 4,
+                                       mostrar_leyenda = TRUE,
+                                       paleta_secciones = NULL) {
 
+  req <- c("ggplot2","dplyr","tibble","stringr","tidyr","ggnewscale")
+  for (p in req) if (!requireNamespace(p, quietly = TRUE))
+    stop("Falta el paquete '", p, "'.", call. = FALSE)
 
+  `%||%` <- function(a,b) if (is.null(a)) b else a
+  .cut <- function(s, n = 12) {
+    s <- as.character(s %||% "")
+    ifelse(nchar(s) > n, substr(s, 1, n), s)  # cortar SIN “...”
+  }
+  .norm_empty <- function(x){
+    x <- as.character(x); x[is.na(x)] <- ""
+    bad <- tolower(trimws(x)) %in% c("na","n/a","none","null","nan")
+    x[bad] <- ""; trimws(x)
+  }
+  .is_nonempty <- function(x) nzchar(.norm_empty(x))
+  .to_bool_req <- function(x){
+    x <- tolower(trimws(as.character(x)))
+    x %in% c("true","true()","1","si","sí","yes","y","s")
+  }
 
+  svy <- inst$survey %||% tibble::tibble()
+  need_cols <- c("name","type","type_base","group_name",
+                 "relevant","constraint","required","choice_filter","calculation")
+  for (cc in need_cols) if (!cc %in% names(svy)) svy[[cc]] <- ""
 
+  # Profundidad por sección (para detectar anidamiento de grupos)
+  depth_df <- inst$meta$groups_detail %||% tibble::tibble()
+  if (!nrow(depth_df)) {
+    # compat: si no existe, asumimos profundidad 1
+    sec_depth <- setNames(rep(1L, length(unique(svy$group_name))), unique(svy$group_name))
+  } else {
+    sec_depth <- setNames(as.integer(depth_df$depth), as.character(depth_df$gname))
+  }
+
+  # Filtrar solo preguntas si se pide
+  if (!isTRUE(incluir_genericos)) {
+    tipos_validos <- c(
+      "select_one","select_multiple","text","integer","decimal",
+      "date","datetime","time","geopoint","image","audio","video",
+      "barcode","acknowledge","note"
+    )
+    svy <- svy[tolower(svy$type_base) %in% tipos_validos, , drop = FALSE]
+  }
+
+  svy$group_name <- ifelse(.is_nonempty(svy$group_name), svy$group_name, "(sin_seccion)")
+
+  # Determinar profundidad de la fila según su group_name
+  fila_depth <- as.integer(sec_depth[svy$group_name])
+  fila_depth[is.na(fila_depth)] <- 1L
+
+  # Bordes por tipo de fila (azul/rojo para begin/end; grosor/linetype por profundidad)
+  tb <- tolower(svy$type_base)
+
+  col_borde <- dplyr::case_when(
+    tb %in% c("begin_group", "begin_repeat") ~ "#1F78B4",  # azul
+    tb %in% c("end_group", "end_repeat")     ~ "#E31A1C",  # rojo
+    TRUE                                     ~ "#333333"   # gris oscuro
+  )
+
+  grosor_borde <- dplyr::case_when(
+    tb %in% c("begin_group", "begin_repeat", "end_group", "end_repeat") & fila_depth > 1L ~ 0.7,
+    tb %in% c("begin_group", "begin_repeat", "end_group", "end_repeat")                   ~ 1.1,
+    TRUE                                                                                  ~ 0.4
+  )
+
+  linetype_borde <- dplyr::case_when(
+    tb %in% c("begin_group", "begin_repeat", "end_group", "end_repeat") & fila_depth > 1L ~ "dashed",
+    tb %in% c("begin_group", "begin_repeat", "end_group", "end_repeat")                   ~ "solid",
+    TRUE                                                                                  ~ "solid"
+  )
+
+  # Paleta de secciones (relleno de celdas) — profesional y distinta a chips
+  secciones <- unique(svy$group_name)
+  if (is.null(paleta_secciones)) {
+    # Paleta tipo “Tableau Light / Set3-like”, clara y contrastada
+    base_sec <- c(
+      "#A6CEE3","#B2DF8A","#FDBF6F","#CAB2D6","#FFFF99",
+      "#1F78B4","#33A02C","#FB9A99","#E31A1C","#FF7F00",
+      "#6A3D9A","#B15928","#B3E2CD","#FDCDAC","#F4CAE4",
+      "#CCEBC5","#DECBE4","#E5D8BD","#FDDDE6","#FFFFCC"
+    )
+    pal <- rep_len(base_sec, length(secciones))
+    names(pal) <- secciones
+    paleta_secciones <- pal
+  } else {
+    # Completar colores faltantes si el usuario pasó algunos
+    faltan <- setdiff(secciones, names(paleta_secciones))
+    if (length(faltan)) {
+      extras <- c("#D9D9D9","#CFE8F3","#FCE4D6","#E6F5C9","#F1E2FF")
+      extras <- rep_len(extras, length(faltan))
+      names(extras) <- faltan
+      paleta_secciones <- c(paleta_secciones, extras)
+    }
+  }
+
+  # Reglas (chips) a partir de columnas crudas del survey
+  svy <- svy %>%
+    dplyr::mutate(
+      rule_calculation   = .is_nonempty(calculation),
+      rule_required      = .to_bool_req(required),
+      rule_constraint    = .is_nonempty(constraint),
+      rule_relevant      = .is_nonempty(relevant),
+      rule_choicefilter  = .is_nonempty(choice_filter)
+    )
+
+  # Layout tipo waffle
+  n <- nrow(svy)
+  fila  <- floor((seq_len(n)-1) / n_columnas)
+  col   <- (seq_len(n)-1) %% n_columnas
+  cx <- col * (ancho_celda + espacio_x)
+  cy <- -fila * (alto_celda  + espacio_y)
+
+  base_tiles <- tibble::tibble(
+    name = svy$name,
+    type_base = svy$type_base,
+    group_name = svy$group_name,
+    cx, cy,
+    xmin = cx - ancho_celda/2, xmax = cx + ancho_celda/2,
+    ymin = cy - alto_celda/2,  ymax = cy + alto_celda/2,
+    etiqueta = .cut(svy$name, max_caracteres),
+    fill_seccion = svy$group_name,
+    col_borde = col_borde,
+    grosor_borde = grosor_borde,
+    linetype_borde = linetype_borde
+  )
+
+  # Chips (solo cuando la regla es TRUE)
+  chips_long <- svy %>%
+    dplyr::select(name, starts_with("rule_")) %>%
+    tidyr::pivot_longer(
+      cols = dplyr::starts_with("rule_"),
+      names_to = "regla",
+      values_to = "valor"
+    ) %>%
+    dplyr::filter(valor) %>%
+    dplyr::mutate(
+      regla = dplyr::recode(regla,
+                            rule_calculation="calculation",
+                            rule_required="required",
+                            rule_constraint="constraint",
+                            rule_relevant="relevant",
+                            rule_choicefilter="choice_filter")
+    ) %>%
+    dplyr::left_join(base_tiles, by="name") %>%
+    dplyr::group_by(name) %>%
+    dplyr::mutate(
+      idx_chip  = dplyr::row_number() - 1L,
+      fila_chip = floor(idx_chip / max_chips_por_fila),
+      col_chip  = idx_chip %% max_chips_por_fila,
+      # chips ocupan el tercio inferior de la celda
+      y_chip = ymin + 0.25*alto_celda + (fila_chip * (tam_chip + 0.04)),
+      ancho_fila_chip = (tam_chip * max_chips_por_fila) + chip_gap_x * (max_chips_por_fila - 1),
+      x_inicio = cx - ancho_fila_chip/2 + tam_chip/2,
+      x_chip = x_inicio + col_chip * (tam_chip + chip_gap_x)
+    ) %>%
+    dplyr::ungroup()
+
+  # Paleta de reglas (contraste alto, distinta a secciones)
+  pal_reglas <- c(
+    calculation   = "#9467BD",
+    required      = "#D62728",
+    constraint    = "#FF7F0E",
+    relevant      = "#2CA02C",
+    choice_filter = "#1F77B4"
+  )
+
+  # --- Gráfico principal ---
+  g <- ggplot2::ggplot() +
+    # Tiles coloreados por sección
+    ggplot2::geom_rect(
+      data = base_tiles,
+      ggplot2::aes(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, fill = fill_seccion),
+      color = base_tiles$col_borde,
+      linewidth = base_tiles$grosor_borde,
+      linetype = base_tiles$linetype_borde
+    ) +
+    ggplot2::scale_fill_manual(values = paleta_secciones, guide = "none") +
+    # Texto (name recortado)
+    ggtext::geom_textbox(
+      data = base_tiles,
+      ggplot2::aes(x=cx, y=cy, label=etiqueta),
+      width = unit(ancho_celda * 0.9, "cm"),
+      box.color = NA,
+      size = tam_texto * 0.8,
+      halign = 0.5,
+      valign = 0.5,
+      lineheight = 0.98,
+      fill = NA
+    ) +
+    ggnewscale::new_scale_fill()
+
+  # Chips de reglas
+  if (nrow(chips_long)) {
+    g <- g +
+      ggplot2::geom_rect(
+        data = chips_long,
+        ggplot2::aes(
+          xmin = x_chip - tam_chip/2,
+          xmax = x_chip + tam_chip/2,
+          ymin = y_chip - tam_chip/2,
+          ymax = y_chip + tam_chip/2,
+          fill = regla
+        ),
+        color = "black", linewidth = 0.15
+      ) +
+      ggplot2::scale_fill_manual(
+        name = "Tipos de regla",
+        values = pal_reglas
+      )
+  }
+
+  g +
+    ggplot2::coord_equal(expand = TRUE) +
+    ggplot2::labs(title = titulo, x = NULL, y = NULL) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(
+      panel.grid = ggplot2::element_blank(),
+      axis.text  = ggplot2::element_blank(),
+      axis.title = ggplot2::element_blank(),
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, margin = ggplot2::margin(b = 10)),
+      legend.position = if (mostrar_leyenda && nrow(chips_long)) "top" else "none",
+      legend.justification = "center",
+      legend.direction = "horizontal",
+      legend.text = ggplot2::element_text(size = 9),
+      legend.title = ggplot2::element_text(size = 10, face = "bold"),
+      plot.margin = ggplot2::margin(t = 10, r = 10, b = 10, l = 10)
+    ) +
+    ggplot2::guides(
+      fill = ggplot2::guide_legend(nrow = 1, byrow = TRUE, title.position = "top")
+    )
+}
