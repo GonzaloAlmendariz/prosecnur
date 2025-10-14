@@ -1,46 +1,45 @@
 # ============================================================
-# LECTOR "SIN NORMALIZAR" PARA REGLAS / PLAN DE LIMPIEZA — ONE-FILE v2.3
+# LECTOR "SIN NORMALIZAR" PARA REGLAS / PLAN DE LIMPIEZA — ONE-FILE v2.5
 # - Soporta begin_group/end_group y begin_repeat/end_repeat
 # - Captura choice_filter y variables referenciadas
-# - groups_detail con glabel (label del begin_group; cae en gname si falta)
-# - section_map dentro de meta (prefix, is_conditional, is_repeat)
-# - choice_cols_by_list depurado (solo columnas no vacías y no "decorativas")
-# - choice_filter_summary (qué columnas de choices usa cada filtro)
-# - Normalización mínima: trims + comillas tipográficas -> ASCII
-# - Validaciones suaves (warnings)
+# - section_map: prefix, is_conditional, is_repeat, group_relevant
+# - choice_cols_by_list: columnas no vacías y no "decorativas"
+# - choice_filter_summary: columnas de choices y variables usadas
+# - Resumen simple en consola: Secciones (condición / repeat -> hoja),
+#   Listas choices normales (conteo y 'Otro'), Selects con listas dinámicas (origen y preview)
+# - Compatible con builders / rule factory (nombres y estructura estable)
 # ============================================================
 
-# Helpers:
-
-# Simplifica texto: quita acentos y deja solo [A-Za-z0-9_], espacios -> _
-.slugify_es <- function(x) {
-  x <- as.character(x)
-  x <- iconv(x, to = "ASCII//TRANSLIT")        # quita acentos
-  x <- gsub("[^A-Za-z0-9]+", "_", x)           # no alfanumérico -> _
-  x <- gsub("_+", "_", x)                      # colapsa
-  x <- gsub("^_|_$", "", x)                    # recorta _ extremos
-  x
+# -------------------- Helpers básicos --------------------
+`%||%` <- function(a, b) if (is.null(a)) b else a
+.nz <- function(x) { !is.null(x) && length(x) > 0 && !is.na(x) && nzchar(x) }
+.fmt_name_label <- function(name, label) {
+  nm <- as.character(name %||% "")
+  lb <- as.character(label %||% "")
+  if (.nz(lb) && !identical(trimws(nm), trimws(lb))) sprintf("%s (%s)", nm, lb) else nm
 }
 
-# Abrevia en modo "heurístico" (3-4 letras): toma la primera palabra significativa
+.slugify_es <- function(x) {
+  x <- as.character(x)
+  x <- iconv(x, to = "ASCII//TRANSLIT")
+  x <- gsub("[^A-Za-z0-9]+", "_", x)
+  x <- gsub("_+", "_", x)
+  gsub("^_|_$", "", x)
+}
+
 .abreviar_heuristico <- function(lbl, max_len = 4) {
   if (is.na(lbl) || !nzchar(lbl)) return("GEN")
-  # Limpia prefijos comunes tipo "S1:", "Parte 2.", etc.
   txt <- gsub("^\\s*(S\\d+\\s*[:.-]|Parte\\s*\\d+\\s*[:.-])\\s*", "", lbl, ignore.case = TRUE)
-  # Toma palabras y omite stopwords simples
   toks <- unlist(strsplit(txt, "\\s+"))
   stopw <- c("de","del","la","el","los","las","y","en","para","por","a","al","lo","un","una","uno")
   toks <- toks[!tolower(toks) %in% stopw]
   base <- if (length(toks)) toks[1] else txt
   base <- gsub("[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", "", base)
   if (!nzchar(base)) base <- "GEN"
-  # Normaliza a ASCII y toma primeras letras
   base <- .slugify_es(base)
-  base <- toupper(substr(base, 1, max(1, max_len)))
-  base
+  toupper(substr(base, 1, max(1, max_len)))
 }
 
-# Aplica transformación solicitada al prefijo base
 .transformar_según_modo <- function(x, modo = c("mayúsculas","tal_cual","simplificar")) {
   modo <- match.arg(modo)
   if (modo == "mayúsculas") return(toupper(x))
@@ -48,107 +47,393 @@
   x
 }
 
+# -------------------- Normalización liviana --------------------
+.trim <- function(x) {
+  x <- as.character(x)
+  x <- stringr::str_replace_all(x, "\\r\\n|\\r|\\n", " ")
+  stringr::str_squish(x)
+}
 
+.fix_names <- function(df) {
+  if (is.null(df) || nrow(df) == 0) return(df)
+  cn <- names(df); cn[is.na(cn)] <- ""; cn <- .trim(cn)
+  is_all_empty <- function(v) {
+    vv <- as.character(v)
+    all(is.na(vv) | !nzchar(.trim(vv)))
+  }
+  drop_cols <- which(!nzchar(cn) & vapply(df, is_all_empty, logical(1)))
+  if (length(drop_cols)) {
+    df <- df[, -drop_cols, drop = FALSE]
+    cn <- names(df); cn[is.na(cn)] <- ""; cn <- .trim(cn)
+    message(sprintf("Aviso: eliminadas %d columnas sin nombre y vacías (survey/choices).", length(drop_cols)))
+  }
+  if (any(!nzchar(cn))) {
+    idx_empty <- which(!nzchar(cn))
+    cn[idx_empty] <- paste0("generico_", seq_along(idx_empty))
+  }
+  low <- tolower(cn); dupl <- duplicated(low)
+  if (any(dupl)) cn <- make.unique(cn, sep = "_")
+  names(df) <- cn
+  df
+}
 
+.to_char_trim_df <- function(df) {
+  if (is.null(df) || nrow(df) == 0) return(df)
+  dplyr::mutate(df, dplyr::across(dplyr::everything(), ~ .trim(.)))
+}
+
+.pick_label_col <- function(cols, lang = "es", prefer_label = NULL) {
+  if (!is.null(prefer_label) && prefer_label %in% cols) return(prefer_label)
+  low <- tolower(cols)
+  exacts <- c(
+    paste0("label::", lang),
+    paste0("label::", lang, " (", toupper(lang), ")"),
+    paste0("label::", toupper(lang), " (", toupper(lang), ")"),
+    "label::spanish (es)", "label::spanish(es)", "label::spanish_es",
+    "label_spanish_es", "label::spanish", "label::es",
+    "label::español (es)", "label::espanol (es)",
+    "label::español", "label::espanol",
+    "label"
+  )
+  for (ex in exacts) {
+    hit <- which(low == tolower(ex))
+    if (length(hit)) return(cols[hit[1]])
+  }
+  hit <- grep(paste0("^label.*", lang), low)
+  if (length(hit)) return(cols[hit[1]])
+  hit <- grep("^label", low)
+  if (length(hit)) return(cols[hit[1]])
+  NA_character_
+}
+
+.parse_type_scalar <- function(type) {
+  type <- .trim(type)
+  if (!nzchar(type)) return(list(base = "", list_name = "", dyn_ref = ""))
+  if (stringr::str_detect(type, "^begin_group"))  return(list(base = "begin_group",  list_name = "", dyn_ref = ""))
+  if (stringr::str_detect(type, "^end_group"))    return(list(base = "end_group",    list_name = "", dyn_ref = ""))
+  if (stringr::str_detect(type, "^begin_repeat")) return(list(base = "begin_repeat", list_name = "", dyn_ref = ""))
+  if (stringr::str_detect(type, "^end_repeat"))   return(list(base = "end_repeat",   list_name = "", dyn_ref = ""))
+  m1 <- stringr::str_match(type, "^(select_one|select_multiple)\\s+([^\\s]+)$")
+  if (!any(is.na(m1))) {
+    base <- m1[,2]; rhs <- .trim(m1[,3])
+    m2 <- stringr::str_match(rhs, "^\\$\\{([^}]+)\\}$")
+    if (!any(is.na(m2))) return(list(base = base, list_name = "", dyn_ref = .trim(m2[,2])))
+    return(list(base = base, list_name = rhs, dyn_ref = ""))
+  }
+  list(base = type, list_name = "", dyn_ref = "")
+}
+
+.norm_list_name <- function(x){
+  x <- tolower(trimws(as.character(x)))
+  x <- gsub("\\s+", "_", x)
+  gsub("[^a-z0-9_]", "_", x)
+}
+
+.lists_with_other <- function(choices_df) {
+  if (is.null(choices_df) || !nrow(choices_df)) {
+    return(tibble::tibble(list_name = character(), has_other = logical()))
+  }
+  nms <- tolower(names(choices_df))
+  lab_col <- if ("label" %in% nms) names(choices_df)[which(nms=="label")[1]] else NA_character_
+  has_other_vec <- purrr::map_lgl(unique(choices_df$list_name), function(ln){
+    sub <- choices_df[choices_df$list_name == ln, , drop = FALSE]
+    if (!nrow(sub)) return(FALSE)
+    any(.trim(sub$name) %in% c("Other","Otro","Otra","Otro(a)")) ||
+      (!is.na(lab_col) && any(.trim(sub[[lab_col]]) %in% c("Other","Otro","Otra","Otro(a)","Otro (especifique)")))
+  })
+  tibble::tibble(list_name = unique(choices_df$list_name), has_other = has_other_vec)
+}
+
+.vars_in_expr <- function(expr) {
+  if (is.null(expr) || is.na(expr) || !nzchar(expr)) return(character(0))
+  m <- stringr::str_match_all(expr, "\\$\\{([^}]+)\\}")
+  unique(unlist(lapply(m, function(mm) mm[,2])))
+}
+
+.normalize_quotes <- function(x){
+  x <- gsub("\u2018|\u2019", "'", x, perl = TRUE)
+  x <- gsub("\u201C|\u201D", "\"", x, perl = TRUE)
+  x
+}
+
+.nonempty_cols_by_list <- function(ch){
+  core_cols   <- c("list_name","list_norm","name","label")
+  ignore_like <- c("^label(::|:).*", "^media(::|:).*", "^name.*_label$", "^order$", "^choice.*_name$")
+  by_list <- split(ch, ch$list_name)
+  res <- lapply(by_list, function(df){
+    cand <- setdiff(names(df), core_cols)
+    if (!length(cand)) return(character(0))
+    is_ignored <- Reduce(`|`, lapply(ignore_like, function(rx) grepl(rx, cand, ignore.case = TRUE)), init = FALSE)
+    cand <- cand[!is_ignored]
+    if (!length(cand)) return(character(0))
+    keep <- vapply(cand, function(col){
+      any(nchar(trimws(as.character(df[[col]]))) > 0, na.rm = TRUE)
+    }, logical(1))
+    cand[keep]
+  })
+  tibble::tibble(list_name = names(res), extra_cols = unname(res))
+}
+
+# -------------------- Estructura: repeats/árbol --------------------
+.detect_repeats <- function(survey, section_map, label_col = "label") {
+  n <- nrow(survey); if (!n) return(tibble::tibble())
+
+  # base del tipo (begin_*, end_*, select_*, etc.)
+  type_base <- tolower(trimws(sub("\\s.*$", "", as.character(survey$type))))
+  nm        <- as.character(survey$name %||% "")
+  labcol    <- if (label_col %in% names(survey)) label_col else "label"
+
+  stack <- list()
+  rows  <- vector("list", n)
+
+  group_label_from_section <- function(gname) {
+    if (is.null(section_map) || !nrow(section_map)) return(NA_character_)
+    i <- match(gname, section_map$group_name)
+    if (is.na(i)) return(NA_character_)
+    pick <- function(col) {
+      if (col %in% names(section_map)) {
+        val <- section_map[[col]][i]
+        if (.nz(val)) return(as.character(val))
+      }
+      NA_character_
+    }
+    lbl <- pick("group_label")
+    if (is.na(lbl)) lbl <- pick("group_label_es")
+    if (is.na(lbl)) lbl <- pick("etiqueta_grupo")
+    if (is.na(lbl) || !nzchar(lbl)) lbl <- section_map$group_name[[i]]
+    as.character(lbl)
+  }
+
+  for (i in seq_len(n)) {
+    tb <- type_base[i]
+    this_name <- if (!is.na(nm[i]) && nzchar(nm[i])) nm[i] else paste0("group_", i)
+    this_lab  <- suppressWarnings(as.character(survey[[labcol]][i]))
+    this_lab  <- if (!length(this_lab) || is.na(this_lab) || !nzchar(this_lab)) group_label_from_section(this_name) else this_lab
+
+    if (identical(tb, "begin_group") || identical(tb, "begin") || identical(tb, "begin_repeat")) {
+      is_rep <- grepl("begin\\s*_?repeat", tb)
+      padre <- if (length(stack)) stack[[length(stack)]]$name else NA_character_
+      padre_lab <- if (length(stack)) stack[[length(stack)]]$label else NA_character_
+      profundidad <- length(stack)
+
+      rows[[i]] <- list(
+        group_name   = this_name,
+        group_label  = this_lab,
+        is_repeat    = is_rep,
+        parent_group = padre,
+        parent_label = padre_lab,
+        profundidad  = profundidad,
+        tabla_hija   = this_name,
+        tabla_padre  = if (!is.na(padre)) padre else "(principal)",
+        key_child    = "_index",
+        key_parent   = if (!is.na(padre)) "_parent_index" else NA_character_
+      )
+      stack[[length(stack)+1]] <- list(name=this_name, is_repeat=is_rep, label=this_lab)
+
+    } else if (identical(tb, "end_group") || identical(tb, "end") || identical(tb, "end_repeat")) {
+      if (length(stack)) stack <- stack[-length(stack)]
+    }
+  }
+
+  out <- rows |> purrr::compact() |> dplyr::bind_rows()
+  if (!nrow(out)) {
+    tibble::tibble(group_name=character(), group_label=character(), is_repeat=logical(),
+                   parent_group=character(), parent_label=character(), profundidad=integer(),
+                   tabla_hija=character(), tabla_padre=character(), key_child=character(), key_parent=character())
+  } else out
+}
+
+.make_tabla_hojas <- function(repeat_links) {
+  if (!nrow(repeat_links)) {
+    return(tibble::tibble(
+      nivel = 0L, tabla = "(principal)", descripcion = "Encuesta principal",
+      vinculo_con_padre = NA_character_
+    ))
+  }
+  dplyr::bind_rows(
+    tibble::tibble(
+      nivel = 0L, tabla = "(principal)", descripcion = "Encuesta principal", vinculo_con_padre = NA_character_
+    ),
+    repeat_links %>%
+      dplyr::transmute(
+        nivel = profundidad + 1L,
+        tabla = tabla_hija,
+        descripcion = ifelse(is_repeat, paste0(group_label, " (repeat)"), group_label),
+        vinculo_con_padre = ifelse(is.na(parent_group),
+                                   NA_character_,
+                                   paste0("Se vincula por _parent_index → _index de «", tabla_padre, "»."))
+      )
+  ) %>%
+    dplyr::distinct() %>%
+    (\(z) z[order(z$nivel, z$tabla), , drop = FALSE])()
+}
+
+# -------------------- Listas dinámicas (select_* ${var}) --------------------
+.detect_dynrefs <- function(survey, section_map, label_col = "label") {
+  if (!nrow(survey)) return(tibble::tibble())
+  labcol <- if (label_col %in% names(survey)) label_col else "label"
+
+  m <- stringr::str_match(suppressWarnings(as.character(survey$type)),
+                          "^\\s*select_(one|multiple)\\s*\\$\\{([A-Za-z0-9_]+)\\}\\s*$")
+  tiene <- which(!is.na(m[,1]))
+  if (!length(tiene)) {
+    return(tibble::tibble(pregunta=character(), tipo=character(), dyn_ref=character(),
+                          grupo_consumidor=character(), etiqueta_pregunta=character(),
+                          origen_dyn=character(), etiqueta_origen=character(), es_de_repeat=logical(),
+                          calc_preview=character()))
+  }
+
+  rep_idx <- .detect_repeats(survey, section_map, label_col)
+  grupos_repeat <- unique(rep_idx$group_name[rep_idx$is_repeat %in% TRUE])
+
+  purrr::map_dfr(tiene, function(i) {
+    tipo <- paste0("select_", m[i,2])
+    ref  <- m[i,3]
+    prg  <- as.character(survey$name[i])
+    grpC <- suppressWarnings(as.character(survey$group_name[i]))
+    labP <- suppressWarnings(as.character(survey[[labcol]][i]))
+
+    fila_ref <- which(survey$name == ref)[1]
+    origen   <- if (length(fila_ref) && !is.na(fila_ref)) suppressWarnings(as.character(survey$group_name[fila_ref])) else NA_character_
+    etq_org  <- if (length(fila_ref) && !is.na(fila_ref)) {
+      v <- suppressWarnings(as.character(survey[[labcol]][fila_ref])); if (!length(v) || is.na(v) || !nzchar(v)) ref else v
+    } else ref
+    es_rep   <- !is.na(origen) && origen %in% grupos_repeat
+
+    calc_prev <- if (length(fila_ref) && !is.na(fila_ref) && "calculation" %in% names(survey)) {
+      cp <- survey$calculation[fila_ref]
+      cp <- gsub("\\s+", " ", trimws(cp))
+      substr(cp, 1, min(80, nchar(cp)))
+    } else ""
+
+    tibble::tibble(
+      pregunta          = prg,
+      tipo              = tipo,
+      dyn_ref           = ref,
+      grupo_consumidor  = grpC,
+      etiqueta_pregunta = if (!length(labP) || is.na(labP) || !nzchar(labP)) prg else labP,
+      origen_dyn        = origen,
+      etiqueta_origen   = etq_org,
+      es_de_repeat      = es_rep,
+      calc_preview      = calc_prev
+    )
+  })
+}
+
+# -------------------- Resumen simple en consola --------------------
+.print_resumen_simple <- function(x) {
+  meta <- x$meta %||% list()
+  section_map  <- meta$section_map  %||% tibble::tibble()
+  repeat_links <- meta$repeat_links %||% tibble::tibble()
+
+  if (is.null(section_map) || !nrow(section_map)) {
+    cat("• Secciones: (no se detectaron grupos)\n")
+    return(invisible())
+  }
+
+  cat("\n• Secciones:\n")
+
+  rep_tbl <- if (nrow(repeat_links)) {
+    repeat_links[, c("group_name","tabla_hija","tabla_padre","key_parent"), drop = FALSE]
+  } else {
+    tibble::tibble(group_name=character(), tabla_hija=character(),
+                   tabla_padre=character(), key_parent=character())
+  }
+
+  ord <- if (".gord" %in% names(section_map)) order(section_map$.gord) else seq_len(nrow(section_map))
+  apply(section_map[ord, , drop = FALSE], 1, function(r) {
+    gname <- as.character(r[["group_name"]])
+    glab  <- as.character(r[["group_label"]])
+    rep   <- isTRUE(as.logical(r[["is_repeat"]]))
+    cond  <- isTRUE(as.logical(r[["is_conditional"]]))
+    relv  <- r[["group_relevant"]] %||% ""
+    titulo <- .fmt_name_label(gname, glab)
+    cat(sprintf("  - %s%s\n", titulo, if (rep) " [repeat]" else ""))
+    if (cond && .nz(relv)) cat("      · se abre si: ", relv, "\n", sep = "")
+    if (rep) {
+      fila <- rep_tbl[rep_tbl$group_name == gname, , drop = FALSE]
+      if (nrow(fila)) {
+        cat(sprintf("      · hoja generada: %s (_parent_index → _index de «%s»)\n",
+                    fila$tabla_hija[1], fila$tabla_padre[1]))
+      }
+    }
+  })
+}
+
+print_resumen_instrumento <- function(x) {
+  settings <- x$settings %||% tibble::tibble()
+  meta     <- x$meta %||% list()
+
+  titulo  <- settings$form_title %||% settings$title %||% "(no definido)"
+  version <- settings$version %||% settings$form_version %||% "(no definido)"
+  idioma  <- settings$default_language %||% "(no definido)"
+
+  cat("\n================ Resumen del instrumento =================\n")
+  cat("• Settings:\n")
+  cat("  - Título: ", titulo,  "\n", sep = "")
+  cat("  - Versión: ", version, "\n", sep = "")
+  cat("  - Idioma por defecto: ", idioma, "\n", sep = "")
+
+  .print_resumen_simple(x)
+
+  # Listas choices normales
+  ch <- x$choices %||% tibble::tibble()
+  if (nrow(ch)) {
+    cat("\n• Listas choices normales:\n")
+    cnt <- ch |>
+      dplyr::filter(nzchar(list_name)) |>
+      dplyr::count(list_name, name = "nopts", sort = FALSE)
+
+    has_other_tbl <- meta$lists_with_other %||% tibble::tibble(list_name=character(), has_other=logical())
+    cnt <- cnt |>
+      dplyr::left_join(has_other_tbl, by = "list_name") |>
+      dplyr::mutate(has_other = ifelse(is.na(has_other), FALSE, has_other))
+
+    apply(cnt, 1, function(r){
+      ln <- as.character(r[["list_name"]])
+      n  <- as.integer(r[["nopts"]])
+      ot <- isTRUE(as.logical(r[["has_other"]]))
+      cat(sprintf("  - %s [%d opciones]%s\n", ln, n, if (ot) " (incluye 'Otro')" else ""))
+    })
+  } else {
+    cat("\n• Listas choices normales: (ninguna)\n")
+  }
+
+  # Selects con choices dinámicas
+  dref <- meta$dynrefs_pretty %||% meta$dynrefs %||% tibble::tibble()
+  if (nrow(dref)) {
+    cat("\n• Selects con choices dinámicas:\n")
+    apply(dref, 1, function(f) {
+      cat(sprintf("  - %s (%s) ← ${%s}\n", f[["pregunta"]], f[["tipo"]], f[["dyn_ref"]]))
+      origen <- if (.nz(f[["origen_dyn"]])) f[["origen_dyn"]] else "(indeterminado)"
+      repflag <- if (isTRUE(as.logical(f[["es_de_repeat"]]))) " [repeat]" else ""
+      cat(sprintf("      · origen: hoja/sección «%s»%s; variable: %s\n",
+                  origen, repflag, f[["dyn_ref"]]))
+      if (.nz(f[["calc_preview"]])) {
+        cat("      · construcción (preview): ", f[["calc_preview"]], "\n", sep = "")
+      }
+    })
+  } else {
+    cat("\n• Selects con choices dinámicas: (ninguna)\n")
+  }
+
+  cat("==========================================================\n")
+}
+
+# ---------------------------------------------------------------
+# Orquestador principal
+# ---------------------------------------------------------------
 
 #' Leer XLSForm para limpieza (sin normalizar valores/labels)
-#'
-#' Lee un XLSForm (hojas `survey`, `choices`, `settings`) y devuelve
-#' objetos listos para generar el Plan de Limpieza (ACNUR), sin alterar
-#' los valores originales. Detecta grupos y repeticiones, choice filters,
-#' listas dinámicas (select_* ${var}), y arma un mapa de secciones con
-#' prefijos configurables.
-#'
-#' @param path Ruta al archivo `.xlsx`.
-#' @param lang Código de idioma a preferir para la etiqueta (p. ej., `"es"`).
-#' @param prefer_label Nombre exacto de la columna de label a priorizar (opcional),
-#'   p. ej. `"label::Spanish (ES)"`. Si no se encuentra, se intentan variantes
-#'   comunes y finalmente `label`.
-#' @param origen_prefijo Estrategia para generar el prefijo de sección en `meta$section_map$prefix`.
-#'   Valores: \itemize{
-#'     \item `"deducir"`: (por defecto) deduce un prefijo corto a partir de la etiqueta
-#'       del grupo (o del nombre si no hay etiqueta). Útil cuando se buscan siglas
-#'       cortas tipo `DOC_`, `MOV_`, `PAR_`.
-#'     \item `"nombre_grupo"`: usa exactamente el `name` del `begin_group` / `begin_repeat`
-#'       como base del prefijo (p. ej., `group_consent_`).
-#'     \item `"etiqueta_grupo"`: usa el `label` del grupo como base del prefijo
-#'       (p. ej., `CONSENTIMIENTO_`).
-#'   }
-#' @param transformar_prefijo Transformación a aplicar al texto base del prefijo.
-#'   Valores: \itemize{
-#'     \item `"mayúsculas"` (por defecto): convierte a mayúsculas.
-#'     \item `"tal_cual"`: no modifica el texto.
-#'     \item `"simplificar"`: quita acentos y deja solo \code{[A-Za-z0-9_]}.
-#'   }
-#' @param sufijo_prefijo Cadena a añadir al final del prefijo (por defecto, `"_”`).
-#' @param max_longitud_prefijo Longitud máxima del prefijo \strong{solo cuando}
-#'   \code{origen_prefijo = "deducir"} (por defecto, 4). No se aplica en
-#'   `"nombre_grupo"` ni `"etiqueta_grupo"`.
-#' @param asegurar_unicidad Si \code{TRUE} (por defecto), garantiza prefijos únicos
-#'   añadiendo sufijos numéricos estables en caso de colisiones.
-#'
-#' @return Una \strong{lista} con elementos:
-#'   \itemize{
-#'     \item \code{survey_raw}: hoja \code{survey} tal cual (nombres saneados).
-#'     \item \code{choices_raw}: hoja \code{choices} tal cual (nombres saneados).
-#'     \item \code{settings_raw}: hoja \code{settings} (si existe).
-#'     \item \code{survey}: preguntas (excluye begin/end) con metadatos útiles:
-#'       \itemize{
-#'         \item \code{type_base}, \code{list_name}, \code{list_norm}
-#'         \item \code{group_name}, \code{group_label}
-#'         \item \code{required}, \code{relevant}, \code{constraint}, \code{calculation}
-#'         \item \code{choice_filter}
-#'         \item \code{dyn_ref}: referencia de \emph{lista dinámica} si el tipo es \code{select_* ${var}}
-#'         \item \code{vars_in_*}: variables referenciadas en \code{relevant/constraint/choice_filter/calculation}
-#'       }
-#'     \item \code{choices}: catálogo con \code{list_name}, \code{list_norm}, \code{name}, \code{label} (columna elegida).
-#'     \item \code{meta}: lista con resúmenes y mapas:
-#'       \itemize{
-#'         \item \code{label_col_survey}, \code{label_col_choices}: columnas de label efectivamente usadas.
-#'         \item \code{groups_detail}: detalle de grupos/repeats (incluye \code{is_repeat}, \code{relevant} y, si existe, \code{repeat_count}).
-#'         \item \code{section_map}: mapa de secciones con \code{prefix}, \code{is_conditional}, \code{is_repeat}, \code{group_relevant}.
-#'         \item \code{lists_with_other}: listas con opción “Otro/Other”.
-#'         \item \code{choice_cols_by_list}: columnas no vacías por lista (útiles para \code{choice_filter}).
-#'         \item \code{choice_filter_summary}: por pregunta con filtro, qué columnas del catálogo y variables del formulario intervienen.
-#'       }
-#'   }
-#'
-#' @details
-#' \itemize{
-#'   \item Los nombres de columnas vacíos/NA se renombran como \code{generico_#};
-#'         las columnas completamente vacías y sin nombre se eliminan con aviso.
-#'   \item \code{origen_prefijo = "deducir"} usa una abreviación corta (longitud controlada
-#'         por \code{max_longitud_prefijo}). En los otros modos no se recorta.
-#'   \item Las preguntas \emph{select} con \emph{lista dinámica} (\code{select_* ${var}})
-#'         no exigen \code{choices$list_name} literal; por eso no generan falsos
-#'         avisos de “lista faltante”.
-#' }
-#'
-#' @examples
-#' \dontrun{
-#' # Prefijos deducidos (comportamiento por defecto)
-#' inst <- leer_xlsform_limpieza(
-#'   path = "RMS_instrumento.xlsx",
-#'   lang = "es",
-#'   prefer_label = "label::Español (es)"
-#' )
-#'
-#' # Prefijo igual al nombre del grupo, sin modificar
-#' inst2 <- leer_xlsform_limpieza(
-#'   path = "RMS_instrumento.xlsx",
-#'   origen_prefijo = "nombre_grupo",
-#'   transformar_prefijo = "tal_cual",
-#'   sufijo_prefijo = "_"
-#' )
-#'
-#' # Prefijo desde la etiqueta del grupo, simplificado (sin acentos, A-Z0-9_)
-#' inst3 <- leer_xlsform_limpieza(
-#'   path = "RMS_instrumento.xlsx",
-#'   origen_prefijo = "etiqueta_grupo",
-#'   transformar_prefijo = "simplificar"
-#' )
-#' }
-#'
+#' @param path Ruta al archivo .xlsx
+#' @param lang Código de idioma para detección de columna label
+#' @param prefer_label Nombre exacto de la columna de label a priorizar (opcional)
+#' @param origen_prefijo "deducir" | "nombre_grupo" | "etiqueta_grupo"
+#' @param transformar_prefijo "mayúsculas" | "tal_cual" | "simplificar"
+#' @param sufijo_prefijo sufijo a añadir al prefijo (por defecto "_")
+#' @param max_longitud_prefijo solo para origen_prefijo="deducir"
+#' @param asegurar_unicidad asegurar prefijos únicos
+#' @param verbose imprimir resumen simple en consola
 #' @export
 leer_xlsform_limpieza <- function(path,
                                   lang = "es",
@@ -157,7 +442,9 @@ leer_xlsform_limpieza <- function(path,
                                   transformar_prefijo = c("mayúsculas", "tal_cual", "simplificar"),
                                   sufijo_prefijo = "_",
                                   max_longitud_prefijo = 4,
-                                  asegurar_unicidad = TRUE) {
+                                  asegurar_unicidad = TRUE,
+                                  verbose = TRUE) {
+
   origen_prefijo      <- match.arg(origen_prefijo)
   transformar_prefijo <- match.arg(transformar_prefijo)
   stopifnot(file.exists(path))
@@ -170,145 +457,7 @@ leer_xlsform_limpieza <- function(path,
     requireNamespace("purrr",   quietly = TRUE)
   })
 
-  `%||%` <- function(a, b) if (is.null(a)) b else a
-
-  .trim <- function(x) {
-    x <- as.character(x)
-    x <- stringr::str_replace_all(x, "\\r\\n|\\r|\\n", " ")
-    stringr::str_squish(x)
-  }
-  .fix_names <- function(df) {
-    if (is.null(df) || nrow(df) == 0) return(df)
-
-    cn <- names(df)
-    cn[is.na(cn)] <- ""
-    cn <- .trim(cn)
-
-    # Detecta columnas totalmente vacías (todas las celdas NA o "")
-    is_all_empty <- function(v) {
-      vv <- as.character(v)
-      all(is.na(vv) | !nzchar(.trim(vv)))
-    }
-
-    drop_cols <- which(!nzchar(cn) & vapply(df, is_all_empty, logical(1)))
-    if (length(drop_cols)) {
-      df <- df[, -drop_cols, drop = FALSE]
-      cn <- names(df)
-      cn[is.na(cn)] <- ""
-      cn <- .trim(cn)
-      message(sprintf("Aviso: eliminadas %d columnas sin nombre y vacías (survey/choices).", length(drop_cols)))
-    }
-
-    # Asigna nombres a encabezados vacíos restantes
-    if (any(!nzchar(cn))) {
-      idx_empty <- which(!nzchar(cn))
-      cn[idx_empty] <- paste0("generico_", seq_along(idx_empty))
-    }
-
-    # Resuelve duplicados (case-insensitive) sin perder grafía original
-    low <- tolower(cn)
-    dupl <- duplicated(low)
-    if (any(dupl)) {
-      cn <- make.unique(cn, sep = "_")
-    }
-
-    names(df) <- cn
-    df
-  }
-  .to_char_trim_df <- function(df) {
-    if (is.null(df) || nrow(df) == 0) return(df)
-    dplyr::mutate(df, dplyr::across(dplyr::everything(), ~ .trim(.)))
-  }
-
-  .pick_label_col <- function(cols, lang = "es", prefer_label = NULL) {
-    if (!is.null(prefer_label) && prefer_label %in% cols) return(prefer_label)
-    low <- tolower(cols)
-    exacts <- c(
-      paste0("label::", lang),
-      paste0("label::", lang, " (", toupper(lang), ")"),
-      paste0("label::", toupper(lang), " (", toupper(lang), ")"),
-      "label::spanish (es)", "label::spanish(es)", "label::spanish_es",
-      "label_spanish_es", "label::spanish", "label::es",
-      "label::español (es)", "label::espanol (es)",
-      "label::español", "label::espanol",
-      "label"
-    )
-    for (ex in exacts) {
-      hit <- which(low == tolower(ex))
-      if (length(hit)) return(cols[hit[1]])
-    }
-    hit <- grep(paste0("^label.*", lang), low)
-    if (length(hit)) return(cols[hit[1]])
-    hit <- grep("^label", low)
-    if (length(hit)) return(cols[hit[1]])
-    NA_character_
-  }
-
-  .parse_type_scalar <- function(type) {
-    type <- .trim(type)
-    if (!nzchar(type)) return(list(base = "", list_name = "", dyn_ref = ""))
-    if (stringr::str_detect(type, "^begin_group"))  return(list(base = "begin_group",  list_name = "", dyn_ref = ""))
-    if (stringr::str_detect(type, "^end_group"))    return(list(base = "end_group",    list_name = "", dyn_ref = ""))
-    if (stringr::str_detect(type, "^begin_repeat")) return(list(base = "begin_repeat", list_name = "", dyn_ref = ""))
-    if (stringr::str_detect(type, "^end_repeat"))   return(list(base = "end_repeat",   list_name = "", dyn_ref = ""))
-    m1 <- stringr::str_match(type, "^(select_one|select_multiple)\\s+([^\\s]+)$")
-    if (!any(is.na(m1))) {
-      base <- m1[,2]; rhs <- .trim(m1[,3])
-      m2 <- stringr::str_match(rhs, "^\\$\\{([^}]+)\\}$")
-      if (!any(is.na(m2))) return(list(base = base, list_name = "", dyn_ref = .trim(m2[,2])))
-      return(list(base = base, list_name = rhs, dyn_ref = ""))
-    }
-    list(base = type, list_name = "", dyn_ref = "")
-  }
-
-  .norm_list_name <- function(x){
-    x <- tolower(trimws(as.character(x)))
-    x <- gsub("\\s+", "_", x)
-    gsub("[^a-z0-9_]", "_", x)
-  }
-  .lists_with_other <- function(choices_df) {
-    if (is.null(choices_df) || !nrow(choices_df)) {
-      return(tibble::tibble(list_name = character(), has_other = logical()))
-    }
-    nms <- tolower(names(choices_df))
-    lab_col <- if ("label" %in% nms) names(choices_df)[which(nms=="label")[1]] else NA_character_
-    has_other_vec <- purrr::map_lgl(unique(choices_df$list_name), function(ln){
-      sub <- choices_df[choices_df$list_name == ln, , drop = FALSE]
-      if (!nrow(sub)) return(FALSE)
-      any(.trim(sub$name) %in% c("Other","Otro","Otra","Otro(a)")) ||
-        (!is.na(lab_col) && any(.trim(sub[[lab_col]]) %in% c("Other","Otro","Otra","Otro(a)","Otro (especifique)")))
-    })
-    tibble::tibble(list_name = unique(choices_df$list_name), has_other = has_other_vec)
-  }
-  .vars_in_expr <- function(expr) {
-    if (is.null(expr) || is.na(expr) || !nzchar(expr)) return(character(0))
-    m <- stringr::str_match_all(expr, "\\$\\{([^}]+)\\}")
-    unique(unlist(lapply(m, function(mm) mm[,2])))
-  }
-  .normalize_quotes <- function(x){
-    x <- gsub("\u2018|\u2019", "'", x, perl = TRUE)
-    x <- gsub("\u201C|\u201D", "\"", x, perl = TRUE)
-    x
-  }
-  .nonempty_cols_by_list <- function(ch){
-    core_cols   <- c("list_name","list_norm","name","label")
-    ignore_like <- c("^label(::|:).*", "^media(::|:).*", "^name.*_label$", "^order$", "^choice.*_name$")
-    by_list <- split(ch, ch$list_name)
-    res <- lapply(by_list, function(df){
-      cand <- setdiff(names(df), core_cols)
-      if (!length(cand)) return(character(0))
-      is_ignored <- Reduce(`|`, lapply(ignore_like, function(rx) grepl(rx, cand, ignore.case = TRUE)), init = FALSE)
-      cand <- cand[!is_ignored]
-      if (!length(cand)) return(character(0))
-      keep <- vapply(cand, function(col){
-        any(nchar(trimws(as.character(df[[col]]))) > 0, na.rm = TRUE)
-      }, logical(1))
-      cand[keep]
-    })
-    tibble::tibble(list_name = names(res), extra_cols = unname(res))
-  }
-
-  # ---- leer hojas (texto, guess_max alto)
+  # ---- leer hojas
   sheets <- readxl::excel_sheets(path)
   .get_sheet <- function(nm, guess_max = 10000L) {
     i <- which(tolower(sheets) == tolower(nm))
@@ -321,24 +470,21 @@ leer_xlsform_limpieza <- function(path,
   settings_raw <- .get_sheet("settings")
 
   if (is.null(survey_raw)) stop("Hoja 'survey' no encontrada en el XLSForm.")
-  if (is.null(choices_raw)) {
-    choices_raw <- tibble::tibble(list_name = character(), name = character(), label = character())
-  }
-
+  if (is.null(choices_raw)) choices_raw <- tibble::tibble(list_name = character(), name = character(), label = character())
   survey_raw   <- .fix_names(survey_raw)   |> .to_char_trim_df()
   choices_raw  <- .fix_names(choices_raw)  |> .to_char_trim_df()
   settings_raw <- .fix_names(settings_raw) |> .to_char_trim_df()
 
-  # normaliza comillas en expresiones (mínima normalización)
+  # normalización mínima de expresiones
   for (cc in c("relevant","constraint","choice_filter","calculation")) {
     if (cc %in% names(survey_raw)) survey_raw[[cc]] <- .normalize_quotes(survey_raw[[cc]])
   }
-
-  # columnas mínimas garantizadas en survey
+  # columnas mínimas
   for (cc in c("type","name","required","relevant","constraint","calculation","appearance","hint","choice_filter")) {
     if (!cc %in% names(survey_raw)) survey_raw[[cc]] <- ""
   }
 
+  # label columns
   survey_label_col  <- .pick_label_col(names(survey_raw),  lang = lang, prefer_label = prefer_label)
   choices_label_col <- .pick_label_col(names(choices_raw), lang = lang, prefer_label = prefer_label)
 
@@ -355,11 +501,10 @@ leer_xlsform_limpieza <- function(path,
       is_end    = type_base %in% c("end_group","end_repeat")
     )
 
-  # init
   survey$group_name  <- ""
-  survey$group_label <- ""
+  survey$group_label <- if (!is.null(survey_label_col) && survey_label_col %in% names(survey_raw)) survey_raw[[survey_label_col]] else survey_raw[["label"]]
 
-  # ---- detectar grupos / repeats
+  # ---- pila de grupos y detalle
   grp_stack <- list()
   label_by_gname <- list()
   groups_detail <- list()
@@ -368,15 +513,11 @@ leer_xlsform_limpieza <- function(path,
   for (i in seq_len(nrow(survey))) {
     tb <- survey$type_base[i]
     nm <- survey$name[i]
-
-    # label del grupo (prefiere prefer_label, luego "label")
     lb <- NA_character_
     if (!is.null(survey_label_col) && !is.na(survey_label_col) && survey_label_col %in% names(survey_raw)) {
       lb <- survey_raw[[survey_label_col]][i]
     }
-    if ((is.na(lb) || !nzchar(lb)) && "label" %in% names(survey_raw)) {
-      lb <- survey_raw[["label"]][i]
-    }
+    if ((is.na(lb) || !nzchar(lb)) && "label" %in% names(survey_raw)) lb <- survey_raw[["label"]][i]
 
     if (tb %in% c("begin_group","begin_repeat")) {
       depth <- depth + 1L
@@ -399,25 +540,20 @@ leer_xlsform_limpieza <- function(path,
     } else if (tb %in% c("end_group","end_repeat")) {
       if (length(groups_detail)) {
         idx_open <- which(vapply(groups_detail, function(x) is.na(x$end_row)[1], logical(1)))
-        if (length(idx_open)) {
-          j <- idx_open[length(idx_open)]
-          groups_detail[[j]]$end_row <- i
-        }
+        if (length(idx_open)) groups_detail[[tail(idx_open,1)]]$end_row <- i
       }
       if (length(grp_stack)) grp_stack <- grp_stack[-length(grp_stack)]
       depth <- max(0L, depth - 1L)
     }
 
     survey$group_name[i]  <- if (length(grp_stack)) grp_stack[[length(grp_stack)]] else ""
-    survey$group_label[i] <- if (nzchar(survey$group_name[i]) && survey$group_name[i] %in% names(label_by_gname)) {
-      label_by_gname[[ survey$group_name[i] ]]
-    } else survey$group_name[i]
+    if (nzchar(survey$group_name[i]) && survey$group_name[i] %in% names(label_by_gname)) {
+      survey$group_label[i] <- label_by_gname[[ survey$group_name[i] ]]
+    }
   }
   if (length(groups_detail)) {
     open_idx <- which(vapply(groups_detail, function(x) is.na(x$end_row)[1], logical(1)))
-    if (length(open_idx)) {
-      for (k in open_idx) groups_detail[[k]]$end_row <- nrow(survey)
-    }
+    if (length(open_idx)) for (k in open_idx) groups_detail[[k]]$end_row <- nrow(survey)
   }
 
   groups_detail_df <- if (length(groups_detail)) dplyr::bind_rows(groups_detail) else
@@ -425,8 +561,8 @@ leer_xlsform_limpieza <- function(path,
                    end_row=integer(), depth=integer(), is_repeat=logical(),
                    relevant=character(), appearance=character(), relevant_vars=list())
 
+  # repeat_count (si existe)
   repeat_count_vec <- if ("repeat_count" %in% names(survey_raw)) survey_raw$repeat_count else rep(NA_character_, nrow(survey_raw))
-
   if (nrow(groups_detail_df)) {
     groups_detail_df$repeat_count <- NA_character_
     groups_detail_df$repeat_count_vars <- vector("list", nrow(groups_detail_df))
@@ -442,6 +578,7 @@ leer_xlsform_limpieza <- function(path,
     }
   }
 
+  # ---- preguntas "reales"
   survey_questions <- survey |>
     dplyr::filter(!(type_base %in% c("begin_group","end_group","begin_repeat","end_repeat"))) |>
     dplyr::mutate(
@@ -461,14 +598,10 @@ leer_xlsform_limpieza <- function(path,
       dplyr::everything()
     )
 
-  # ---- choices (mínimo + list_norm)
+  # ---- choices
   for (cc in c("list_name","name")) if (!cc %in% names(choices_raw)) choices_raw[[cc]] <- ""
   choices <- choices_raw |>
-    dplyr::mutate(
-      list_name = .data$list_name,
-      name      = .data$name
-    ) |>
-    dplyr::mutate(list_norm = .norm_list_name(list_name)) |>
+    dplyr::mutate(list_norm = .norm_list_name(.data$list_name)) |>
     dplyr::select(list_name, list_norm, name, dplyr::any_of("label"), dplyr::everything())
 
   # ---- validaciones suaves
@@ -481,32 +614,24 @@ leer_xlsform_limpieza <- function(path,
   if (nrow(vac_svy)) warning(sprintf("Preguntas en survey con 'name' vacío: %d", nrow(vac_svy)))
   vac_ch  <- choices |> dplyr::filter(!nzchar(list_name) | !nzchar(name))
   if (nrow(vac_ch)) warning(sprintf("Filas en choices con 'list_name' o 'name' vacío: %d", nrow(vac_ch)))
+
+  # listas usadas por selects NO dinámicos y definidas en choices
   ln_needed <- survey_questions |>
     dplyr::filter(
       type_base %in% c("select_one","select_multiple"),
-      (is.na(dyn_ref) | !nzchar(dyn_ref)),              # no dinámicas
-      nzchar(list_name)                                  # con nombre real
+      (is.na(dyn_ref) | !nzchar(dyn_ref)),
+      nzchar(list_name)
     ) |>
     dplyr::pull(list_name) |> unique()
 
   ln_have <- unique(choices$list_name)
   miss_ln <- setdiff(ln_needed, ln_have)
-  if (length(miss_ln)) {
-    warning(sprintf("Listas referidas en survey sin definir en choices: %s",
-                    paste(miss_ln, collapse = ", ")))
-  }
-  miss_ln   <- setdiff(ln_needed, ln_have)
-  if (length(miss_ln)) warning(sprintf("Listas referidas en survey sin definir en choices: %s", paste(miss_ln, collapse=", ")))
-  col_norm <- aggregate(list_name ~ list_norm, choices, function(v) length(unique(v)))
-  col_norm <- subset(col_norm, list_name > 1)
-  if (nrow(col_norm)) warning("Colisiones de list_norm: distintos list_name mapean al mismo list_norm (revisa acentos/espacios).")
+  if (length(miss_ln)) warning(sprintf("Listas referidas en survey sin definir en choices: %s", paste(miss_ln, collapse = ", ")))
 
-  lists_with_other <- .lists_with_other(choices)
+  lists_with_other     <- .lists_with_other(choices)
+  choice_cols_by_list  <- .nonempty_cols_by_list(choices)
 
-  # ---- meta: columnas no-vacías por lista (potenciales filtros)
-  choice_cols_by_list <- .nonempty_cols_by_list(choices)
-
-  # ---- section_map (prefijo configurable, condicionalidad e is_repeat)
+  # ---- section_map (prefijo, condicionalidad, repeat)
   if (nrow(groups_detail_df)) {
     base_map <- tibble::tibble(
       group_name     = as.character(groups_detail_df$gname),
@@ -524,55 +649,34 @@ leer_xlsform_limpieza <- function(path,
       .gord          = rank(groups_detail_df$begin_row, ties.method = "first") |> as.integer()
     )
 
-    # Generación del prefijo según parámetros
+    # prefijos
     pref <- character(nrow(base_map))
-
     if (origen_prefijo == "deducir") {
-      # Usa etiqueta si existe; si no, cae a nombre de grupo
       fuente <- ifelse(is.na(base_map$group_label) | !nzchar(base_map$group_label),
                        base_map$group_name, base_map$group_label)
       pref <- vapply(fuente, .abreviar_heuristico, character(1), max_len = max_longitud_prefijo)
       pref <- .transformar_según_modo(pref, transformar_prefijo)
     }
-
     if (origen_prefijo == "nombre_grupo") {
       pref <- base_map$group_name
       pref <- .transformar_según_modo(pref, transformar_prefijo)
-      # En "nombre_grupo" NO aplicamos recorte por longitud (se mantiene tal cual)
     }
-
     if (origen_prefijo == "etiqueta_grupo") {
-      # Si no hay etiqueta, cae a nombre de grupo
       fuente <- ifelse(is.na(base_map$group_label) | !nzchar(base_map$group_label),
                        base_map$group_name, base_map$group_label)
       pref <- .transformar_según_modo(fuente, transformar_prefijo)
-      # En "etiqueta_grupo" NO recortamos por longitud (mantén lectura amigable)
     }
-
-    # Asegurar que el prefijo no quede vacío
     pref[!nzchar(pref)] <- "GEN"
-
-    # Añadir sufijo (p. ej., "_")
     pref <- paste0(pref, sufijo_prefijo %||% "")
 
-    # Asegurar unicidad si se solicita
     if (isTRUE(asegurar_unicidad)) {
-      # make.unique añade sufijos .1, .2; los cambiamos a _2, _3 manteniendo sufijo_prefijo final
       tmp <- make.unique(pref, sep = "")
       if (!identical(tmp, pref)) {
-        # Detecta los que se alteraron y formatea sufijos como _2, _3...
-        pattern <- paste0("^(", gsub("([\\W])", "\\\\\\1", pref), ")(\\.)(\\d+)$")
         for (i in seq_along(tmp)) {
           if (grepl("\\.\\d+$", tmp[i])) {
-            # extrae base sin .n
             base <- sub("\\.\\d+$", "", tmp[i])
             num  <- sub("^.*\\.(\\d+)$", "\\1", tmp[i])
-            # Si ya termina con sufijo_prefijo, añade número; si no, respeta el sufijo existente
-            if (endsWith(base, sufijo_prefijo)) {
-              tmp[i] <- paste0(base, num)
-            } else {
-              tmp[i] <- paste0(base, sufijo_prefijo, num)
-            }
+            if (endsWith(base, sufijo_prefijo)) tmp[i] <- paste0(base, num) else tmp[i] <- paste0(base, sufijo_prefijo, num)
           }
         }
         pref <- tmp
@@ -582,7 +686,6 @@ leer_xlsform_limpieza <- function(path,
     base_map$prefix <- pref
     base_map <- dplyr::distinct(base_map, .data$group_name, .keep_all = TRUE)
     section_map <- base_map
-
   } else {
     section_map <- tibble::tibble(
       group_name     = character(),
@@ -595,7 +698,7 @@ leer_xlsform_limpieza <- function(path,
     )
   }
 
-  # ---- resumen de choice_filter (qué columnas de choices usa)
+  # ---- resumen de choice_filter (qué columnas/vars usa)
   has_label <- "label" %in% names(survey_questions)
   cols_for_list <- function(ln){
     row <- choice_cols_by_list[choice_cols_by_list$list_name == ln, , drop = FALSE]
@@ -615,8 +718,8 @@ leer_xlsform_limpieza <- function(path,
       cf_vars      = list(vars_in_choicefilter)
     ) |>
     dplyr::ungroup()
-  if (has_label) {
-    choice_filter_summary <- csum0 |>
+  choice_filter_summary <- (if (has_label) {
+    csum0 |>
       dplyr::transmute(
         q_order, name, label,
         list_name, choice_filter,
@@ -624,7 +727,7 @@ leer_xlsform_limpieza <- function(path,
         cf_uses_cols = vapply(cf_uses_cols, function(v) paste(v, collapse=", "), character(1))
       )
   } else {
-    choice_filter_summary <- csum0 |>
+    csum0 |>
       dplyr::transmute(
         q_order, name,
         label = NA_character_,
@@ -632,32 +735,433 @@ leer_xlsform_limpieza <- function(path,
         cf_vars      = vapply(cf_vars,      function(v) paste(v, collapse=", "), character(1)),
         cf_uses_cols = vapply(cf_uses_cols, function(v) paste(v, collapse=", "), character(1))
       )
-  }
+  })
 
-  # ---- salida
+  # === enriquecimiento: repeats, hojas, listas dinámicas ===
+  repeat_links  <- .detect_repeats(survey, section_map, survey_label_col %||% "label")
+  tabla_hojas   <- .make_tabla_hojas(repeat_links)
+  dynrefs       <- .detect_dynrefs(survey, section_map, survey_label_col %||% "label")
+
+  # ---- meta
   meta <- list(
-    label_col_survey   = survey_label_col,
-    label_col_choices  = choices_label_col,
-    groups_detail      = groups_detail_df,
-    lists_with_other   = lists_with_other,
-    choice_cols_by_list= choice_cols_by_list,
-    section_map        = section_map,
-    choice_filter_summary = choice_filter_summary
+    label_col_survey      = survey_label_col,
+    label_col_choices     = choices_label_col,
+    groups_detail         = groups_detail_df,
+    lists_with_other      = lists_with_other,
+    choice_cols_by_list   = choice_cols_by_list,
+    section_map           = section_map,
+    choice_filter_summary = choice_filter_summary,
+    repeat_links          = repeat_links,
+    tabla_hojas           = tabla_hojas,
+    dynrefs               = dynrefs,
+    dynrefs_pretty        = dynrefs
   )
 
+  # ---- salida estable (no romper builders/rule factory)
   out <- list(
     survey_raw   = survey_raw,
     choices_raw  = choices_raw,
-    settings_raw = settings_raw,
-    survey       = tibble::as_tibble(survey_questions),
+    settings     = settings_raw,         # << importante: presente como 'settings'
+    survey       = tibble::as_tibble(survey),
     choices      = tibble::as_tibble(choices),
     meta         = meta
   )
 
-  # advertencia opcional de balance begin/end
+  # advertencia de balance begin/end
   b <- sum(grepl("^begin_", survey$type_base))
   e <- sum(grepl("^end_",   survey$type_base))
   if (b != e) warning(sprintf("Desbalance begin/end: begin=%d, end=%d (revisa la hoja 'survey')", b, e))
 
+  if (isTRUE(verbose)) print_resumen_instrumento(out)
+
   out
 }
+
+
+# ============================================================
+# VISUALIZACIONES
+# ============================================================
+
+
+# ============================================================
+# GRAFICACIÓN DE SECCIONES — paleta estilo Tableau + leyenda interna
+# ============================================================
+
+.nz1 <- function(x) is.character(x) && length(x) == 1 && !is.na(x) && nzchar(x)
+
+.fmt_name_label_vec <- function(name, label) {
+  nm <- as.character(name); lb <- as.character(label)
+  nm[is.na(nm)] <- ""; lb[is.na(lb)] <- ""
+  nm_trim <- trimws(nm); lb_trim <- trimws(lb)
+  same <- (lb_trim == "") | (tolower(nm_trim) == tolower(lb_trim))
+  same[is.na(same)] <- TRUE
+  out <- nm_trim
+  if (any(!same)) out[!same] <- sprintf("%s (%s)", nm_trim[!same], lb_trim[!same])
+  idx_empty <- (!nzchar(nm_trim)) & nzchar(lb_trim)
+  if (any(idx_empty)) out[idx_empty] <- lb_trim[idx_empty]
+  out
+}
+
+.clean_cond_text <- function(x) {
+  if (is.null(x) || all(is.na(x))) return("")
+  x <- as.character(x)
+  x <- gsub("\\s+", " ", trimws(x))
+  x <- gsub("(?i)\\band\\b", "Y", x, perl = TRUE)
+  x <- gsub("(?i)\\bor\\b", "O", x, perl = TRUE)
+  x
+}
+
+.tipo_cond <- function(x) {
+  if (is.null(x) || all(is.na(x))) return(NA_character_)
+  gsub("\\s+", " ", trimws(as.character(x)))
+}
+
+.vars_en_cond <- function(x) {
+  if (is.null(x) || is.na(x) || !nzchar(x)) return(character(0))
+  m <- stringr::str_match_all(x, "\\$\\{([^}]+)\\}")
+  unique(unlist(lapply(m, function(mm) mm[, 2])))
+}
+
+# Paleta tipo Tableau 10 (contraste alto, profesional)
+.tableau10 <- function(n) {
+  base <- c("#4E79A7","#F28E2B","#E15759","#76B7B2","#59A14F",
+            "#EDC948","#B07AA1","#FF9DA7","#9C755F","#BAB0AC")
+  if (n <= length(base)) base[seq_len(n)] else rep_len(base, n)
+}
+
+#' Graficar secciones, condiciones y repeats del XLSForm (sin inferir jerarquías)
+#'
+#' @param inst Lista devuelta por `leer_xlsform_limpieza()`.
+#' @param titulo Título del gráfico.
+#' @param altura_seccion,separacion_y Dimensiones verticales.
+#' @param ancho_seccion,ancho_condicion,ancho_repeat Anchos de columnas.
+#' @param gap_seccion_condicion,gap_condicion_repeat Separación horizontal entre columnas.
+#' @param envolver_seccion,envolver_condicion,envolver_repeat Wrapping de texto (caracteres).
+#' @param tam_seccion,tam_condicion,tam_repeat Tamaños de fuente.
+#' @param largo_cabeza_flecha Longitud de punta de flecha (cm).
+#' @param grosor_flecha Grosor de líneas/flechas.
+#' @param margen_carril Margen interior para carriles entre columna sección y condición.
+#' @param mostrar_leyenda ¿Mostrar leyenda de tipos de condición?
+#' @param tam_texto_leyenda Tamaño del texto de la leyenda.
+#' @param filas_leyenda Nº de filas en la leyenda (NULL = auto).
+#' @param leyenda_por_filas Si TRUE, ordena la leyenda por filas (byrow).
+#' @param posicion_leyenda "top" (default), "bottom", "left", "right" o "none".
+#' @param color_texto_cond Color del texto dentro de las cajas de condición.
+#' @param paleta_condiciones Vector con nombre para tipos de condición; si NULL usa Tableau 10.
+#'
+#' @return Un `ggplot`.
+#' @export
+GraficarSecciones <- function(inst,
+                              titulo = "Mapeo de secciones",
+                              altura_seccion = 0.9,
+                              separacion_y   = 0.35,
+                              ancho_seccion   = 5.6,
+                              ancho_condicion = 6.6,
+                              ancho_repeat    = 5.2,
+                              gap_seccion_condicion = 1.6,
+                              gap_condicion_repeat  = 1.4,
+                              envolver_seccion   = 38,
+                              envolver_condicion = 46,
+                              envolver_repeat    = 36,
+                              tam_seccion   = 3.4,
+                              tam_condicion = 3.1,
+                              tam_repeat    = 3.1,
+                              largo_cabeza_flecha = 0.18,
+                              grosor_flecha       = 0.8,
+                              margen_carril = 0.25,
+                              mostrar_leyenda = TRUE,
+                              tam_texto_leyenda = 8,
+                              filas_leyenda     = 2,
+                              leyenda_por_filas = TRUE,
+                              posicion_leyenda  = "top",
+                              color_texto_cond  = "#262626",
+                              paleta_condiciones = NULL) {
+
+  req <- c("ggplot2","dplyr","tibble","stringr","purrr","grid","ggnewscale")
+  for (p in req) if (!requireNamespace(p, quietly = TRUE)) {
+    stop("Falta el paquete '", p, "'. Instálalo.", call. = FALSE)
+  }
+  `%||%` <- function(a,b) if (is.null(a)) b else a
+  .wrap <- function(x, width=40) stringr::str_wrap(as.character(x %||% ""), width=width)
+
+  sm <- inst$meta$section_map %||% tibble::tibble()
+  survey <- inst$survey %||% tibble::tibble()
+  if (!nrow(sm)) stop("inst$meta$section_map está vacío.")
+
+  sm <- dplyr::arrange(sm, .data$.gord)
+
+  tipo_seccion <- dplyr::case_when(
+    !is.na(sm$is_repeat)      & sm$is_repeat      ~ "repeat_seccion",
+    !is.na(sm$is_conditional) & sm$is_conditional ~ "condicional",
+    TRUE ~ "normal"
+  )
+
+  etiqueta_sec <- .fmt_name_label_vec(sm$group_name, sm$group_label)
+  texto_cond <- .clean_cond_text(sm$group_relevant)
+  tipo_cond  <- .tipo_cond(sm$group_relevant)
+
+  # Columnas X
+  x_sec <- 0
+  x_sec_der <- x_sec + ancho_seccion/2
+  x_cond <- x_sec_der + gap_seccion_condicion + ancho_condicion/2
+  x_cond_izq  <- x_cond - ancho_condicion/2
+  x_cond_der  <- x_cond + ancho_condicion/2
+  x_rep  <- x_cond_der + gap_condicion_repeat + ancho_repeat/2
+  x_rep_izq <- x_rep - ancho_repeat/2
+
+  # Filas Y
+  n <- nrow(sm); y0 <- 0; dy <- altura_seccion + separacion_y
+  y_fila <- y0 - (seq_len(n)-1)*dy
+
+  # Cajas
+  df_sec <- tibble::tibble(
+    group_name  = sm$group_name,
+    group_label = sm$group_label,
+    label = .wrap(etiqueta_sec, envolver_seccion),
+    tipo = factor(tipo_seccion, levels=c("normal","condicional","repeat_seccion")),
+    x = x_sec, y = y_fila, w = ancho_seccion, h = altura_seccion
+  )
+
+  tiene_cond <- !is.na(tipo_cond) & nzchar(tipo_cond)
+  niveles_cond <- unique(tipo_cond[tiene_cond])
+
+  df_cond <- tibble::tibble(
+    group_name = sm$group_name[tiene_cond],
+    tipo_cond  = factor(tipo_cond[tiene_cond], levels = niveles_cond),
+    texto_cond = .wrap(texto_cond[tiene_cond], envolver_condicion),
+    x = x_cond, y = y_fila[tiene_cond], w = ancho_condicion, h = altura_seccion
+  )
+
+  tiene_rep <- !is.na(sm$is_repeat) & sm$is_repeat
+  df_rep <- tibble::tibble(
+    group_name = sm$group_name[tiene_rep],
+    texto_rep  = .wrap(paste0("Hoja generada: ", sm$group_name[tiene_rep]), envolver_repeat),
+    x = x_rep, y = y_fila[tiene_rep], w = ancho_repeat, h = altura_seccion
+  )
+
+  # Carriles por tipo de condición
+  carriles_x <- NULL
+  if (length(niveles_cond)) {
+    if (length(niveles_cond) == 1L) {
+      carriles_x <- setNames((x_sec_der + x_cond_izq)/2, niveles_cond)
+    } else {
+      carriles_seq <- seq(x_sec_der + margen_carril, x_cond_izq - margen_carril, length.out = length(niveles_cond))
+      carriles_x <- setNames(carriles_seq, niveles_cond)
+    }
+  }
+
+  # Flechas sección -> condición (L)
+  edges_sec_cond <- if (nrow(df_cond)) {
+    purrr::map_dfr(seq_len(nrow(df_cond)), function(i){
+      gn <- df_cond$group_name[i]
+      yS <- df_sec$y[df_sec$group_name==gn][1]
+      tibble::tibble(
+        clase="sec2cond", group_name=gn,
+        x1=c(x_sec_der, x_cond_izq), y1=c(yS, yS),
+        x2=c(x_cond_izq, x_cond_izq), y2=c(yS, df_cond$y[i]),
+        es_final=c(FALSE, TRUE),
+        tipo_cond = df_cond$tipo_cond[i]
+      )
+    })
+  } else tibble::tibble()
+
+  # Flechas condición -> sección (L con carril)
+  edges_cond_sec <- if (nrow(df_cond) && nrow(survey)) {
+    purrr::map_dfr(seq_len(nrow(df_cond)), function(i){
+      gn <- df_cond$group_name[i]
+      tcond <- as.character(df_cond$tipo_cond[i])
+      yC <- df_cond$y[i]
+      vars <- .vars_en_cond(sm$group_relevant[sm$group_name==gn][1])
+      if (!length(vars)) return(tibble::tibble())
+      x_mid <- carriles_x[tcond] %||% ((x_sec_der + x_cond_izq)/2)
+
+      purrr::map_dfr(vars, function(vr){
+        gsrc <- survey$group_name[which(survey$name==vr)[1]]
+        if (!.nz1(gsrc)) return(tibble::tibble())
+        yT <- df_sec$y[df_sec$group_name==gsrc][1]
+        if (is.na(yT)) return(tibble::tibble())
+        tibble::tibble(
+          clase="cond2sec", group_name=gn, var=vr, tipo_cond=factor(tcond, levels=niveles_cond),
+          x1=c(x_cond_izq, x_mid, x_mid), y1=c(yC, yC, yT),
+          x2=c(x_mid,     x_mid, x_sec_der), y2=c(yC, yT, yT),
+          es_final=c(FALSE, FALSE, TRUE),
+          y_destino = yT
+        )
+      })
+    })
+  } else tibble::tibble()
+
+  # Separación en destino SOLO si confluyen tipos distintos
+  if (nrow(edges_cond_sec)) {
+    tipos_por_destino <- edges_cond_sec |>
+      dplyr::filter(.data$es_final) |>
+      dplyr::distinct(.data$y_destino, .data$tipo_cond) |>
+      dplyr::group_by(.data$y_destino) |>
+      dplyr::summarise(tipos = list(as.character(.data$tipo_cond)), .groups = "drop")
+
+    off_map <- purrr::map_dfr(seq_len(nrow(tipos_por_destino)), function(i){
+      yD <- tipos_por_destino$y_destino[i]
+      tipos <- tipos_por_destino$tipos[[i]]
+      k <- length(tipos)
+      if (k <= 1) return(tibble::tibble(y_destino=yD, tipo_cond=character(0), off=numeric(0)))
+      d <- 0.05
+      idx <- seq_len(k) - (k+1)/2
+      tibble::tibble(y_destino = yD, tipo_cond = tipos, off = idx * d)
+    })
+
+    if (nrow(off_map)) {
+      edges_cond_sec <- edges_cond_sec |>
+        dplyr::left_join(off_map, by = c("y_destino","tipo_cond" = "tipo_cond")) |>
+        dplyr::mutate(
+          off = dplyr::coalesce(.data$off, 0),
+          y2  = ifelse(.data$es_final, .data$y2 + .data$off, .data$y2),
+          y1  = ifelse(.data$es_final, .data$y1 + .data$off, .data$y1)
+        ) |>
+        dplyr::select(-.data$off)
+    }
+  }
+
+  # Flechas sección -> repeat (recta)
+  edges_repeat <- if (nrow(df_rep)) {
+    purrr::map_dfr(seq_len(nrow(df_rep)), function(i){
+      gn <- df_rep$group_name[i]
+      yS <- df_sec$y[df_sec$group_name==gn][1]
+      tibble::tibble(clase="sec2rep", group_name=gn, x1=x_sec_der, y1=yS, x2=x_rep_izq, y2=yS, es_final=TRUE)
+    })
+  } else tibble::tibble()
+
+  # Estilos
+  fill_secciones <- c(normal="#ECECEC", condicional="#FFE6C2", repeat_seccion="#D6EEFF")
+  col_borde <- "#777777"
+  col_repeat <- "#4E79A7"   # tono Tableau para repeat (coherente)
+
+  # Paleta por tipo de condición
+  if (is.null(paleta_condiciones)) {
+    paleta_condiciones <- setNames(.tableau10(length(niveles_cond)), niveles_cond)
+  }
+
+  g <- ggplot2::ggplot() +
+    ggplot2::geom_rect(
+      data=df_sec,
+      ggplot2::aes(xmin=x-w/2, xmax=x+w/2, ymin=y-h/2, ymax=y+h/2, fill=tipo),
+      color=col_borde, linewidth=0.3, radius=ggplot2::unit(6,"pt")
+    ) +
+    ggplot2::geom_text(data=df_sec, ggplot2::aes(x=x, y=y, label=label), size=tam_seccion) +
+    ggplot2::scale_fill_manual(
+      name=NULL, values=fill_secciones,
+      breaks=c("normal","condicional","repeat_seccion"),
+      labels=c("Sección normal","Sección condicional","Sección repeat")
+    ) +
+    ggnewscale::new_scale_fill()
+
+  if (nrow(df_cond)) {
+    g <- g +
+      ggplot2::geom_rect(
+        data=df_cond,
+        ggplot2::aes(xmin=x-w/2, xmax=x+w/2, ymin=y-h/2, ymax=y+h/2, fill=tipo_cond),
+        color=col_borde, linewidth=0.3, radius=ggplot2::unit(6,"pt"), alpha=0.96
+      ) +
+      ggplot2::geom_text(
+        data=df_cond,
+        ggplot2::aes(x=x, y=y, label=texto_cond),
+        size=tam_condicion, lineheight=0.98, color=color_texto_cond
+      ) +
+      ggplot2::scale_fill_manual(name=NULL, values=paleta_condiciones, guide="none")
+  }
+
+  if (nrow(df_rep)) {
+    g <- g +
+      ggplot2::geom_rect(
+        data=df_rep,
+        ggplot2::aes(xmin=x-w/2, xmax=x+w/2, ymin=y-h/2, ymax=y+h/2),
+        fill="#E8EEF3", color=col_borde, linewidth=0.3, radius=ggplot2::unit(6,"pt")
+      ) +
+      ggplot2::geom_text(
+        data=df_rep,
+        ggplot2::aes(x=x, y=y, label=texto_rep),
+        size=tam_repeat, color="#1F2D3D", lineheight=0.98
+      )
+  }
+
+  # Flechas
+  if (nrow(edges_sec_cond)) {
+    g <- g +
+      ggplot2::geom_segment(
+        data=dplyr::filter(edges_sec_cond, !.data$es_final),
+        ggplot2::aes(x=x1,y=y1,xend=x2,yend=y2, color=tipo_cond),
+        linewidth=grosor_flecha
+      ) +
+      ggplot2::geom_segment(
+        data=dplyr::filter(edges_sec_cond,  .data$es_final),
+        ggplot2::aes(x=x1,y=y1,xend=x2,yend=y2, color=tipo_cond),
+        linewidth=grosor_flecha,
+        arrow=grid::arrow(length=grid::unit(largo_cabeza_flecha,"cm"), type="closed")
+      )
+  }
+
+  if (nrow(edges_cond_sec)) {
+    g <- g +
+      ggplot2::geom_segment(
+        data=dplyr::filter(edges_cond_sec, !.data$es_final),
+        ggplot2::aes(x=x1,y=y1,xend=x2,yend=y2, color=tipo_cond),
+        linewidth=grosor_flecha
+      ) +
+      ggplot2::geom_segment(
+        data=dplyr::filter(edges_cond_sec,  .data$es_final),
+        ggplot2::aes(x=x1,y=y1,xend=x2,yend=y2, color=tipo_cond),
+        linewidth=grosor_flecha,
+        arrow=grid::arrow(length=grid::unit(largo_cabeza_flecha,"cm"), type="closed")
+      )
+  }
+
+  if (nrow(edges_repeat)) {
+    g <- g +
+      ggplot2::geom_segment(
+        data=edges_repeat,
+        ggplot2::aes(x=x1,y=y1,xend=x2,yend=y2),
+        linewidth=grosor_flecha, color=col_repeat, linetype="solid",
+        arrow=grid::arrow(length=grid::unit(largo_cabeza_flecha,"cm"), type="closed")
+      )
+  }
+
+  # Escala de color para flechas (tipos)
+  if (length(paleta_condiciones)) {
+    g <- g + ggplot2::scale_color_manual(
+      name = "Tipo de condición",
+      values = paleta_condiciones,
+      guide = if (mostrar_leyenda) ggplot2::guide_legend(nrow = filas_leyenda, byrow = leyenda_por_filas) else "none"
+    )
+  } else {
+    g <- g + ggplot2::scale_color_discrete(
+      name = "Tipo de condición",
+      guide = if (mostrar_leyenda) ggplot2::guide_legend(nrow = filas_leyenda, byrow = leyenda_por_filas) else "none"
+    )
+  }
+
+  # Tema + leyenda interna (sin añadir nada fuera)
+  g +
+    ggplot2::labs(title = titulo) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(
+      panel.grid = ggplot2::element_blank(),
+      axis.title = ggplot2::element_blank(),
+      axis.text = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      legend.position = if (mostrar_leyenda && length(paleta_condiciones)) posicion_leyenda else "none",
+      legend.justification = "center",
+      legend.text  = ggplot2::element_text(size = tam_texto_leyenda),
+      legend.title = ggplot2::element_text(size = max(7, tam_texto_leyenda - 1), face = "bold"),
+      legend.key.height = ggplot2::unit(10, "pt"),
+      plot.title = ggplot2::element_text(face = "bold", hjust = 0.5, margin = ggplot2::margin(b = 8)),
+      plot.margin = ggplot2::margin(t = 12, r = 18, b = 12, l = 18)
+    )
+}
+
+
+
+
+
+
+
+
+
