@@ -2,54 +2,44 @@
 % Please edit documentation in R/aplicacion-codificacion.R
 \name{ppra_adaptar_data}
 \alias{ppra_adaptar_data}
-\title{Aplica recodificación para select-multiple (parent_var), select-one (uni_var)
-y abiertos (open_var). Opcionalmente aplica un “slim” final que elimina
-todas las hijas *_recod y todas las *_recod_label, dejando solo los padres
-\if{html}{\out{<Parent>}}_recod (y todas las columnas originales).}
+\title{ppra_adaptar_data}
 \usage{
 ppra_adaptar_data(
   path_instrumento,
   path_datos,
   path_plantilla,
-  parent_var = character(0),
-  uni_var = character(0),
-  open_var = character(0),
-  path_map = "familiasv3.xlsx",
-  out_path = NULL,
-  colores = TRUE,
-  slim = TRUE,
-  out_path_final = NULL
+  sm_vars = character(0),
+  so_parent_vars = character(0),
+  so_child_vars = character(0),
+  out_path = NULL
 )
 }
 \arguments{
-\item{path_instrumento}{XLSForm (survey/choices)}
+\item{path_instrumento}{Ruta al XLSForm (survey/choices)}
 
-\item{path_datos}{Base original}
+\item{path_datos}{Ruta a los datos (CSV/XLSX)}
 
-\item{path_plantilla}{Excel de plantilla con hojas por parent (31-chars safe)}
+\item{path_plantilla}{Ruta a la plantilla de codificación (hojas por parent)}
 
-\item{parent_var}{vector de select-multiple a procesar}
+\item{sm_vars}{Vector de SM (p.ej. c("services","futuros_servicios"))}
 
-\item{uni_var}{vector de select-one a procesar}
+\item{so_parent_vars}{Vector de SO que recodifican el \strong{padre}}
 
-\item{open_var}{vector de “abiertas” a procesar (detalles de texto)}
+\item{so_child_vars}{Vector de SO que recodifican el \strong{hijo} (why/otro)}
 
-\item{path_map}{Excel familias (columns: parent, text_col) para anclaje (opcional)}
-
-\item{out_path}{ruta de salida XLSX “completo” (con bloques y color)}
-
-\item{colores}{TRUE para colorear el out_path “completo”}
-
-\item{slim}{si TRUE, ejecuta recorte final para dejar solo padres _recod}
-
-\item{out_path_final}{ruta de salida XLSX “slim” (opcional, solo padres _recod)}
+\item{out_path}{Ruta del XLSX de salida}
 }
 \value{
-list con data (completa), final_data (slim si aplica) y metadatos
+data.frame adaptado (también guardado en \code{out_path} si se provee)
 }
 \description{
-Aplica recodificación para select-multiple (parent_var), select-one (uni_var)
-y abiertos (open_var). Opcionalmente aplica un “slim” final que elimina
-todas las hijas *_recod y todas las *_recod_label, dejando solo los padres
-\if{html}{\out{<Parent>}}_recod (y todas las columnas originales).
+Función \strong{limpia y universal}:
+\itemize{
+\item \strong{SM}: genera \verb{<parent>_recod} (con overrides y nuevas hijas, normalización de códigos),
+lo inserta a la derecha del \code{parent} y lo colorea \strong{verde}.
+\item \strong{SO-padre}: genera \verb{<parent>_recod}, lo inserta y colorea \strong{azul}.
+\item \strong{SO-hijo}: genera \verb{<parent>_<alias>_recod} (p.ej. \code{CEPR01_why_recod}),
+lo inserta y colorea \strong{azul}.
+No deja columnas técnicas ni requiere “slim”.
+}
 }
