@@ -475,13 +475,22 @@ leer_xlsform_limpieza <- function(path,
   choices_raw  <- .fix_names(choices_raw)  |> .to_char_trim_df()
   settings_raw <- .fix_names(settings_raw) |> .to_char_trim_df()
 
-  # normalización mínima de expresiones
-  for (cc in c("relevant","constraint","choice_filter","calculation")) {
-    if (cc %in% names(survey_raw)) survey_raw[[cc]] <- .normalize_quotes(survey_raw[[cc]])
-  }
-  # columnas mínimas
+  # === columnas mínimas (asegúralas primero) ===
   for (cc in c("type","name","required","relevant","constraint","calculation","appearance","hint","choice_filter")) {
     if (!cc %in% names(survey_raw)) survey_raw[[cc]] <- ""
+  }
+
+  # === fuerza a character y sin NA en columnas de expresiones ===
+  expr_cols <- c("relevant","constraint","choice_filter","calculation")
+  for (cc in expr_cols) {
+    survey_raw[[cc]] <- as.character(survey_raw[[cc]])
+    survey_raw[[cc]][is.na(survey_raw[[cc]])] <- ""
+  }
+
+  # === normalización mínima de expresiones (ya existen y son character) ===
+  for (cc in expr_cols) {
+    survey_raw[[cc]] <- .normalize_quotes(survey_raw[[cc]])
+    survey_raw[[cc]] <- .trim(survey_raw[[cc]])   # opcional: limpia espacios y saltos de línea
   }
 
   # label columns
@@ -701,12 +710,33 @@ leer_xlsform_limpieza <- function(path,
   # ---- resumen de choice_filter (qué columnas/vars usa)
   has_label <- "label" %in% names(survey_questions)
   cols_for_list <- function(ln){
-    row <- choice_cols_by_list[choice_cols_by_list$list_name == ln, , drop = FALSE]
-    if (!nrow(row)) character(0) else unlist(row$extra_cols)
+    # 1) Normaliza el argumento
+    if (is.null(ln) || length(ln) != 1) return(character(0))
+    ln1 <- suppressWarnings(as.character(ln)[1])
+    if (is.na(ln1) || !nzchar(trimws(ln1))) return(character(0))
+
+    # 2) Si la tabla de columnas extra está vacía o no tiene list_name, sal
+    if (is.null(choice_cols_by_list) || !nrow(choice_cols_by_list) ||
+        !"list_name" %in% names(choice_cols_by_list)) {
+      return(character(0))
+    }
+
+    # 3) Indexa de forma segura (usa %in% y which); maneja list-col vacía
+    idx <- which(choice_cols_by_list$list_name %in% ln1)
+    if (!length(idx)) return(character(0))
+
+    row <- choice_cols_by_list[idx, , drop = FALSE]
+    ext <- row$extra_cols
+    if (!length(ext)) return(character(0))
+
+    out <- tryCatch(unlist(ext, use.names = FALSE), error = function(e) character(0))
+    out[nzchar(out)]
   }
   tokens_in_cf <- function(cf){
-    if (is.na(cf) || !nzchar(cf)) return(character(0))
-    toks <- unlist(strsplit(cf, "[^A-Za-z0-9_]+"))
+    if (is.null(cf) || length(cf) == 0) return(character(0))
+    cf1 <- suppressWarnings(as.character(cf)[1])
+    if (is.na(cf1) || !nzchar(cf1)) return(character(0))
+    toks <- unlist(strsplit(cf1, "[^A-Za-z0-9_]+"))
     toks[nzchar(toks)]
   }
   csum0 <- survey_questions |>
