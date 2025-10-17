@@ -2,42 +2,31 @@
 % Please edit documentation in R/lector_limpieza.R
 \name{lector_limpieza}
 \alias{lector_limpieza}
-\title{Lector de datos ODK/XLSForm con repeats (limpieza y metadatos)}
+\title{Lector robusto de Excel RMS/ODK con hojas repetidas}
 \usage{
-lector_limpieza(path, hoja_principal = NULL, grupos_repetidos = NULL)
+lector_limpieza(archivo, hoja_principal = NULL, grupos_repetidos = NULL)
 }
 \arguments{
-\item{path}{Ruta al archivo Excel.}
+\item{archivo}{Ruta al .xlsx}
 
-\item{hoja_principal}{(opcional) Nombre de la hoja principal tal como aparece en Excel
-(no sensible a mayúsculas, espacios o tildes).}
+\item{hoja_principal}{Nombre de la hoja principal (tolerante a acentos/espacios).
+Si no se proporciona, se infiere.}
 
-\item{grupos_repetidos}{(opcional) Vector con nombres de hojas repeat.
-Si no se provee, se detectan automáticamente por presencia de \verb{_parent_index}
-o \verb{_submission__id} en sus columnas.}
+\item{grupos_repetidos}{Vector opcional con nombres de hojas repetidas (tolerante).
+Si no se proporciona, se detectan por columnas típicas (\verb{_parent_index}, etc.).}
 }
 \value{
 Una lista con:
 \itemize{
-\item \code{data$main}: dataframe principal con columnas \verb{n_<repeat>}.
-\item \code{data$repeats}: lista de dataframes por repeat.
-\item \code{meta$keys}: tibble con columnas \code{table}, \code{key}, \code{parent_key}.
-\item \code{meta$parent_map}: vector con orden de tablas: principal + repeats.
-\item \code{meta$counts}: tibble largo con \code{parent_key}, \code{n}, \code{repeat_name}, \code{parent_table}.
+\item \code{data}: lista de data.frames por hoja (normalizados)
+\item \code{meta$keys}: tibble con claves por hoja (key y parent_key)
+\item \code{meta$parent_map}: tibble con relaciones hijo→padre
+\item \code{counts}: tibble con conteos por padre para cada repeat
 }
 }
 \description{
-Lee un archivo Excel exportado desde ODK/Enketo/Kobo, detecta la hoja principal
-y las hojas de secciones repetidas (repeats), enlaza padre-hijo usando
-\verb{_submission__id} ↔ \verb{_id} (si existe) o \verb{_parent_index} ↔ \verb{_index} (fallback),
-construye conteos \verb{n_<repeat>} y devuelve un objeto con datos y metadatos.
-}
-\examples{
-\dontrun{
-datos <- lector_limpieza("datos_RMS.xlsx",
-                         hoja_principal   = "RMS 2025 Perú - Q4",
-                         grupos_repetidos = c("rpt_hhmnames","childedupe","s1"))
-datos$meta$keys
-names(datos$data$main) |> grep("^n_", ., value = TRUE)
-}
+Lee un archivo Excel exportado de KoBo/ODK (o similar), normaliza nombres
+de columnas y detecta relaciones padre–hijo entre hoja principal y grupos
+repetidos. Agrega conteos \verb{n_<repeat>} a la hoja principal cuando existe
+el vínculo, y devuelve metadatos útiles para validación.
 }
