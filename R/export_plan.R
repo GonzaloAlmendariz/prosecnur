@@ -1,5 +1,5 @@
 # =====================================================================
-# Exportar Plan de Limpieza a Excel — versión “pro” y editable
+# Exportar Plan de Limpieza a Excel — versión “pro” y editable (Ajustado)
 # =====================================================================
 
 suppressPackageStartupMessages({
@@ -12,13 +12,14 @@ suppressPackageStartupMessages({
 
 `%||%` <- function(a, b) if (is.null(a) || (length(a)==1 && is.na(a))) b else a
 
-# ---------- Paletas / niveles ya usados en tu export ----------
-.tipo_levels <- c(
+# ---------- Paletas / niveles ----------
+.categoria_levels <- c(
   "Saltos de preguntas",
   "Preguntas de control",
   "Consistencia",
   "Valores atípicos",
-  "Filtro de opciones"
+  "Filtro de opciones",
+  "Valores calculados"
 )
 
 .paletas_por_hue <- list(
@@ -62,7 +63,7 @@ suppressPackageStartupMessages({
 .section_prefix_from_id <- function(id) sub("^([A-Za-z0-9]+_).*", "\\1", id)
 
 .build_section_type_palette <- function(plan) {
-  stopifnot("ID" %in% names(plan), "Tipo de observación" %in% names(plan))
+  stopifnot("ID" %in% names(plan), "Categoría" %in% names(plan))
   secciones <- plan$ID |> .section_prefix_from_id() |> unique()
   hue_idx <- seq_along(secciones)
   hues <- ._hues_order[ (hue_idx - 1L) %% length(._hues_order) + 1L ]
@@ -70,25 +71,25 @@ suppressPackageStartupMessages({
   names(out) <- secciones
   for (i in seq_along(secciones)) {
     tonos <- .paletas_por_hue[[ hues[[i]] ]]
-    tonos <- rep_len(tonos, length.out = length(.tipo_levels))
-    names(tonos) <- .tipo_levels
+    tonos <- rep_len(tonos, length.out = length(.categoria_levels))
+    names(tonos) <- .categoria_levels
     out[[ secciones[[i]] ]] <- tonos
   }
   out
 }
 
 .shade_plan_by_section_and_type <- function(wb, sheet, datos) {
-  if (!all(c("ID","Tipo de observación") %in% names(datos))) return(invisible())
+  if (!all(c("ID","Categoría") %in% names(datos))) return(invisible())
   pal_map <- .build_section_type_palette(datos)
   ids    <- as.character(datos$ID)
-  tipos  <- as.character(datos$`Tipo de observación`)
+  tipos  <- as.character(datos$`Categoría`)
   seccs  <- .section_prefix_from_id(ids)
   combos <- unique(data.frame(secc = seccs, tipo = tipos, stringsAsFactors = FALSE))
   for (k in seq_len(nrow(combos))) {
     sec  <- combos$secc[k]
     tipo <- combos$tipo[k]
     if (!sec %in% names(pal_map)) next
-    idx_tipo <- match(tipo, .tipo_levels)
+    idx_tipo <- match(tipo, .categoria_levels)
     if (is.na(idx_tipo)) next
     color <- pal_map[[sec]][[ idx_tipo ]]
     st <- openxlsx::createStyle(
@@ -137,7 +138,7 @@ suppressPackageStartupMessages({
 # ---------- Tablas auxiliares ----------
 .build_resumen <- function(plan) {
   plan %>%
-    dplyr::count(`Tipo de observación`, name = "n_reglas") %>%
+    dplyr::count(`Categoría`, name = "n_reglas") %>%
     dplyr::arrange(dplyr::desc(n_reglas))
 }
 
@@ -173,6 +174,15 @@ suppressPackageStartupMessages({
 
 .build_readme <- function(plan, x, autor, titulo, version, hojas_presentes) {
   secmap <- .build_secciones(x)
+
+  # Helper: siempre devolver chr(1)
+  chr1 <- function(z) {
+    z <- z %||% ""              # NULL -> ""
+    if (length(z) == 0) z <- ""
+    z <- as.character(z)
+    if (length(z) == 0) "" else z[1]
+  }
+
   toc <- paste0(
     if (isTRUE(hojas_presentes$plan))        "- [Plan](#'Plan'!A1)\n" else "",
     if (isTRUE(hojas_presentes$resumen))     "- [Resumen](#'Resumen'!A1)\n" else "",
@@ -180,49 +190,57 @@ suppressPackageStartupMessages({
     if (isTRUE(hojas_presentes$diccionario)) "- [Diccionario](#'Diccionario'!A1)\n" else "",
     if (isTRUE(hojas_presentes$choices))     "- [Choices](#'Choices'!A1)\n" else ""
   )
-  tibble::tibble(
-    Seccion = c("Título", "Versión", "Autor", "Fecha",
-                "Descripción",
-                "Tabla de contenidos",
-                "Estructura de columnas (Plan)",
-                "Convenciones de Procesamiento",
-                "Secciones y prefijos (resumen)"),
-    Contenido = c(
-      titulo %||% "Plan de Limpieza – ACNUR",
-      as.character(version %||% Sys.Date()),
-      autor %||% Sys.info()[["user"]],
-      format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-      "Este archivo contiene el plan de limpieza automatizado a partir de un XLSForm. \
+
+  secciones <- c(
+    "Título", "Versión", "Autor", "Fecha",
+    "Descripción",
+    "Tabla de contenidos",
+    "Estructura de columnas (Plan)",
+    "Convenciones de Procesamiento",
+    "Secciones y prefijos (resumen)"
+  )
+
+  contenidos <- c(
+    chr1(titulo %||% "Plan de Limpieza – ACNUR"),
+    chr1(as.character(version %||% Sys.Date())),
+    chr1(autor %||% Sys.info()[["user"]] %||% "—"),
+    chr1(format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
+    chr1("Este archivo contiene el plan de limpieza automatizado a partir de un XLSForm. \
 Incluye reglas de control, saltos de preguntas, restricciones/consistencias, \
-y referencias de diccionario y opciones.",
-      toc,
-      "Plan: columnas esperadas:
-- ID: identificador único (prefijo de sección + número)
-- Tipo de observación: categoría (p.ej., 2. Saltos de preguntas, 3. Preguntas de control, 7. Consistencia)
-- Objetivo: descripción humana de la validación
-- Variable 1 / 2 y sus etiquetas: variables involucradas
-- Nombre de regla: nombre del flag; coincide con el objeto creado
-- Procesamiento: UNA expresión R de asignación única: `flag <- EXPRESION` que devuelve TRUE (OK) o FALSE (inconsistencia)",
-      "Convenciones clave:
-- TRUE = caso consistente; FALSE = inconsistencia
-- Texto: usar `trimws(var) != \"\"`
-- NA: usar `is.na(var)`
-- Rangos: `between(suppressWarnings(as.numeric(var)), min, max)`
-- Token Other (select_multiple): `grepl(\"(^|\\\\s)(Other|Otro|Otra)(\\\\s|$)\", var)`",
-      paste0(
-        "Secciones detectadas (", nrow(secmap), "): ",
-        paste0(secmap$prefix, "→", secmap$group_name, collapse = "; ")
-      )
-    )
+y referencias de diccionario y opciones."),
+    chr1(toc),
+    chr1("Plan: columnas esperadas:
+- ID
+- Tabla
+- Categoría
+- Tipo
+- Nombre de regla
+- Objetivo
+- Variable 1 / 2 / 3 y sus etiquetas
+- Procesamiento
+- (técnicas y metadatos a la derecha)"),
+    chr1("Convenciones clave:
+- TRUE = inconsistencia (o según tu convención)
+- Texto vacío: `trimws(var) == \"\"`
+- NA: `is.na(var)`
+- Rangos numéricos: usa conversión segura `suppressWarnings(as.numeric(var))`
+- Token Other (select_multiple): `grepl(\"(^|\\\\s)(Other|Otro|Otra)(\\\\s|$)\", var)`"),
+    chr1(paste0(
+      "Secciones detectadas (", nrow(secmap), "): ",
+      paste0(secmap$prefix, "→", secmap$group_name, collapse = "; ")
+    ))
+  )
+
+  # Garantiza longitudes iguales
+  stopifnot(length(secciones) == length(contenidos))
+
+  tibble::tibble(
+    Seccion  = secciones,
+    Contenido = contenidos
   )
 }
 
 # ---------- Saneos de ordenación ----------
-.ordenar_ids <- function(ids) {
-  nums <- as.numeric(sub("^[A-Za-z0-9]+_", "", ids))
-  order(nums, na.last = TRUE)
-}
-
 .reordenar_plan <- function(plan, x, orden_prefijos = NULL) {
   stopifnot(is.data.frame(plan), is.list(x), !is.null(x$meta$section_map))
   if (is.null(orden_prefijos)) {
@@ -247,7 +265,7 @@ y referencias de diccionario y opciones.",
     ) %>%
     dplyr::arrange(
       sec_ord, pref,
-      dplyr::desc(!is.na(num)), # con número primero
+      dplyr::desc(!is.na(num)),
       num, suf
     ) %>%
     dplyr::select(-pref, -suf, -num, -sec_ord)
@@ -263,22 +281,19 @@ y referencias de diccionario y opciones.",
 
 .get_pal_map <- function(plan) .build_section_type_palette(plan)
 
-# --- Agrupar filas por sección y tipo (compatible con distintas versiones de openxlsx)
 .group_plan_rows <- function(wb, sheet, datos) {
-  if (!all(c("ID","Tipo de observación") %in% names(datos))) return(invisible())
+  if (!all(c("ID","Categoría") %in% names(datos))) return(invisible())
 
-  # Detecta qué argumentos acepta tu openxlsx::groupRows()
   gr_fun   <- get("groupRows", asNamespace("openxlsx"))
   gr_args  <- names(formals(gr_fun))
   has_ol   <- "outlineLevel" %in% gr_args
-  has_lvl  <- "level"        %in% gr_args   # por si hay variantes
+  has_lvl  <- "level"        %in% gr_args
   has_coll <- "collapsed"    %in% gr_args
 
   seccs <- .section_prefix_from_id(as.character(datos$ID))
-  tipos <- as.character(datos$`Tipo de observación`)
+  tipos <- as.character(datos$`Categoría`)
   sec_levels <- unique(seccs)
 
-  # Helper para invocar groupRows con la firma correcta
   .group_rows_call <- function(rows, lvl) {
     if (length(rows) < 2) return(invisible())
     if (has_ol) {
@@ -286,10 +301,8 @@ y referencias de diccionario y opciones.",
     } else if (has_lvl) {
       openxlsx::groupRows(wb, sheet, rows = rows, level = lvl)
     } else if (has_coll) {
-      # Sin nivel explícito, al menos agrupa (queda como nivel por defecto)
       openxlsx::groupRows(wb, sheet, rows = rows, collapsed = FALSE)
     } else {
-      # Firma mínima: solo rows
       openxlsx::groupRows(wb, sheet, rows = rows)
     }
   }
@@ -312,8 +325,8 @@ y referencias de diccionario y opciones.",
 
 .add_legend_sheet <- function(wb, pal_map) {
   df <- tibble::tibble(
-    Seccion = rep(names(pal_map), each = length(.tipo_levels)),
-    `Tipo de observación` = rep(.tipo_levels, times = length(pal_map)),
+    Seccion = rep(names(pal_map), each = length(.categoria_levels)),
+    `Categoría` = rep(.categoria_levels, times = length(pal_map)),
     Color = unlist(pal_map, use.names = FALSE)
   )
   sheet_name <- .sanitize_sheet("Leyenda")
@@ -362,7 +375,7 @@ y referencias de diccionario y opciones.",
 # =====================================================================
 #' Exportar el plan de limpieza a Excel con varias hojas y formato profesional
 #'
-#' @param plan Tibble/data.frame del plan.
+#' @param plan Tibble/data.frame del plan (ya normalizado con columnas nuevas).
 #' @param x Lista devuelta por `leer_xlsform_limpieza()` (con $meta$section_map).
 #' @param path Ruta del archivo de salida `.xlsx`.
 #' @param autor Autor opcional (string).
@@ -374,27 +387,32 @@ y referencias de diccionario y opciones.",
 #' @return (invisible) `path`
 #' @export
 exportar_plan_limpieza <- function(plan,
-                                 x,
-                                 path,
-                                 autor   = NULL,
-                                 titulo  = NULL,
-                                 version = Sys.Date(),
-                                 incluir = list(plan = TRUE,
-                                                resumen = TRUE,
-                                                secciones = TRUE,
-                                                diccionario = TRUE,
-                                                choices = TRUE,
-                                                readme = TRUE),
-                                 overwrite = TRUE,
-                                 zebra = TRUE) {
+                                   x,
+                                   path,
+                                   autor   = NULL,
+                                   titulo  = NULL,
+                                   version = Sys.Date(),
+                                   incluir = list(plan = TRUE,
+                                                  resumen = TRUE,
+                                                  secciones = TRUE,
+                                                  diccionario = TRUE,
+                                                  choices = TRUE,
+                                                  readme = TRUE),
+                                   overwrite = TRUE,
+                                   zebra = TRUE) {
   stopifnot(is.data.frame(plan), "meta" %in% names(x))
   if (file.exists(path) && !isTRUE(overwrite)) {
     stop("El archivo ya existe y overwrite=FALSE: ", path, call. = FALSE)
   }
-  cols_need <- c("ID","Tipo de observación","Objetivo",
-                 "Variable 1","Variable 1 - Etiqueta",
-                 "Variable 2","Variable 2 - Etiqueta",
-                 "Nombre de regla","Procesamiento")
+
+  # --- Validación de columnas mínimas (nuevo orden/ naming)
+  cols_need <- c(
+    "ID","Tabla","Categoría","Tipo","Nombre de regla","Objetivo",
+    "Variable 1","Variable 1 - Etiqueta",
+    "Variable 2","Variable 2 - Etiqueta",
+    "Variable 3","Variable 3 - Etiqueta",
+    "Procesamiento"
+  )
   miss <- setdiff(cols_need, names(plan))
   if (length(miss) > 0) {
     stop("Faltan columnas en `plan`: ", paste(miss, collapse = ", "), call. = FALSE)
@@ -410,9 +428,11 @@ exportar_plan_limpieza <- function(plan,
 
     widths <- rep(18, ncol(df_plan))
     nm <- names(df_plan)
-    widths[match("Objetivo", nm)]      <- 60
-    widths[match("Procesamiento", nm)] <- 90
+    widths[match("Objetivo", nm)]        <- 60
+    widths[match("Procesamiento", nm)]   <- 90
     widths[match("Nombre de regla", nm)] <- 34
+    widths[match("Tabla", nm)]           <- 18
+    widths[match("Categoría", nm)]       <- 24
 
     .add_sheet_with_table(
       wb, sheet = sheet_plan, data = df_plan,
@@ -429,10 +449,10 @@ exportar_plan_limpieza <- function(plan,
     # ID como texto
     .force_text_column(wb, sheet_plan, col_index = match("ID", names(df_plan)), n_rows = nrow(df_plan))
 
-    # Colorear por sección/tipo
+    # Colorear por sección/categoría
     .shade_plan_by_section_and_type(wb, sheet_plan, df_plan)
 
-    # Agrupar por sección y por tipo
+    # Agrupar por sección y por categoría
     .group_plan_rows(wb, sheet_plan, df_plan)
 
     # Pulido de hoja

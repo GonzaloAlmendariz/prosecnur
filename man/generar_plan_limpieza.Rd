@@ -7,22 +7,23 @@
 generar_plan_limpieza(
   x,
   incluir = list(required = TRUE, other = TRUE, relevant = TRUE, constraint = TRUE,
-    calculate = TRUE, choice_filter = TRUE, fecha_campo = TRUE),
-  fecha_var = "mand_Date",
-  fecha_campo = Sys.Date()
+    calculate = TRUE, choice_filter = TRUE, repeat_min1 = TRUE, tiempo_ventana = FALSE),
+  rango_fecha = NULL,
+  campo_fecha = NULL
 )
 }
 \arguments{
-\item{x}{Lista devuelta por \code{leer_xlsform_limpieza()} con \verb{$survey}, \verb{$choices}, \verb{$meta}.}
+\item{x}{lista con $survey, $choices y $meta (de tu lector)}
 
-\item{incluir}{Lista de banderas lógicas para incluir bloques.}
+\item{incluir}{lista de banderas lógicas para incluir bloques}
 
-\item{fecha_var}{Nombre de la variable de fecha a verificar (default \code{"mand_Date"}).}
+\item{rango_fecha}{NULL o cadena "YYYY-MM-DD - YYYY-MM-DD"}
 
-\item{fecha_campo}{Fecha límite para \code{fecha_var} (Date o \code{"YYYY-MM-DD"}).}
+\item{campo_fecha}{NULL o nombre de la variable de fecha a validar}
 }
 \value{
-tibble con plan.
+tibble con plan. TRUE en Procesamiento = inconsistencia.
+Columnas exactamente las solicitadas.
 }
 \description{
 Generar plan de limpieza (G-aware) desde un XLSForm ya leído

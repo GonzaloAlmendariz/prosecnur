@@ -18,7 +18,7 @@ exportar_plan_limpieza(
 )
 }
 \arguments{
-\item{plan}{Tibble/data.frame del plan.}
+\item{plan}{Tibble/data.frame del plan (ya normalizado con columnas nuevas).}
 
 \item{x}{Lista devuelta por \code{leer_xlsform_limpieza()} (con $meta$section_map).}
 
