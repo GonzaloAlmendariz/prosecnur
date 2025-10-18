@@ -114,17 +114,30 @@ INDEXED_REPEAT <- function(...) stop("INDEXED_REPEAT() requiere preprocesar repe
 # Rewriter: tokens ODK → helpers R (solo para el texto de 'Procesamiento')
 rewrite_odk_tokens <- function(x){
   out <- x
+  # today(), selected-at(), POSITION_DOT(), join(), count-selected(), concat()
   out <- gsub("\\btoday\\s*\\(\\)", "Sys.Date()", out)
   out <- gsub("\\bselected-at\\s*\\(", "selected_at(", out)
-  out <- gsub("\\bSELECTED_AT\\s*\\(", "selected_at(", out)
   out <- gsub("\\bPOSITION_DOT\\s*\\(\\)", "position_dot()", out)
-  # join(sep, vec) → paste(vec, collapse = sep)
-  out <- gsub("join\\s*\\(\\s*([^,]+?)\\s*,\\s*([^\\)]+?)\\s*\\)",
-              "paste(\\2, collapse = \\1)", out, perl = TRUE)
-  # count-selected( → count_selected(
-  out <- gsub("\\bcount-selected\\s*\\(", "count_selected(", out, perl = TRUE)
-  # concat(a,b,c) → paste0(a,b,c)
+  out <- gsub("join\\s*\\(\\s*([^,]+?)\\s*,\\s*([^\\)]+?)\\s*\\)", "paste(\\2, collapse = \\1)", out, perl = TRUE)
+  out <- gsub("\\bcount\\s*-?\\s*selected\\s*\\(", "count_selected(", out, perl = TRUE)
   out <- gsub("\\bconcat\\s*\\(", "paste0(", out, perl = TRUE)
+
+  # regex(x, 'pat') -> grepl('pat', x, perl = TRUE)
+  out <- gsub("\\bregex\\s*\\(\\s*([^,]+?)\\s*,\\s*'([^']+)'\\s*\\)",
+              "grepl('\\2', \\1, perl = TRUE)", out, perl = TRUE)
+  out <- gsub("\\bregex\\s*\\(\\s*([^,]+?)\\s*,\\s*\"([^\"]+)\"\\s*\\)",
+              "grepl(\"\\2\", \\1, perl = TRUE)", out, perl = TRUE)
+
+  # selected(var, "k") -> grepl((^|\s)k(\s|$), var, perl = TRUE)
+  out <- gsub(
+    "\\bselected\\s*\\(\\s*([A-Za-z0-9_\\.]+)\\s*,\\s*'([^']+)'\\s*\\)",
+    "grepl('(^|\\\\s)\\2(\\\\s|$)', \\1, perl = TRUE)", out, perl = TRUE
+  )
+  out <- gsub(
+    "\\bselected\\s*\\(\\s*([A-Za-z0-9_\\.]+)\\s*,\\s*\"([^\"]+)\"\\s*\\)",
+    "grepl(\"(^|\\\\s)\\2(\\\\s|$)\", \\1, perl = TRUE)", out, perl = TRUE
+  )
+
   out
 }
 
@@ -175,12 +188,26 @@ sanitize_id <- function(x){
   x <- gsub("[^A-Za-z0-9_]", "_", x)
   x
 }
-tabla_destino_de <- function(group_name, survey){
-  if (!nz1(group_name)) return("(principal)")
-  tb <- tolower(trimws(sub("\\s.*$", "", as.character(survey$type))))
-  nm <- as.character(survey$name)
-  is_rep <- any(tb == "begin_repeat" & nm == group_name)
-  if (is_rep) group_name else "(principal)"
+tabla_destino_de <- function(group_name, section_map, main_name = "(principal)") {
+  g <- as_chr1(group_name)
+  if (!nz1(g)) return(main_name)
+  if (is.null(section_map) || !nrow(section_map)) return(main_name)
+
+  i <- match(g, section_map$group_name)
+
+  # 1) Si el group es repeat (según section_map), su tabla es el propio nombre del grupo
+  if (!is.na(i) && "is_repeat" %in% names(section_map) && isTRUE(section_map$is_repeat[i])) {
+    return(g)
+  }
+
+  # 2) Si tenemos mapeo explícito a hoja/datos en section_map (opcional)
+  if (!is.na(i) && "data_table" %in% names(section_map)) {
+    dt <- as_chr1(section_map$data_table[i])
+    if (nz1(dt)) return(dt)
+  }
+
+  # 3) Por defecto, principal
+  main_name
 }
 nivel_scope <- function(tabla) if (identical(tabla, "(principal)")) 0L else 1L
 .pref_de <- function(gname, section_map){
@@ -343,7 +370,7 @@ build_required_g <- function(survey, section_map, meta, gmap){
     lab1 <- lab_pregunta(survey, meta, var)
     tipo <- as_chr1(row$type_base)
     gname<- as_chr1(row$group_name)
-    tabla<- tabla_destino_de(gname, survey)
+    tabla<- tabla_destino_de(gname, section_map, main_name = "(principal)")
     nivel<- nivel_scope(tabla)
     secc <- gname
 
@@ -429,7 +456,7 @@ build_other_g <- function(survey, section_map, meta, gmap){
       paste0("(", parent_var, " == '96')")
     }
 
-    tabla <- tabla_destino_de(gname, survey); nivel <- nivel_scope(tabla)
+    tabla <- tabla_destino_de(gname, section_map, main_name = "(principal)"); nivel <- nivel_scope(tabla)
     secc_label <- .section_label(gname, section_map)
     opening    <- .hum_opening_with_section(secc_label, G_h, "")
     repeat_txt <- if (.is_repeat_group(gname, section_map)) sprintf("En la hoja de datos «%s» (sección repetida «%s»), ", tabla, secc) else ""
@@ -476,7 +503,7 @@ build_relevant_g <- function(survey, section_map, meta, choices, gmap){
     lab1 <- lab_pregunta(survey, meta, var)
     tipo <- as_chr1(row$type_base)
     gname<- as_chr1(row$group_name); secc <- gname
-    tabla<- tabla_destino_de(gname, survey); nivel <- nivel_scope(tabla)
+    tabla<- tabla_destino_de(gname, section_map, main_name = "(principal)"); nivel <- nivel_scope(tabla)
 
     G_row <- gmap[gmap$group_name == gname, , drop = FALSE]
     G_r <- as_chr1(if (nrow(G_row)) G_row$G_expr[[1]] else "")
@@ -558,7 +585,7 @@ build_constraint_g <- function(survey, section_map, meta, gmap){
     lab1 <- lab_pregunta(survey, meta, var)
     tipo <- as_chr1(row$type_base)
     gname<- as_chr1(row$group_name); secc <- gname
-    tabla<- tabla_destino_de(gname, survey); nivel <- nivel_scope(tabla)
+    tabla<- tabla_destino_de(gname, section_map, main_name = "(principal)"); nivel <- nivel_scope(tabla)
 
     G_row <- gmap[gmap$group_name == gname, , drop = FALSE]
     G_r <- as_chr1(if (nrow(G_row)) G_row$G_expr[[1]] else "")
@@ -677,14 +704,30 @@ eq_chr_na <- function(a, b){
   # selected-at( → selected_at(
   x <- gsub("selected-at\\s*\\(", "selected_at(", x, perl = TRUE)
 
-  # regex(…) no existe en base R → grepl(…)
-  x <- gsub("\\bregex\\s*\\(", "grepl(", x, perl = TRUE)
+  # --- regex(texto, patron)  -->  grepl(patron, texto, perl = TRUE)
+  x <- gsub(
+    "\\bregex\\s*\\(\\s*([^,]+?)\\s*,\\s*([^\\)]+?)\\s*\\)",
+    "grepl(\\2, \\1, perl = TRUE)",
+    x, perl = TRUE
+  )
 
   # descomillar literales numéricos en comparaciones
   x <- gsub("([<>]=?|==|!=)\\s*\"([0-9]+)\"", "\\1 \\2", x, perl = TRUE)
   x <- gsub("([<>]=?|==|!=)\\s*'([0-9]+)'", "\\1 \\2", x, perl = TRUE)
 
   gsub("\\s+", " ", trimws(x))
+
+  # --- selected(var, 'opt')  -->  grepl("(^|\\s)opt(\\s|$)", var, perl = TRUE)
+  x <- gsub(
+    "selected\\s*\\(\\s*([A-Za-z0-9_\\.]+)\\s*,\\s*'([^']+)'\\s*\\)",
+    'grepl("(^|\\\\s)\\2(\\\\s|$)", \\1, perl = TRUE)',
+    x, perl = TRUE
+  )
+  x <- gsub(
+    'selected\\s*\\(\\s*([A-Za-z0-9_\\.]+)\\s*,\\s*"([^"]+)"\\s*\\)',
+    'grepl("(^|\\\\s)\\2(\\\\s|$)", \\1, perl = TRUE)',
+    x, perl = TRUE
+  )
 }
 
 # --- Clasificador por “familias” ---
@@ -770,7 +813,7 @@ build_calculate_g <- function(survey, section_map, meta, gmap){
     lab1  <- lab_pregunta(survey, meta, var)
     gname <- as_chr1(row$group_name); secc <- gname
     tipo  <- "calculate"
-    tabla <- tabla_destino_de(gname, survey); nivel <- nivel_scope(tabla)
+    tabla <- tabla_destino_de(gname, section_map, main_name = "(principal)"); nivel <- nivel_scope(tabla)
 
     # Apertura de sección (G) + relevant del ítem
     G_row <- gmap[gmap$group_name == gname, , drop = FALSE]
@@ -856,7 +899,7 @@ build_choice_filter_g <- function(inst, gmap){
     ch_ln <- choices[choices$list_name == ln, , drop = FALSE]
     if (!nrow(ch_ln)) return(tibble())
 
-    tabla <- tabla_destino_de(gname, survey); nivel <- nivel_scope(tabla)
+    tabla <- tabla_destino_de(gname, section_map, main_name = "(principal)"); nivel <- nivel_scope(tabla)
     secc_label <- .section_label(gname, section_map)
     apertura   <- if (nz1(G_h) || nz1(rel_h)) {
       if (nz1(G_h) && nz1(rel_h)) {

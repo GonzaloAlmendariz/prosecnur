@@ -82,8 +82,8 @@ ll_detect_repeats_infer <- function(hojas, main_name) {
 }
 
 ll_link_children <- function(parent_df, child_df, child_name, parent_label) {
-  p <- ll_std_names(parent_df)
-  c <- ll_std_names(child_df)
+  p <- parent_df
+  c <- child_df
 
   parent_key <- ll_find_col(p, c("_index","_id","_uuid","__id","__uuid"))
   child_pk   <- ll_find_col(c, c("_index"))
@@ -153,7 +153,6 @@ lector_limpieza <- function(archivo,
   hojas_nombres <- readxl::excel_sheets(archivo)
   hojas <- purrr::map(hojas_nombres, ~ readxl::read_excel(archivo, sheet = .x))
   names(hojas) <- hojas_nombres
-  hojas <- purrr::map(hojas, ll_std_names)
 
   # -------- 2) Resolver hoja principal ----------
   main_name <- ll_detect_main_sheet(hojas, hoja_principal)
@@ -207,6 +206,10 @@ lector_limpieza <- function(archivo,
     link <- ll_link_children(main_df, child_df, child_name = child, parent_label = main_name)
     counts_all <- dplyr::bind_rows(counts_all, link$counts)
     parent_aug <- link$parent_aug
+    n_col <- paste0("n_", child)
+    if (!n_col %in% names(parent_aug)) parent_aug[[n_col]] <- NA_integer_
+    parent_aug[[n_col]] <- suppressWarnings(as.integer(parent_aug[[n_col]]))
+    parent_aug[[n_col]][is.na(parent_aug[[n_col]])] <- 0L
   }
 
   hojas[[main_name]] <- parent_aug
