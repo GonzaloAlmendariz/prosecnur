@@ -2,14 +2,22 @@
 % Please edit documentation in R/evaluacion_data.R
 \name{total_inconsistencias}
 \alias{total_inconsistencias}
-\title{Totales de inconsistencia}
+\title{Totales de inconsistencia por regla}
 \usage{
-total_inconsistencias(
-  evaluacion,
-  as_kable = FALSE,
-  titulo = "Totales de inconsistencia por regla"
-)
+total_inconsistencias(evaluacion)
+}
+\arguments{
+\item{evaluacion}{Lista devuelta por \code{evaluar_consistencia()}.}
+}
+\value{
+Lista con \code{cabecera} (reglas y total) y \code{detalle} (por regla).
 }
 \description{
-Resumen global de inconsistencias por regla (con porcentaje por tabla).
+Totales de inconsistencia por regla
+}
+\examples{
+\dontrun{
+tot <- total_inconsistencias(ev)
+tot$detalle
+}
 }

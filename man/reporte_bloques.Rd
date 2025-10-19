@@ -2,7 +2,7 @@
 % Please edit documentation in R/evaluacion_data.R
 \name{reporte_bloques}
 \alias{reporte_bloques}
-\title{Construir bloques de reporte por regla}
+\title{Construir bloques por regla (resumen + casos)}
 \usage{
 reporte_bloques(
   evaluacion,
@@ -15,6 +15,34 @@ reporte_bloques(
   ordenar = c("n_desc", "id_asc")
 )
 }
+\arguments{
+\item{evaluacion}{Lista devuelta por \code{evaluar_consistencia()}.}
+
+\item{familias}{Vector de filtros regex aplicados sobre \code{Tipo}.}
+
+\item{ids}{Vector de \code{id_regla} o \code{nombre_regla} a mantener.}
+
+\item{solo_relevantes}{Si \code{TRUE}, conserva sólo reglas con \code{n_inconsistencias > 0}.}
+
+\item{incluir_solo_inconsistentes}{Si \code{TRUE}, no construye \code{casos} cuando n=0.}
+
+\item{incluir_reglas_sin_casos}{Si \code{FALSE}, descarta reglas sin filas en \code{casos}.}
+
+\item{contar_na_como_inconsistencia}{Si \code{TRUE}, los NA cuentan como inconsistencia al construir \code{casos}.}
+
+\item{ordenar}{Criterio: \code{"n_desc"} o \code{"id_asc"}.}
+}
+\value{
+\code{tibble} con metadatos de regla + columna lista \code{casos}.
+}
 \description{
-Construir bloques de reporte por regla
+Une \code{evaluacion$resumen} con \code{evaluacion$reglas_meta} para cada regla
+y agrega una columna \code{casos} con las filas inconsistentes (vía
+\code{observaciones_regla()}) de la \strong{tabla correcta}. Robusto a repeats.
+}
+\examples{
+\dontrun{
+bloques <- reporte_bloques(evaluacion = ev, solo_relevantes = TRUE)
+str(bloques$casos[[1]])
+}
 }

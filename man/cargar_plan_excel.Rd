@@ -2,15 +2,23 @@
 % Please edit documentation in R/evaluacion_data.R
 \name{cargar_plan_excel}
 \alias{cargar_plan_excel}
-\title{Cargar plan de limpieza desde Excel}
+\title{Cargar plan de limpieza desde Excel (Plan v1/v2)}
 \usage{
 cargar_plan_excel(path, sheet = "Plan")
 }
 \arguments{
-\item{path}{ruta al .xlsx}
+\item{path}{Ruta al archivo \code{.xlsx}.}
 
-\item{sheet}{nombre de hoja (default "Plan")}
+\item{sheet}{Nombre de la hoja del plan (default \code{"Plan"}).}
+}
+\value{
+\code{tibble} listo para evaluar (mantiene columnas v2 si existen).
 }
 \description{
-Cargar plan de limpieza desde Excel
+Cargar plan de limpieza desde Excel (Plan v1/v2)
+}
+\examples{
+\dontrun{
+plan <- cargar_plan_excel("plan_limpieza.xlsx", sheet = "Plan")
+}
 }

@@ -2,24 +2,46 @@
 % Please edit documentation in R/evaluacion_data.R
 \name{evaluar_consistencia}
 \alias{evaluar_consistencia}
-\title{Evaluar consistencia (multi-tabla)}
+\title{Evaluar reglas de limpieza (multi-tabla; soporte repeats)}
 \usage{
 evaluar_consistencia(
   datos,
   plan,
   hoja_principal = NULL,
-  contar_na_como_inconsistencia = FALSE
+  contar_na_como_inconsistencia = FALSE,
+  choices = NULL,
+  use_choice_labels = FALSE
 )
 }
 \arguments{
-\item{datos}{data.frame, lista de lector_limpieza(), o ruta a .xlsx}
+\item{datos}{\code{data.frame}, lista de data.frames, o ruta \code{.xlsx}.}
 
-\item{plan}{tibble de plan (ver \code{cargar_plan_excel()})}
+\item{plan}{\code{tibble} devuelto por \code{cargar_plan_excel()}.}
 
-\item{hoja_principal}{si \code{datos} es ruta a .xlsx, hoja a leer}
+\item{hoja_principal}{Si \code{datos} es ruta \code{.xlsx}, hoja a leer.}
 
-\item{contar_na_como_inconsistencia}{lógico (default FALSE)}
+\item{contar_na_como_inconsistencia}{Si \code{TRUE}, los \code{NA} del flag cuentan como inconsistencia.}
+
+\item{choices}{(opcional) lista nombrada: \code{var} -> named character \code{c(code="Etiqueta")} para inyectar \code{var_label}.}
+
+\item{use_choice_labels}{si \code{TRUE}, aplica \code{choices} y crea columnas \verb{*_label}.}
+}
+\value{
+Lista con \code{datos}, \code{datos_tablas}, \code{resumen}, \code{reglas_meta}.
 }
 \description{
-Evaluar consistencia (multi-tabla)
+Evalúa un plan de limpieza sobre: un \code{data.frame}, una \strong{lista} con tablas
+(\verb{$data} o \verb{$datos_tablas}), o una \strong{ruta .xlsx} (se lee una hoja).
+Usa \strong{Tabla} / \strong{Hoja base} para decidir en qué data.frame evaluar cada regla.
+Convención: \strong{\code{TRUE} en el flag = inconsistencia}.
+Cruces principal ← hijo sólo si hay \strong{agregación explícita} (o guía del plan).
+}
+\examples{
+\dontrun{
+plan <- cargar_plan_excel("plan_limpieza.xlsx")
+ev   <- evaluar_consistencia(datos = mis_tablas, plan = plan,
+                             choices = list(Country = c(PER="Perú", VEN="Venezuela")),
+                             use_choice_labels = TRUE)
+ev$resumen
+}
 }

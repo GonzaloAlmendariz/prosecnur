@@ -13,16 +13,25 @@ observaciones_regla(
 )
 }
 \arguments{
-\item{evaluacion}{list devuelto por \code{evaluar_consistencia()}}
+\item{evaluacion}{Lista de \code{evaluar_consistencia()}.}
 
-\item{regla}{identificador a buscar (por id_regla, nombre_regla o flag)}
+\item{regla}{id/nombre/flag de la regla.}
 
-\item{por}{campo de búsqueda: "id_regla", "nombre_regla" o "flag"}
+\item{por}{Campo: \code{"id_regla"}, \code{"nombre_regla"} o \code{"flag"}.}
 
-\item{incluir_flag}{si TRUE añade la columna del flag en la salida}
+\item{incluir_flag}{Si \code{TRUE}, agrega la columna del flag.}
 
-\item{contar_na_como_inconsistencia}{NA cuenta como inconsistencia si TRUE}
+\item{contar_na_como_inconsistencia}{Si \code{TRUE}, NA cuentan como inconsistencia.}
+}
+\value{
+\code{tibble} con filas inconsistentes y variables relevantes.
 }
 \description{
-Devuelve filas \strong{de la tabla correcta} donde la regla marca inconsistencia.
+Devuelve filas donde la regla marca inconsistencia (TRUE), tomando
+la \strong{tabla correcta} asociada a esa regla.
+}
+\examples{
+\dontrun{
+casos <- observaciones_regla(evaluacion = ev, regla = "GEN_006", por = "id_regla")
+}
 }

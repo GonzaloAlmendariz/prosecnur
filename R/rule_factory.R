@@ -79,6 +79,42 @@ nombre_regla_calc    <- function(var, suf = "") paste0("calc_",  sanitize_id(var
   gsub("\\.", "_", x, perl = TRUE)
 }
 
+# --- Helpers para detección de cruce ambiguo principal→hijo ---
+.var_tabla <- function(var, survey, section_map, main_name="(principal)"){
+  if (!nzchar(as_chr1(var))) return(main_name)
+  # group_name de la variable en survey
+  gi <- match(as_chr1(var), as.character(survey$name))
+  gname <- as_chr1(if (!is.na(gi)) survey$group_name[gi] else NA_character_)
+  tabla_destino_de(gname, section_map, main_name = main_name)
+}
+
+.is_repeat_tabla <- function(tabla, main_name="(principal)"){
+  nzchar(as_chr1(tabla)) && !identical(tabla, main_name)
+}
+
+.rhs_tiene_agregacion <- function(rhs_r){
+  x <- as_chr1(rhs_r)
+  if (!nzchar(x)) return(FALSE)
+  # señales de agregación/colapso que resuelve la ambigüedad
+  any(grepl("\\bsum\\s*\\(",              x)) ||
+    any(grepl("\\bany\\s*\\(",              x)) ||
+    any(grepl("\\ball\\s*\\(",              x)) ||
+    any(grepl("\\bmin\\s*\\(",              x)) ||
+    any(grepl("\\bmax\\s*\\(",              x)) ||
+    any(grepl("\\bpaste\\s*\\(.*collapse\\s*=", x, perl=TRUE)) ||
+    any(grepl("\\bn_[A-Za-z0-9_]+\\b",      x))  # contadores precomputados
+}
+
+.es_cruce_principal_hijo_sin_agg <- function(tabla_base, vars_implicadas, survey, section_map, rhs_r){
+  # Sólo nos importa si la base es principal
+  if (!identical(as_chr1(tabla_base), "(principal)")) return(FALSE)
+  vtabs <- vapply(vars_implicadas, .var_tabla, character(1), survey=survey, section_map=section_map, main_name="(principal)")
+  hay_hijos <- any(vtabs != "(principal)")
+  if (!hay_hijos) return(FALSE)
+  # ¿El RHS/cond tiene agregación clara?
+  !.rhs_tiene_agregacion(rhs_r)
+}
+
 # =============================================================================
 # Helpers ODK → R (runtime)
 # =============================================================================
@@ -137,6 +173,47 @@ rewrite_odk_tokens <- function(x){
     "\\bselected\\s*\\(\\s*([A-Za-z0-9_\\.]+)\\s*,\\s*\"([^\"]+)\"\\s*\\)",
     "grepl(\"(^|\\\\s)\\2(\\\\s|$)\", \\1, perl = TRUE)", out, perl = TRUE
   )
+
+  out
+}
+
+# Envuelve con as.numeric() todas las ocurrencias de variables numéricas
+# (según 'type_base' del survey) dentro de una expresión RHS.
+wrap_numeric_tokens <- function(rhs, survey){
+  if (!nz1(rhs) || !is.data.frame(survey) || !"type" %in% names(survey) || !"name" %in% names(survey)) {
+    return(rhs)
+  }
+  type_base <- tolower(trimws(sub("\\s.*$", "", as.character(survey$type))))
+  num_like  <- survey$name[ type_base %in% c("integer","decimal","calculate") ]
+  out <- rhs
+  for (v in unique(na.omit(as.character(num_like)))) {
+    # Evita tocar partes de otros nombres; doble envoltura no daña (as.numeric(as.numeric(x)) ok)
+    pat <- paste0("(?<![A-Za-z0-9_])", regex_escape(v), "(?![A-Za-z0-9_])")
+    out <- gsub(pat, paste0("as.numeric(", v, ")"), out, perl = TRUE)
+  }
+  out
+}
+
+# Envuelve con as.numeric() únicamente las variables que participan en comparaciones numéricas
+wrap_numeric_in_comparisons <- function(rhs, survey){
+  if (!nz1(rhs) || !is.data.frame(survey) || !"name" %in% names(survey)) return(rhs)
+
+  # Lista de nombres de variables válidas del formulario
+  vars <- unique(as.character(survey$name))
+  if (!length(vars)) return(rhs)
+
+  # Construimos un OR de variables escapadas para regex
+  v_or <- paste(vapply(vars, regex_escape, ""), collapse = "|")
+
+  out <- rhs
+
+  # Caso A: VAR op NUM  →  as.numeric(VAR) op NUM
+  patA <- paste0("(?<![A-Za-z0-9_])(", v_or, ")\\s*(>=|<=|>|<|==|!=)\\s*(['\"]?\\d+(?:\\.\\d+)?['\"]?)")
+  out  <- gsub(patA, "as.numeric(\\1) \\2 \\3", out, perl = TRUE)
+
+  # Caso B: NUM op VAR  →  NUM op as.numeric(VAR)
+  patB <- paste0("(['\"]?\\d+(?:\\.\\d+)?['\"]?)\\s*(>=|<=|>|<|==|!=)\\s*(", v_or, ")(?![A-Za-z0-9_])")
+  out  <- gsub(patB, "\\1 \\2 as.numeric(\\3)", out, perl = TRUE)
 
   out
 }
@@ -209,6 +286,41 @@ tabla_destino_de <- function(group_name, section_map, main_name = "(principal)")
   # 3) Por defecto, principal
   main_name
 }
+
+
+# --- NUEVO: hoja de una variable (principal vs repeat) -----------------------
+hoja_de_variable <- function(var, survey, section_map, main_name = "(principal)") {
+  v <- as_chr1(var); if (!nz1(v)) return(NA_character_)
+  i <- match(v, as.character(survey$name))
+  if (is.na(i)) return(NA_character_)  # var no encontrada en survey
+  gname <- as_chr1(survey$group_name[i])
+  tabla_destino_de(gname, section_map, main_name = main_name)
+}
+
+# --- NUEVO: heurística mínima de agregación para cruces principal → hijo ----
+inferir_agreg <- function(var1, varN, hoja_base, hoja_varN) {
+  # Sólo aplica cuando hoja_base es principal y varN está en hoja hija
+  if (!identical(hoja_base, "(principal)") && !identical(hoja_base, as_chr1(hoja_base))) {
+    # Si decides usar el nombre real del main en Hoja base, igual tratamos principal como "principal"
+  }
+  if (!identical(hoja_base, "(principal)")) return(NA_character_)
+  if (is.na(hoja_varN) || is.na(hoja_base) || identical(hoja_varN, hoja_base)) return(NA_character_)
+
+  v1 <- as_chr1(var1); vN <- as_chr1(varN)
+
+  # 1) Si la Variable 1 pide explícitamente un conteo (n_)
+  if (nzchar(v1) && grepl("^n[_]", v1)) return("n")
+
+  # 2) Si Variable 1 sugiere suma (sufijo _sum)
+  if (nzchar(v1) && grepl("_sum$", v1)) return("sum")
+
+  # 3) Heurística simple para flags 0/1: nombres que suelen ser indicadores
+  if (nzchar(vN) && grepl("(?:_r$|^adult0?1$|^below[0-9]+_?r?$|_count$)", vN, perl = TRUE)) return("sum")
+
+  # 4) Ambiguo: que avise el evaluador
+  NA_character_
+}
+
 nivel_scope <- function(tabla) if (identical(tabla, "(principal)")) 0L else 1L
 .pref_de <- function(gname, section_map){
   pf <- section_map$prefix[ match(as_chr1(gname), section_map$group_name) ] %||% "GEN_"
@@ -715,7 +827,7 @@ eq_chr_na <- function(a, b){
   x <- gsub("([<>]=?|==|!=)\\s*\"([0-9]+)\"", "\\1 \\2", x, perl = TRUE)
   x <- gsub("([<>]=?|==|!=)\\s*'([0-9]+)'", "\\1 \\2", x, perl = TRUE)
 
-  gsub("\\s+", " ", trimws(x))
+  x <- gsub("\\s+", " ", trimws(x))
 
   # --- selected(var, 'opt')  -->  grepl("(^|\\s)opt(\\s|$)", var, perl = TRUE)
   x <- gsub(
@@ -826,10 +938,19 @@ build_calculate_g <- function(survey, section_map, meta, gmap){
     else if (nz1(G_r)) G_r else if (nz1(REL_r)) REL_r else ""
 
     # Clasificación y normalización del RHS
-    det <- calc_detect_type(as_chr1(row$calculation))
-    if (!isTRUE(det$ejecutable)) return(tibble::tibble())  # ignoramos no ejecutables
+    det   <- calc_detect_type(as_chr1(row$calculation))
+    if (!isTRUE(det$ejecutable)) return(tibble::tibble())
     rhs_r <- as_chr1(det$rhs_r); if (!nz1(rhs_r)) return(tibble::tibble())
 
+    # (a) Corregir comparaciones numéricas incluso si el cálculo global es textual
+    rhs_r <- wrap_numeric_in_comparisons(rhs_r, survey)
+
+    # (b) Si el cálculo es numérico "puro", envolver tokens numéricos de forma amplia (tu wrapper actual)
+    if (identical(det$kind, "numeric")) {
+      rhs_r <- wrap_numeric_tokens(rhs_r, survey)
+    }
+
+    # (c) Agregados repeat: tu regla existente
     if (identical(det$kind, "agg_repeat")) {
       rhs_r <- gsub("\\bcount\\s*\\(\\s*([A-Za-z0-9_]+)\\s*\\)", "n_\\1", rhs_r, perl = TRUE)
     }
@@ -943,37 +1064,61 @@ build_choice_filter_g <- function(inst, gmap){
   })
 }
 
-# ---- REPEAT: existencia mínima ----------------------------------------------
-build_repeat_min1 <- function(inst){
+# ---- REPEAT: existencia mínima (TRUE = inconsistencia) -----------------------
+# Genera reglas para cada begin_repeat:
+#   rep_<repeat>_min1 <- (Gate AND (is.na(n_<repeat>) OR n_<repeat> < 1))
+# Hoja base: (principal)  — el runner debe inyectar n_<repeat> por _parent_index
+build_repeat_min1 <- function(inst, na_es_inconsistencia = TRUE){
   survey      <- inst$survey
   section_map <- inst$meta$section_map %||% tibble()
   if (!nrow(survey) || !nrow(section_map)) return(tibble())
 
-  rmap <- survey %>%
+  # nombres de grupos repeat en survey
+  reps <- survey %>%
     transmute(type_base = tolower(trimws(sub("\\s.*$", "", .data$type))),
               name = as.character(.data$name)) %>%
-    filter(type_base == "begin_repeat") %>% pull(name)
-  reps <- unique(rmap); if (!length(reps)) return(tibble())
+    filter(type_base == "begin_repeat") %>%
+    distinct(name) %>% pull(name)
 
-  map_dfr(reps, function(gname){
-    secc <- gname
-    tabla <- gname
+  if (!length(reps)) return(tibble())
+
+  purrr::map_dfr(reps, function(gname){
+    secc  <- gname
+    tabla <- "(principal)"
+
+    # Gate de apertura de sección (si existe)
     G_row <- (.make_gmap(list(survey=survey, choices=inst$choices, meta=inst$meta)))[,]
-    G_r  <- as_chr1(G_row$G_expr[G_row$group_name==gname] %||% "")
-    G_h  <- as_chr1(G_row$G_humano[G_row$group_name==gname] %||% "")
+    G_r   <- as_chr1(G_row$G_expr[G_row$group_name==gname] %||% "")
+    G_h   <- as_chr1(G_row$G_humano[G_row$group_name==gname] %||% "")
 
     secc_label <- .section_label(gname, section_map)
     apertura   <- if (nz1(G_h)) sprintf("Si la sección «%s» se abre (%s), ", secc_label, G_h) else ""
-    objetivo <- paste0(apertura, "debe existir al menos 1 registro en la hoja de datos «", secc, "».")
+    objetivo   <- paste0(apertura, "debe existir al menos 1 registro en la hoja de datos «", secc, "».")
 
-    nom  <- .norm_rule_name(paste0("rep_", sanitize_id(gname), "_min1"))
-    # Requiere que el runner aporte n_<repeat> por envío (conteo por parent). Aquí solo generamos la condición:
-    proc <- if (nz1(G_r)) paste0(nom, " <- ( (", G_r, ") & (n_", gname, " < 1) )") else paste0(nom, " <- (n_", gname, " < 1)")
+    nom <- .norm_rule_name(paste0("rep_", sanitize_id(gname), "_min1"))
 
-    tibble(
-      ID = NA_character_, Tabla = "(principal)", `Sección` = secc,
-      Categoría = "Registros repetidos", Tipo = "repeat_rule",
-      `Nombre de regla` = nom, Objetivo = objetivo,
+    # === RHS (TRUE = inconsistencia) =========================================
+    # base: (is.na(n_g) | n_g < 1)
+    core <- sprintf("(is.na(n_%s) | n_%s < 1)", gname, gname)
+    # permitir tratar NA como consistencia si se desea
+    if (!isTRUE(na_es_inconsistencia)) {
+      core <- sprintf("(n_%s < 1)", gname)
+    }
+    # envolver con gate si existe
+    proc <- if (nz1(G_r)) {
+      sprintf("%s <- ( (%s) & %s )", nom, G_r, core)
+    } else {
+      sprintf("%s <- %s", nom, core)
+    }
+
+    tibble::tibble(
+      ID = NA_character_,
+      Tabla = tabla,
+      `Sección` = secc,
+      Categoría = "Registros repetidos",
+      Tipo = "repeat_min1",
+      `Nombre de regla` = nom,
+      Objetivo = objetivo,
       `Variable 1` = secc, `Variable 1 - Etiqueta` = secc,
       `Variable 2` = NA_character_, `Variable 2 - Etiqueta` = NA_character_,
       `Variable 3` = NA_character_, `Variable 3 - Etiqueta` = NA_character_,
@@ -1120,6 +1265,43 @@ generar_plan_limpieza <- function(
     ))
   }
 
+
+  # === NUEVO: enriquecimiento con hojas por variable y agregación ============
+  # Nombre "real" del principal si lo tuvieras en meta; si no, usamos "(principal)"
+  main_name_real <- as_chr1(x$meta$main %||% "(principal)")
+
+  # Hoja base = lo que ya llama "Tabla" (mantenemos "(principal)" por compatibilidad)
+  plan$`Hoja base` <- as.character(plan$Tabla)
+
+  # Resolver hoja por variable (Var1/2/3)
+  plan$`Hoja Var1` <- vapply(plan$`Variable 1`, hoja_de_variable,
+                             FUN.VALUE = character(1),
+                             survey = survey, section_map = section_map, main_name = main_name_real)
+  plan$`Hoja Var2` <- vapply(plan$`Variable 2`, hoja_de_variable,
+                             FUN.VALUE = character(1),
+                             survey = survey, section_map = section_map, main_name = main_name_real)
+  plan$`Hoja Var3` <- vapply(plan$`Variable 3`, hoja_de_variable,
+                             FUN.VALUE = character(1),
+                             survey = survey, section_map = section_map, main_name = main_name_real)
+
+  # Inferir agregación (sólo cuando Hoja base es principal y VarN está en hoja hija)
+  plan$`Agreg Var2` <- mapply(
+    inferir_agreg,
+    var1 = plan$`Variable 1`,
+    varN = plan$`Variable 2`,
+    hoja_base = plan$`Hoja base`,
+    hoja_varN = plan$`Hoja Var2`,
+    USE.NAMES = FALSE
+  )
+  plan$`Agreg Var3` <- mapply(
+    inferir_agreg,
+    var1 = plan$`Variable 1`,
+    varN = plan$`Variable 3`,
+    hoja_base = plan$`Hoja base`,
+    hoja_varN = plan$`Hoja Var3`,
+    USE.NAMES = FALSE
+  )
+
   # Normaliza 'Procesamiento' y aplica rewriter de tokens ODK
   plan <- plan %>% mutate(`Procesamiento` = normalizar_proc(`Procesamiento`))
   plan$Procesamiento <- vapply(plan$Procesamiento, rewrite_odk_tokens, character(1))
@@ -1152,6 +1334,75 @@ generar_plan_limpieza <- function(
     mutate(ID = paste0(.pref, sprintf("%03d", .row))) %>%
     select(-.row, -.grp, -Nivel, -.pref)
 
+  # --- Sanitizado final del RHS (tapones de fuga) ---
+  plan$Procesamiento <- gsub(
+    "jr:choice-name\\s*\\(",
+    "as.character(",
+    plan$Procesamiento, perl = TRUE
+  )
+
+  plan$Procesamiento <- gsub(
+    "perl\\s*==\\s*TRUE",
+    "perl = TRUE",
+    plan$Procesamiento, perl = TRUE
+  )
+
+  plan$Procesamiento <- gsub(
+    "selected\\s*\\(\\s*([A-Za-z0-9_\\.]+)\\s*,\\s*'([^']+)'\\s*\\)",
+    'grepl("(^|\\\\s)\\2(\\\\s|$)", \\1, perl = TRUE)',
+    plan$Procesamiento, perl = TRUE
+  )
+
+  # --- FILTRO FINAL: omitir calculate principal→hijo sin agregación explícita ---
+  if (nrow(plan)) {
+    main_name <- "(principal)"
+
+    # Mapa: variable -> group_name -> tabla (para detectar si es hijo)
+    var2grp <- setNames(as.character(survey$group_name %||% NA_character_), survey$name)
+    hoja_de_var <- function(v){
+      if (is.na(v) || !nzchar(v)) return(NA_character_)
+      gv <- as.character(var2grp[[v]] %||% NA_character_)
+      tabla_destino_de(gv, section_map, main_name = main_name)
+    }
+
+    # Extrae drivers (posibles Var2/Var3) desde el RHS
+    drivers_from_proc <- function(txt){
+      .drivers_from_expr(as.character(txt %||% ""), survey$name)
+    }
+
+    # Heurística de agregación inequívoca en el RHS
+    tiene_agregacion <- function(rhs){
+      r <- as.character(rhs %||% "")
+      grepl("\\b(sum|any|all|min|max)\\s*\\(", r) ||
+        grepl("\\bpaste\\s*\\([^)]*collapse\\s*=", r, perl = TRUE) ||
+        grepl("\\bn_[A-Za-z0-9_]+\\b", r)
+    }
+
+    # ¿Es una regla ambigua?
+    es_ambigua <- function(row){
+      if (!identical(row[["Categoría"]], "Valores calculados")) return(FALSE)
+      if (!identical(row[["Tabla"]], main_name)) return(FALSE)
+
+      rhs <- row[["Procesamiento"]]
+      if (tiene_agregacion(rhs)) return(FALSE)
+
+      # Detectar Var2/Var3 (o cualquier driver) y ver si alguno está en hoja hija
+      drs <- unique(drivers_from_proc(rhs))
+      if (!length(drs)) return(FALSE)
+
+      hojas <- vapply(drs, hoja_de_var, character(1))
+      any(!is.na(hojas) & hojas != main_name)
+    }
+
+    keep <- !apply(plan, 1, es_ambigua)
+    n_drop <- sum(!keep)
+
+    if (n_drop > 0) {
+      message(sprintf("[rule_factory] Omitidas %d reglas calculate principal→hijo sin agregación explícita.", n_drop))
+      plan <- plan[keep, , drop = FALSE]
+    }
+  }
+
   # --- SALIDA: exactas columnas solicitadas ----------------------------------
   plan %>%
     select(
@@ -1159,6 +1410,8 @@ generar_plan_limpieza <- function(
       `Variable 1`, `Variable 1 - Etiqueta`,
       `Variable 2`, `Variable 2 - Etiqueta`,
       `Variable 3`, `Variable 3 - Etiqueta`,
-      `Procesamiento`
+      `Procesamiento`,
+      # --- NUEVO: metadatos de cruce -----------------------------------------
+      `Hoja base`, `Hoja Var1`, `Hoja Var2`, `Hoja Var3`, `Agreg Var2`, `Agreg Var3`
     )
 }

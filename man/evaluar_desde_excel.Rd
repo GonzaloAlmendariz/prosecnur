@@ -2,22 +2,38 @@
 % Please edit documentation in R/evaluacion_data.R
 \name{evaluar_desde_excel}
 \alias{evaluar_desde_excel}
-\title{Evaluar desde Excel}
+\title{Atajo: Evaluar cargando el plan directo desde Excel}
 \usage{
 evaluar_desde_excel(
   datos,
   path_xlsx,
   hoja_principal = NULL,
-  contar_na_como_inconsistencia = FALSE
+  contar_na_como_inconsistencia = FALSE,
+  choices = NULL,
+  use_choice_labels = FALSE
 )
 }
 \arguments{
-\item{datos}{data.frame, lista lector_limpieza() o ruta a .xlsx}
+\item{datos}{\code{data.frame}, lista de data.frames, o ruta \code{.xlsx}.}
 
-\item{path_xlsx}{ruta al plan .xlsx}
+\item{path_xlsx}{Ruta al plan \code{.xlsx}.}
 
-\item{hoja_principal}{si \code{datos} es ruta a .xlsx, hoja a leer}
+\item{hoja_principal}{Si \code{datos} es ruta \code{.xlsx}, hoja a leer.}
+
+\item{contar_na_como_inconsistencia}{Si \code{TRUE}, los \code{NA} del flag cuentan como inconsistencia.}
+
+\item{choices}{(opcional) lista nombrada: \code{var} -> named character \code{c(code="Etiqueta")} para inyectar \code{var_label}.}
+
+\item{use_choice_labels}{si \code{TRUE}, aplica \code{choices} y crea columnas \verb{*_label}.}
+}
+\value{
+Lista devuelta por \code{evaluar_consistencia()}.
 }
 \description{
-Evaluar desde Excel
+Atajo: Evaluar cargando el plan directo desde Excel
+}
+\examples{
+\dontrun{
+ev <- evaluar_desde_excel(datos = mis_tablas, path_xlsx = "plan_limpieza.xlsx")
+}
 }
