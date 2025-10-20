@@ -10,6 +10,19 @@ suppressPackageStartupMessages({
   library(rlang)
 })
 
+# --- helper interno, al principio del archivo si no existe aún ---
+.is_num_like <- function(tablas, hoja, var){
+  if (!hoja %in% names(tablas)) return(FALSE)
+  if (!var  %in% names(tablas[[hoja]])) return(FALSE)
+  x <- tablas[[hoja]][[var]]
+  if (is.numeric(x)) return(TRUE)
+  if (is.character(x)) {
+    ok <- suppressWarnings(!is.na(as.numeric(x)))
+    return(mean(ok, na.rm = TRUE) >= 0.7)
+  }
+  FALSE
+}
+
 # -------------------------------------------------------------------
 # Utilidades pequeñas
 # -------------------------------------------------------------------
@@ -399,43 +412,64 @@ cargar_plan_excel <- function(path, sheet = "Plan"){
   txt  <- info$txt; var2sheet <- info$var2sheet
   if (!length(var2sheet)) return(list(rhs2 = txt, omit = FALSE))
 
+  # 1) Reemplazar agregaciones explícitas (sum/paste/count) por AGG_*
   for (v in names(var2sheet)) {
     hoja <- var2sheet[[v]]
     if (is.null(hoja) || !nzchar(hoja) || hoja == base_table_key) next
 
     txt <- gsub(paste0("\\bsum\\s*\\(\\s*", v, "\\s*\\)"),
                 paste0("AGG_SUM('", hoja, "','", v, "')"), txt, perl = TRUE)
+
     txt <- gsub(paste0("\\bpaste\\s*\\(\\s*", v, "\\s*,\\s*collapse\\s*=\\s*('|\")([^'\"]+)\\1\\s*\\)"),
                 paste0("AGG_PASTE('", hoja, "','", v, "', sep = \"\\2\")"), txt, perl = TRUE)
+
     txt <- gsub(paste0("\\bcount\\s*\\(\\s*", v, "\\s*\\)"),
                 paste0("AGG_N('", hoja, "','", v, "')"), txt, perl = TRUE)
   }
 
+  # 2) Variables cruzadas "crudas" sin agregación -> INFERIR agregación (NO omitir)
   for (v in names(var2sheet)) {
     hoja <- var2sheet[[v]]
     if (is.null(hoja) || hoja == base_table_key) next
 
+    # ¿aparece como token suelto (no ya envuelto en AGG_*)?
     aparece_crudo <- grepl(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"), txt, perl = TRUE) &&
       !grepl(paste0("AGG_(SUM|PASTE|N)\\([^)]*'", v, "'\\)"), txt, perl = TRUE)
 
-    if (aparece_crudo) {
-      trae_agg <- .has_explicit_agg_on(rhs, v)
-      agreg_plan <- NULL
-      if (length(agreg_cols) && !is.null(agreg_cols[[v]]) && .nz(agreg_cols[[v]])) agreg_plan <- tolower(trimws(agreg_cols[[v]]))
+    if (!aparece_crudo) next
 
-      if (!isTRUE(trae_agg) && !.nz(agreg_plan)) return(list(rhs2 = NA_character_, omit = TRUE))
+    # ¿el plan dio agregación para ese var?
+    agreg_plan <- NULL
+    if (length(agreg_cols) && !is.null(agreg_cols[[v]]) && .nz(agreg_cols[[v]])) {
+      agreg_plan <- tolower(trimws(agreg_cols[[v]]))
+    }
 
-      if (.nz(agreg_plan)) {
-        if (agreg_plan %in% c("sum")) {
-          txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
-                      paste0("AGG_SUM('", hoja, "','", v, "')"), txt, perl = TRUE)
-        } else if (agreg_plan %in% c("n","count")) {
-          txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
-                      paste0("AGG_N('", hoja, "','", v, "')"), txt, perl = TRUE)
-        } else {
-          return(list(rhs2 = NA_character_, omit = TRUE))
-        }
+    if (.nz(agreg_plan)) {
+      # respetar lo que diga el plan
+      if (agreg_plan %in% c("sum")) {
+        txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
+                    paste0("AGG_SUM('", hoja, "','", v, "')"), txt, perl = TRUE)
+      } else if (agreg_plan %in% c("n","count")) {
+        txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
+                    paste0("AGG_N('", hoja, "','", v, "')"), txt, perl = TRUE)
+      } else if (agreg_plan %in% c("paste","concat","join")) {
+        txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
+                    paste0("AGG_PASTE('", hoja, "','", v, "', sep = \" \")"), txt, perl = TRUE)
+      } else {
+        # agreg desconocida: intentar inferir
+        infer_sum <- .is_num_like(tablas, hoja, v)
+        rep <- if (infer_sum)
+          paste0("AGG_SUM('", hoja, "','", v, "')") else
+            paste0("AGG_PASTE('", hoja, "','", v, "', sep = \" \")")
+        txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"), rep, txt, perl = TRUE)
       }
+    } else {
+      # SIN guía del plan: inferir por tipo (numérico vs texto)
+      infer_sum <- .is_num_like(tablas, hoja, v)
+      rep <- if (infer_sum)
+        paste0("AGG_SUM('", hoja, "','", v, "')") else
+          paste0("AGG_PASTE('", hoja, "','", v, "', sep = \" \")")
+      txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"), rep, txt, perl = TRUE)
     }
   }
 
