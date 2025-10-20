@@ -7,7 +7,7 @@
 generar_plan_limpieza(
   x,
   incluir = list(required = TRUE, other = TRUE, relevant = TRUE, constraint = TRUE,
-    calculate = TRUE, choice_filter = TRUE, repeat_min1 = TRUE, tiempo_ventana = FALSE),
+    calculate = TRUE, choice_filter = TRUE, repeat_min1 = FALSE, tiempo_ventana = FALSE),
   rango_fecha = NULL,
   campo_fecha = NULL
 )

@@ -2,9 +2,15 @@
 % Please edit documentation in R/lector_limpieza.R
 \name{lector_limpieza}
 \alias{lector_limpieza}
-\title{Lector robusto de Excel RMS/ODK con hojas repetidas}
+\title{Lector robusto de Excel RMS/ODK con verificación de repeat_count}
 \usage{
-lector_limpieza(archivo, hoja_principal = NULL, grupos_repetidos = NULL)
+lector_limpieza(
+  archivo,
+  hoja_principal = NULL,
+  grupos_repetidos = NULL,
+  repeats_count_map = NULL,
+  warn = TRUE
+)
 }
 \arguments{
 \item{archivo}{Ruta al .xlsx}
@@ -14,19 +20,30 @@ Si no se proporciona, se infiere.}
 
 \item{grupos_repetidos}{Vector opcional con nombres de hojas repetidas (tolerante).
 Si no se proporciona, se detectan por columnas típicas (\verb{_parent_index}, etc.).}
+
+\item{repeats_count_map}{(opcional) \code{tibble/data.frame} con columnas:
+\itemize{
+\item \code{repeats} = nombre de hoja “hijo” (coincide con el nombre de sheet exportado)
+\item \code{repeat_count} (o \code{repeats_count}) = expresión del XLSForm
+\item (opcional) \code{source_group} = nombre del group en survey (informativo)
+}}
+
+\item{warn}{Logical. Si \code{TRUE}, emite warnings con el resumen de discrepancias.}
 }
 \value{
-Una lista con:
+Lista con:
 \itemize{
-\item \code{data}: lista de data.frames por hoja (normalizados)
-\item \code{meta$keys}: tibble con claves por hoja (key y parent_key)
-\item \code{meta$parent_map}: tibble con relaciones hijo→padre
-\item \code{counts}: tibble con conteos por padre para cada repeat
+\item \code{data}: lista de data.frames por hoja (normalizados). La hoja principal incluye columnas \code{n_<repeats>}.
+\item \code{counts}: tibble con conteos por padre para cada repeats (\code{parent_key}, \code{n}, \code{repeats_name}).
+\item \code{meta$main}: nombre de la hoja principal.
+\item \code{meta$keys}: claves detectadas por hoja.
+\item \code{meta$parent_map}: relaciones hijo→padre.
+\item \code{meta$repeats_count}: mapa de repeat_count utilizado (si se pasó).
+\item \code{rc_checks}: lista por repeats con \code{$by_parent} (fila a fila) y \code{$summary}.
 }
 }
 \description{
-Lee un archivo Excel exportado de KoBo/ODK (o similar), normaliza nombres
-de columnas y detecta relaciones padre–hijo entre hoja principal y grupos
-repetidos. Agrega conteos \verb{n_<repeat>} a la hoja principal cuando existe
-el vínculo, y devuelve metadatos útiles para validación.
+Lee un Excel exportado de KoBo/ODK, normaliza columnas, detecta relaciones
+padre–hijo y, \strong{si se provee \code{repeats_count_map}}, compara por fila del padre
+el número de hijos que \strong{tiene} vs. el que \strong{debería tener} según el \code{repeat_count}.
 }

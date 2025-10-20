@@ -356,7 +356,11 @@
         cat(sprintf("      · hoja generada: %s (_parent_index → _index de «%s»)\n",
                     fila$tabla_hija[1], fila$tabla_padre[1]))
       }
+      # // NEW: pinta repeat_count si viene
+      rc <- tryCatch({ x$meta$section_map$repeat_count[x$meta$section_map$group_name == gname][1] }, error = function(e) NA_character_)
+      if (.nz(rc)) cat("      · repeat_count: ", rc, "\n", sep = "")
     }
+
   })
 }
 
@@ -480,8 +484,12 @@ leer_xlsform_limpieza <- function(path,
     if (!cc %in% names(survey_raw)) survey_raw[[cc]] <- ""
   }
 
+  # // NEW: repeat_count siempre presente (ya viene en tu XLS, pero blindamos)
+  if (!"repeat_count" %in% names(survey_raw)) survey_raw$repeat_count <- ""
+  survey_raw$repeat_count[is.na(survey_raw$repeat_count)] <- ""
+
   # === fuerza a character y sin NA en columnas de expresiones ===
-  expr_cols <- c("relevant","constraint","choice_filter","calculation")
+  expr_cols <- c("relevant","constraint","choice_filter","calculation", "repeat_count")
   for (cc in expr_cols) {
     survey_raw[[cc]] <- as.character(survey_raw[[cc]])
     survey_raw[[cc]][is.na(survey_raw[[cc]])] <- ""
@@ -571,16 +579,19 @@ leer_xlsform_limpieza <- function(path,
                    relevant=character(), appearance=character(), relevant_vars=list())
 
   # repeat_count (si existe)
-  repeat_count_vec <- if ("repeat_count" %in% names(survey_raw)) survey_raw$repeat_count else rep(NA_character_, nrow(survey_raw))
+  repeat_count_vec <- survey_raw$repeat_count  # // CHANGED: ya garantizada arriba
+
   if (nrow(groups_detail_df)) {
-    groups_detail_df$repeat_count <- NA_character_
+    groups_detail_df$repeat_count      <- NA_character_
     groups_detail_df$repeat_count_vars <- vector("list", nrow(groups_detail_df))
+
     for (i in seq_len(nrow(groups_detail_df))) {
       if (isTRUE(groups_detail_df$is_repeat[i])) {
         br <- groups_detail_df$begin_row[i]
         rc <- repeat_count_vec[br]
-        groups_detail_df$repeat_count[i] <- ifelse(is.na(rc) || !nzchar(rc), NA_character_, rc)
-        groups_detail_df$repeat_count_vars[[i]] <- .vars_in_expr(groups_detail_df$repeat_count[i] %||% "")
+        rc <- ifelse(is.na(rc) || !nzchar(rc), NA_character_, rc)
+        groups_detail_df$repeat_count[i]      <- rc
+        groups_detail_df$repeat_count_vars[[i]] <- .vars_in_expr(rc %||% "")
       } else {
         groups_detail_df$repeat_count_vars[[i]] <- character(0)
       }
@@ -655,6 +666,14 @@ leer_xlsform_limpieza <- function(path,
         nzchar(gsub("\\s+", " ", ifelse(is.na(r), "", as.character(r))))
       },
       is_repeat      = as.logical(groups_detail_df$is_repeat),
+      # // NEW ↓↓↓
+      repeat_count   = {
+        rc <- groups_detail_df$repeat_count
+        rc <- gsub("\\s+", " ", trimws(as.character(rc)))
+        ifelse(nzchar(rc), rc, NA_character_)
+      },
+      repeat_count_vars = groups_detail_df$repeat_count_vars,
+      # // NEW ↑↑↑
       .gord          = rank(groups_detail_df$begin_row, ties.method = "first") |> as.integer()
     )
 
@@ -869,6 +888,7 @@ leer_xlsform_limpieza <- function(path,
             "#EDC948","#B07AA1","#FF9DA7","#9C755F","#BAB0AC")
   if (n <= length(base)) base[seq_len(n)] else rep_len(base, n)
 }
+
 
 #' Graficar secciones, condiciones y repeats del XLSForm (sin inferir jerarquías)
 #'
@@ -1210,7 +1230,6 @@ GraficarSecciones <- function(inst,
       plot.margin = ggplot2::margin(t = 12, r = 18, b = 12, l = 18)
     )
 }
-
 
 
 

@@ -1206,7 +1206,7 @@ generar_plan_limpieza <- function(
       constraint     = TRUE,
       calculate      = TRUE,
       choice_filter  = TRUE,
-      repeat_min1    = TRUE,
+      repeat_min1    = FALSE, # ya no tiene utilidad por el lector de repitentes
       tiempo_ventana = FALSE
     ),
     rango_fecha = NULL,
