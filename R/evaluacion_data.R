@@ -799,10 +799,11 @@ evaluar_consistencia <- function(datos,
     plan2,
     id_regla, nombre_regla,
     tabla_dest, seccion, categoria, tipo_observacion,
+    objetivo,                     # <-- AÑADIDO
     variable_1, variable_1_etiqueta,
     variable_2, variable_2_etiqueta,
     variable_3, variable_3_etiqueta,
-    procesamiento
+    procesamiento                 # <-- AÑADIDO
   ) %>% dplyr::rename(tabla = tabla_dest)
 
   list(
@@ -954,6 +955,25 @@ total_inconsistencias <- function(evaluacion) {
 # Render de bloques (kable/HTML) y construcción de bloques
 # -------------------------------------------------------------------
 
+
+# coalesce que ignora columnas ausentes
+.safe_coalesce <- function(df, cols, fill = NA_character_) {
+  exist <- cols[cols %in% names(df)]
+  if (!length(exist)) return(rep(fill, nrow(df)))
+  out <- df[[exist[1]]]
+  if (length(exist) > 1) {
+    for (nm in exist[-1]) out <- dplyr::coalesce(out, df[[nm]])
+  }
+  out
+}
+
+# renombra "si existe": de cualquiera de los nombres en 'from' al nombre único 'to'
+.rename_if_present <- function(df, from, to) {
+  hit <- intersect(from, names(df))
+  if (length(hit)) names(df)[match(hit, names(df))] <- to
+  df
+}
+
 #' Saneador de etiquetas (objetivo, etc.)
 #' @keywords internal
 .san_label <- function(s) {
@@ -963,6 +983,10 @@ total_inconsistencias <- function(evaluacion) {
   s <- gsub("[\\r\\n]+", " ", s, perl = TRUE)
   trimws(gsub("\\s+", " ", s, perl = TRUE))
 }
+
+# Helpers
+`%||%` <- function(a,b) if (is.null(a) || (length(a)==1 && is.na(a))) b else a
+coalesce2 <- function(...) Reduce(dplyr::coalesce, list(...))
 
 #' Construir bloques por regla (resumen + casos)
 #'
@@ -1002,7 +1026,10 @@ reporte_bloques <- function(evaluacion,
   meta <- evaluacion$reglas_meta
   if (!nrow(res)) return(tibble::tibble())
 
-  # filtros opcionales
+  # --- Filtros opcionales (ser tolerantes si 'tipo_observacion' no está) ---
+  if (!"tipo_observacion" %in% names(res) && "Tipo" %in% names(res)) {
+    res$tipo_observacion <- res$Tipo
+  }
   if (!is.null(familias) && length(familias)) {
     keep <- vapply(res$tipo_observacion, function(x) {
       any(stringr::str_detect(x %||% "", paste(familias, collapse = "|")))
@@ -1017,10 +1044,32 @@ reporte_bloques <- function(evaluacion,
   }
   if (!nrow(res)) return(tibble::tibble())
 
-  # join metadatos
+  # --- Join metadatos ---
   bloques <- dplyr::left_join(res, meta, by = c("id_regla","nombre_regla"))
 
-  # construir lista de casos por regla
+  # --- Asegurar columnas antes de usarlas (clave para evitar el error) ---
+  need_chr <- c(
+    "tabla","tabla.x","tabla.y","Hoja base",
+    "seccion","seccion.x","seccion.y",
+    "categoria","categoria.x","categoria.y",
+    "tipo_observacion","tipo_observacion.x","tipo_observacion.y","Tipo",
+    "objetivo","Objetivo"
+  )
+  for (nm in need_chr) {
+    if (!nm %in% names(bloques)) bloques[[nm]] <- NA_character_
+  }
+
+  # --- Normalización de columnas canónicas ---
+  bloques <- dplyr::mutate(
+    bloques,
+    tabla            = dplyr::coalesce(.data$tabla, .data$tabla.x, .data$tabla.y, .data$`Hoja base`, "(principal)"),
+    seccion          = dplyr::coalesce(.data$seccion, .data$seccion.x, .data$seccion.y),
+    categoria        = dplyr::coalesce(.data$categoria, .data$categoria.x, .data$categoria.y),
+    tipo_observacion = dplyr::coalesce(.data$tipo_observacion, .data$tipo_observacion.x, .data$tipo_observacion.y, .data$Tipo),
+    objetivo         = dplyr::coalesce(.data$objetivo, .data$Objetivo)
+  )
+
+  # --- Construir lista de casos por regla ---
   bloques$casos <- lapply(seq_len(nrow(bloques)), function(i) {
     if (!incluir_solo_inconsistentes && (bloques$n_inconsistencias[i] %||% 0L) == 0L) {
       return(tibble::tibble())
@@ -1039,15 +1088,18 @@ reporte_bloques <- function(evaluacion,
     bloques <- bloques[keep, , drop = FALSE]
   }
 
-  # orden
+  # --- Orden final y selección de columnas visibles "limpias" ---
   if (identical(ordenar, "n_desc")) {
     bloques <- dplyr::arrange(bloques, dplyr::desc(.data$n_inconsistencias), .data$id_regla)
   } else {
     bloques <- dplyr::arrange(bloques, .data$id_regla)
   }
 
+  # dejamos columnas canónicas primero; las _x/_y quedan para depurar si quieres
+  # (si prefieres ocultarlas del todo, agrega un select(-any_of(...)))
   bloques
 }
+
 
 #' Renderizar bloques en HTML (kableExtra)
 #'
@@ -1098,12 +1150,10 @@ render_bloques_kable <- function(
   if (!requireNamespace("kableExtra", quietly = TRUE)) stop("Necesitas {kableExtra}.")
   if (!requireNamespace("htmltools", quietly = TRUE)) stop("Necesitas {htmltools}.")
   if (nrow(bloques) == 0) {
-    cat("<p><em>No hay reglas para mostrar.</em></p>")
-    return(invisible(NULL))
+    return(htmltools::tags$p(htmltools::tags$em("No hay reglas para mostrar.")))
   }
   if (!is.null(seed)) set.seed(seed)
 
-  # mapeo opcional de nombres limpios→originales (sólo visual)
   apply_mapping <- function(nms){
     if (!isTRUE(usar_mapeo) || is.null(map_clean_to_original)) return(nms)
     m <- map_clean_to_original
@@ -1114,29 +1164,45 @@ render_bloques_kable <- function(
     repl
   }
 
+  cards <- vector("list", nrow(bloques))
+
   for (i in seq_len(nrow(bloques))) {
     b <- bloques[i,]
 
-    # Cabecera por bloque
     cab_id <- paste0("[", b$id_regla %||% "", "]")
-    objetivo <- .san_label(b$objetivo)
-    tipo     <- .san_label(b$tipo_observacion)
 
-    header_html <- htmltools::tagList(
-      htmltools::tags$div(style="margin:18px 0;border-top:1px solid #ddd;padding-top:14px"),
-      htmltools::tags$h3(esc(cab_id)),
-      if (nz(objetivo)) htmltools::tags$div(htmltools::tags$strong("Objetivo:"), " ", esc(objetivo)),
-      if (nz(tipo))     htmltools::tags$div(htmltools::tags$strong("Tipo:"), " ", esc(tipo))
+    # fallbacks robustos
+    objetivo <- .san_label(
+      dplyr::coalesce(
+        b$objetivo %||% NA_character_,
+        b$Objetivo %||% NA_character_
+      )
+    )
+    tipo <- .san_label(
+      dplyr::coalesce(
+        b$tipo_observacion %||% NA_character_,
+        b$Tipo %||% NA_character_,
+        b$tipo %||% NA_character_,
+        b$categoria %||% NA_character_
+      )
     )
 
-    # Resumen compacto
+    header_html <-
+      htmltools::tagList(
+        htmltools::tags$div(style="margin:18px 0;border-top:1px solid #ddd;padding-top:14px"),
+        htmltools::tags$h3(esc(cab_id)),
+        if (nz(objetivo)) htmltools::tags$div(htmltools::tags$strong("Objetivo:"), " ", esc(objetivo)),
+        if (nz(tipo))     htmltools::tags$div(htmltools::tags$strong("Tipo:"), " ", esc(tipo))
+      )
+
+    # Resumen
     lab1 <- .san_label(b$variable_1_etiqueta)
     lab2 <- .san_label(b$variable_2_etiqueta)
     lab3 <- .san_label(b$variable_3_etiqueta)
 
     resumen_raw <- tibble::tibble(
       `Id regla`   = b$id_regla %||% NA_character_,
-      `Tabla`      = b$tabla     %||% NA_character_,
+      `Tabla`      = (b$tabla %||% b$`Hoja base`) %||% "(principal)",
       `Variable 1` = b$variable_1 %||% NA_character_,
       `Etiqueta 1` = if (nz(lab1)) lab1 else NA_character_,
       `Variable 2` = b$variable_2 %||% NA_character_,
@@ -1146,7 +1212,6 @@ render_bloques_kable <- function(
       `# inconsist.` = b$n_inconsistencias %||% 0L,
       `%`           = if (!is.na(b$porcentaje)) sprintf("%.1f%%", 100*b$porcentaje) else NA_character_
     )
-    # ocultar columnas 2/3 si vienen vacías
     cols_chk  <- c("Variable 2","Etiqueta 2","Variable 3","Etiqueta 3")
     drop_cols <- vapply(resumen_raw[cols_chk], function(col) all(is.na(col) | trimws(as.character(col))==""), logical(1))
     keep_cols <- c(setdiff(names(resumen_raw), cols_chk[drop_cols]))
@@ -1159,12 +1224,12 @@ render_bloques_kable <- function(
                                 font_size = 13) |>
       kableExtra::scroll_box(height = alto_resumen, width = ancho_resumen,
                              box_css = "overflow-x:auto; overflow-y:auto; border:1px solid #ddd; padding:6px; border-radius:6px;")
+    k_res_node <- htmltools::HTML(as.character(k_res))
 
     # Casos
     casos <- b$casos[[1]]
     if (!is.data.frame(casos)) casos <- tibble::tibble()
 
-    # Si no hay casos y se pidió muestreo, tomar del fallback
     if (!nrow(casos) && mostrar_aleatorios_si_cero > 0) {
       if (is.data.frame(fallback_df) && nrow(fallback_df)) {
         n <- min(nrow(fallback_df), mostrar_aleatorios_si_cero)
@@ -1172,7 +1237,6 @@ render_bloques_kable <- function(
       }
     }
 
-    # elegir columnas razonables para mostrar
     desired_cols <- unique(na.omit(c(
       cols_id, b$variable_1, b$variable_2, b$variable_3,
       paste0(b$variable_1, "_label"),
@@ -1187,18 +1251,19 @@ render_bloques_kable <- function(
     casos_show <- casos[, keep, drop = FALSE]
     names(casos_show) <- apply_mapping(names(casos_show))
 
-    k_casos <- if (nrow(casos_show)) {
-      knitr::kable(utils::head(casos_show, max_casos), format = "html", align = "l", escape = TRUE) |>
+    k_casos_node <- if (nrow(casos_show)) {
+      k_casos <- knitr::kable(utils::head(casos_show, max_casos), format = "html", align = "l", escape = TRUE) |>
         kableExtra::kable_styling(full_width = FALSE,
                                   bootstrap_options = c("hover","condensed"),
                                   font_size = 12) |>
         kableExtra::scroll_box(height = alto_casos, width = ancho_casos,
                                box_css = "overflow-x:auto; overflow-y:auto; border:1px solid #ddd; padding:6px; border-radius:6px;")
+      htmltools::HTML(as.character(k_casos))
     } else {
       htmltools::HTML("<em>Casos: (ninguno)</em>")
     }
 
-    # Mostrar procesamiento usado (auditoría)
+    # Procesamiento (auditoría)
     proc <- as.character(b$procesamiento %||% "")
     proc_node <- if (nz(proc)) {
       htmltools::tags$div(
@@ -1211,14 +1276,15 @@ render_bloques_kable <- function(
       )
     } else htmltools::HTML("")
 
-    htmltools::catTagList(
-      htmltools::tags$div(style="margin:18px 0;border-top:1px solid #ddd;padding-top:14px"),
+    # Un “card” por regla
+    cards[[i]] <- htmltools::tagList(
+      htmltools::tags$div(style = "margin:18px 0; border-top:1px solid #ddd; padding-top:14px"),
       header_html,
-      htmltools::HTML(as.character(k_res)),
-      if (inherits(k_casos, "shiny.tag")) k_casos else htmltools::HTML(as.character(k_casos)),
+      k_res_node,
+      k_casos_node,
       proc_node
     )
   }
 
-  invisible(NULL)
+  htmltools::tagList(cards)
 }
