@@ -527,78 +527,6 @@ build_required_g <- function(survey, section_map, meta, gmap){
   })
 }
 
-# ---- OTHER (“Otros”) --------------------------------------------------------
-detectar_other_links <- function(survey){
-  survey %>%
-    mutate(type_base = tolower(trimws(sub("\\s.*$", "", .data$type)))) %>%
-    filter(type_base %in% c("text","string")) %>%
-    mutate(parent = str_match(as.character(.data$relevant %||% ""), "selected\\(\\$\\{([A-Za-z0-9_]+)\\},\\s*'96'\\)")[,2]) %>%
-    filter(!is.na(parent), nzchar(parent)) %>%
-    transmute(parent_var = parent, other_var = name, group_name = .data$group_name, .qord = row_number()) %>% distinct()
-}
-build_other_g <- function(survey, section_map, meta, gmap){
-  links <- detectar_other_links(survey)
-  if (!nrow(links)) return(tibble::tibble())
-
-  pmap_dfr(links, function(parent_var, other_var, group_name, .qord){
-    gname <- as_chr1(group_name); secc <- gname
-
-    # --- tomar SIEMPRE una sola fila usando match() ---
-    idx_other  <- match(other_var,  survey$name)
-    idx_parent <- match(parent_var, survey$name)
-
-    # etiquetas
-    labP  <- lab_pregunta(survey, meta, parent_var)
-    labO  <- lab_pregunta(survey, meta, other_var)
-
-    # tipos base (escalares)
-    tipo_other <- tolower(trimws(sub("\\s.*$", "", as_chr1(survey$type[idx_other]))))
-    tipo_parent<- tolower(trimws(sub("\\s.*$", "", as_chr1(survey$type[idx_parent]))))
-
-    tipo <- as_chr1(tipo_other)
-
-    G_row <- gmap[gmap$group_name == gname, , drop = FALSE]
-    G_r <- as_chr1(if (nrow(G_row)) G_row$G_expr[[1]] else "")
-    G_h <- as_chr1(if (nrow(G_row)) G_row$G_humano[[1]] else "")
-
-    # condición: si el padre es select_multiple, buscar '96' como token; si no, igualdad
-    cond_r_opt <- if (isTRUE(startsWith(as_chr1(tipo_parent), "select_multiple"))) {
-      paste0('grepl("(^|\\\\s)96(\\\\s|$)", ', parent_var, ', perl = TRUE)')
-    } else {
-      paste0("(", parent_var, " == '96')")
-    }
-
-    tabla <- tabla_destino_de(gname, section_map, main_name = "(principal)"); nivel <- nivel_scope(tabla)
-    secc_label <- .section_label(gname, section_map)
-    opening    <- .hum_opening_with_section(secc_label, G_h, "")
-    repeat_txt <- if (.is_repeat_group(gname, section_map)) sprintf("En la hoja de datos «%s» (sección repetida «%s»), ", tabla, secc) else ""
-
-    nom1 <- .norm_rule_name(nombre_regla_salto(other_var, "_otros_req"))
-    nom2 <- .norm_rule_name(nombre_regla_salto(other_var, "_otros_nodet"))
-
-    base1 <- paste0("(", cond_r_opt, ") & ", sprintf("(is.na(%s) | trimws(%s) == \"\")", other_var, other_var))
-    base2 <- paste0("!(", cond_r_opt, ") & ", sprintf("(!is.na(%s) & trimws(%s) != \"\")", other_var, other_var))
-
-    proc1 <- if (nz1(G_r)) paste0(nom1, " <- ((", G_r, ") & ", base1, ")") else paste0(nom1, " <- ", base1)
-    proc2 <- if (nz1(G_r)) paste0(nom2, " <- ((", G_r, ") & ", base2, ")") else paste0(nom2, " <- ", base2)
-
-    obj1 <- paste0(repeat_txt, opening, "si en «", labP, "» se elige «Otros», «", labO, "» debe detallarse.")
-    obj2 <- paste0(repeat_txt, opening, "si en «", labP, "» no se elige «Otros», «", labO, "» no debe llenarse.")
-    obj1 <- gsub("\\$\\{([^}]+)\\}", "«\\1»", obj1, perl = TRUE)
-    obj2 <- gsub("\\$\\{([^}]+)\\}", "«\\1»", obj2, perl = TRUE)
-
-    tibble::tibble(
-      ID = NA_character_, Tabla = tabla, `Sección` = secc, Categoría = "Saltos de preguntas",
-      Tipo = as_chr1(tipo), `Nombre de regla` = c(nom1, nom2), Objetivo = c(obj1, obj2),
-      `Variable 1` = other_var, `Variable 1 - Etiqueta` = labO,
-      `Variable 2` = parent_var, `Variable 2 - Etiqueta` = labP,
-      `Variable 3` = NA_character_, `Variable 3 - Etiqueta` = NA_character_,
-      `Procesamiento` = c(proc1, proc2),
-      `Apertura de sección (R)` = as_chr1(G_r), `Apertura de sección (texto)` = as_chr1(G_h),
-      `Ejecutable en R` = "Sí", Nivel = nivel
-    )
-  })
-}
 
 # ---- Relevant (saltos) ------------------------------------------------------
 build_relevant_g <- function(survey, section_map, meta, choices, gmap){
@@ -984,7 +912,7 @@ build_calculate_g <- function(survey, section_map, meta, gmap){
 }
 
 
-# ---- Choice filter -----------------------------------------------------------
+# ---- Choice filter (select_one) — con "no aplica" y objetivo humanizado ----
 build_choice_filter_g <- function(inst, gmap){
   survey      <- inst$survey
   choices     <- inst$choices %||% tibble()
@@ -994,33 +922,50 @@ build_choice_filter_g <- function(inst, gmap){
   if (!nrow(survey)) return(tibble())
 
   dat <- survey %>%
-    filter(!is.na(.data$name)) %>%
-    mutate(type_base = tolower(trimws(sub("\\s.*$", "", .data$type))),
-           choice_filter = ifelse(is.na(.data$choice_filter), "", .data$choice_filter)) %>%
-    filter(type_base == "select_one", nzchar(choice_filter), nzchar(list_name))
+    dplyr::filter(!is.na(.data$name)) %>%
+    dplyr::mutate(
+      type_base     = tolower(trimws(sub("\\s.*$", "", .data$type))),
+      choice_filter = ifelse(is.na(.data$choice_filter), "", .data$choice_filter)
+    ) %>%
+    dplyr::filter(type_base == "select_one", nzchar(choice_filter), nzchar(list_name))
   if (!nrow(dat)) return(tibble())
 
-  pmap_dfr(dat, function(...){
-    row <- list(...)
-    var <- row$name; lab <- lab_pregunta(survey, meta, var)
-    gname <- as_chr1(row$group_name); secc <- gname
-    tipo <- as_chr1(row$type_base); ln <- row$list_name
+  purrr::pmap_dfr(dat, function(...){
+    row   <- list(...)
+    var   <- row$name
+    lab   <- lab_pregunta(survey, meta, var)
+    gname <- as_chr1(row$group_name)
+    secc  <- gname
+    tipo  <- as_chr1(row$type_base)
+    ln    <- row$list_name
 
+    # Apertura de grupo y relevant
     G_row <- gmap[gmap$group_name == gname, , drop = FALSE]
-    G_r <- as_chr1(if (nrow(G_row)) G_row$G_expr[[1]] else ""); G_h <- as_chr1(if (nrow(G_row)) G_row$G_humano[[1]] else "")
+    G_r <- as_chr1(if (nrow(G_row)) G_row$G_expr[[1]]   else "")
+    G_h <- as_chr1(if (nrow(G_row)) G_row$G_humano[[1]] else "")
 
-    rel_parsed <- tryCatch(relevant_a_r_y_humano(as_chr1(row$relevant %||% ""), survey, choices, meta), error=function(e) list(expr_r="", human=""))
-    rel_r <- as_chr1(rel_parsed$expr_r %||% ""); rel_h <- as_chr1(rel_parsed$human %||% "")
-    cond_r <- if (nz1(G_r) && nz1(rel_r)) paste0("(", G_r, ") & (", rel_r, ")") else if (nz1(G_r)) G_r else if (nz1(rel_r)) rel_r else ""
+    rel_parsed <- tryCatch(
+      relevant_a_r_y_humano(as_chr1(row$relevant %||% ""), survey, choices, meta),
+      error = function(e) list(expr_r = "", human = "")
+    )
+    rel_r <- as_chr1(rel_parsed$expr_r %||% "")
+    rel_h <- as_chr1(rel_parsed$human  %||% "")
 
-    extras <- ccols_map$extra_cols[[ match(ln, ccols_map$list_name) ]] %||% character(0)
+    cond_r <- if (nz1(G_r) && nz1(rel_r)) paste0("(", G_r, ") & (", rel_r, ")")
+    else if (nz1(G_r)) G_r
+    else if (nz1(rel_r)) rel_r
+    else ""
+
+    # Drivers declarados en meta como columnas filter_*
+    extras      <- ccols_map$extra_cols[[ match(ln, ccols_map$list_name) ]] %||% character(0)
     cols_driver <- extras[grepl("^filter_", extras)]
     if (!length(cols_driver)) return(tibble())
 
     ch_ln <- choices[choices$list_name == ln, , drop = FALSE]
     if (!nrow(ch_ln)) return(tibble())
 
-    tabla <- tabla_destino_de(gname, section_map, main_name = "(principal)"); nivel <- nivel_scope(tabla)
+    # Metadatos de sección/tabla
+    tabla      <- tabla_destino_de(gname, section_map, main_name = "(principal)")
     secc_label <- .section_label(gname, section_map)
     apertura   <- if (nz1(G_h) || nz1(rel_h)) {
       if (nz1(G_h) && nz1(rel_h)) {
@@ -1030,33 +975,82 @@ build_choice_filter_g <- function(inst, gmap){
       else sprintf("Si (%s), ", rel_h)
     } else ""
 
-    map_dfr(cols_driver, function(colf){
-      drv <- sub("^filter_", "", colf); if (!drv %in% survey$name) return(tibble())
+    purrr::map_dfr(cols_driver, function(colf){
+
+      drv <- sub("^filter_", "", colf)
+      if (!drv %in% survey$name) return(tibble())
       drv_lab <- lab_pregunta(survey, meta, drv)
 
-      opt_names <- unique(na.omit(as.character(ch_ln$name)))
-      vals_ok   <- unique(na.omit(as.character(ch_ln[[colf]]))); vals_ok <- vals_ok[nzchar(vals_ok)]
-      if (!length(vals_ok)) return(tibble())
+      # Mapa: valor de la hija (var) -> conjunto permitido del driver (drv)
+      ch_tmp <- ch_ln %>%
+        dplyr::mutate(
+          name_chr = as.character(.data$name),
+          filter_v = as.character(.data[[colf]])
+        )
 
-      # Por simplicidad, comprobamos que al elegir cualquier opción, el driver esté en el conjunto permitido
-      vals_q <- paste0("'", gsub("'", "\\\\'", vals_ok), "'")
-      cond_ok <- paste0("trimws(as.character(", drv, ")) %in% c(", paste(vals_q, collapse=","), ")")
+      rows_ok <- split(ch_tmp$filter_v, ch_tmp$name_chr)  # "valor var" -> c('2','3','4','5', ...)
+      rows_ok <- lapply(rows_ok, function(v){
+        vv <- unique(na.omit(as.character(v)))
+        vv[nzchar(vv)]
+      })
+      rows_ok <- Filter(function(v) length(v) > 0, rows_ok)
+      if (!length(rows_ok)) return(tibble())
 
-      nom   <- .norm_rule_name(paste0("cons_", sanitize_id(var), "_cf_", sanitize_id(drv)))
-      base  <- paste0("!(", cond_ok, ") & ", no_vacio(var))  # cuando se respondió, driver debe ser válido
-      proc  <- if (nz1(cond_r)) paste0(nom, " <- ( (", cond_r, ") & ", base, " )") else paste0(nom, " <- ", base)
+      # Casos OK mapeados: (var == 'k' & drv %in% {…})
+      driver_cases <- lapply(names(rows_ok), function(k){
+        allowed  <- rows_ok[[k]]
+        allowed_q <- paste0("'", gsub("'", "\\\\'", allowed), "'", collapse = ",")
+        sprintf("(%s == '%s' & trimws(as.character(%s)) %%in%% c(%s))",
+                var, gsub("'", "\\\\'", k), drv, allowed_q)
+      })
+      driver_cases <- Filter(Negate(is.null), driver_cases)
+
+      # Permisos NA/vacío (no marcar cuando no aplica por falta de info)
+      permiso_na <- sprintf("is.na(%s) | !nzchar(trimws(as.character(%s))) | is.na(%s)", var, var, drv)
+
+      # *** FIX CLAVE: NO APLICA si la hija no está entre las claves del filtro ***
+      keys        <- names(rows_ok)
+      keys_q      <- paste0("'", gsub("'", "\\\\'", keys), "'", collapse = ",")
+      perm_noaplica <- sprintf("!(trimws(as.character(%s)) %%in%% c(%s))", var, keys_q)
+
+      # OK final = (casos mapeados) OR (NA/vacío) OR (NO APLICA)
+      ok_expr <- paste(c(unlist(driver_cases), permiso_na, perm_noaplica), collapse = " | ")
+
+      # TRUE = violación (tu convención)
+      nom  <- .norm_rule_name(paste0("cons_", sanitize_id(var), "_cf_", sanitize_id(drv)))
+      base <- paste0("!(", ok_expr, ")")
+      proc <- if (nz1(cond_r)) paste0(nom, " <- ( (", cond_r, ") & ", base, " )")
+      else paste0(nom, " <- ", base)
+
+      # Objetivo: claro, conciso y humano
+      resumen_filtro <- purrr::imap_chr(rows_ok, function(v, k) {
+        v_text <- paste(unique(v), collapse = ", ")
+        sprintf("cuando «%s» = '%s', «%s» debe estar en {%s}", lab, k, drv_lab, v_text)
+      }) |> paste(collapse = "; ")
 
       obj <- paste0(
-        if (.is_repeat_group(gname, section_map)) sprintf("En la hoja de datos «%s» (sección repetida «%s»), ", tabla, secc) else "",
-        apertura, "al responder «", lab, "», «", drv_lab, "» debe pertenecer al conjunto permitido por el filtro de opciones."
+        if (.is_repeat_group(gname, section_map))
+          sprintf("En la hoja de datos «%s» (sección repetida «%s»), ", tabla, secc)
+        else "",
+        apertura,
+        "de acuerdo con la lógica del cuestionario, las respuestas en «", lab, "» y «", drv_lab,
+        "» deben guardar coherencia. En particular: ", resumen_filtro, "."
       )
 
-      tibble(
-        ID = NA_character_, Tabla = tabla, `Sección` = secc,
-        Categoría = "Filtro de opciones", Tipo = tipo, `Nombre de regla` = nom, Objetivo = obj,
-        `Variable 1` = var, `Variable 1 - Etiqueta` = lab,
-        `Variable 2` = drv, `Variable 2 - Etiqueta` = drv_lab,
-        `Variable 3` = NA_character_, `Variable 3 - Etiqueta` = NA_character_,
+      tibble::tibble(
+        ID = NA_character_,
+        Tabla = tabla,
+        `Sección` = secc,
+        Categoría = "Filtro de opciones",
+        Tipo = tipo,
+        `Nombre de regla` = nom,
+        Objetivo = obj,
+        `Variable 1` = var,
+        `Variable 1 - Etiqueta` = lab,
+        `Variable 2` = drv,
+        `Variable 2 - Etiqueta` = drv_lab,
+        `Variable 3` = NA_character_,
+        `Variable 3 - Etiqueta` = NA_character_,
         `Procesamiento` = proc,
         .grp = gname
       )
@@ -1245,7 +1239,6 @@ generar_plan_limpieza <- function(
 
   bloques <- list()
   if (isTRUE(incluir$required))       bloques$required      <- build_required_g(survey, section_map, x$meta, gmap)
-  if (isTRUE(incluir$other))          bloques$other         <- build_other_g(survey, section_map, x$meta, gmap)
   if (isTRUE(incluir$relevant))       bloques$relevant      <- build_relevant_g(survey, section_map, x$meta, x$choices %||% tibble(), gmap)
   if (isTRUE(incluir$constraint))     bloques$constraint    <- build_constraint_g(survey, section_map, x$meta, gmap)
   if (isTRUE(incluir$calculate))      bloques$calculate     <- build_calculate_g(survey, section_map, x$meta, gmap)
