@@ -11,35 +11,16 @@ ppra_adaptar_data(
   sm_vars = character(0),
   so_parent_vars = character(0),
   so_child_vars = character(0),
-  out_path = NULL
+  out_path = NULL,
+  path_familias = NULL
 )
 }
-\arguments{
-\item{path_instrumento}{Ruta al XLSForm (survey/choices)}
-
-\item{path_datos}{Ruta a los datos (CSV/XLSX)}
-
-\item{path_plantilla}{Ruta a la plantilla de codificación (hojas por parent)}
-
-\item{sm_vars}{Vector de SM (p.ej. c("services","futuros_servicios"))}
-
-\item{so_parent_vars}{Vector de SO que recodifican el \strong{padre}}
-
-\item{so_child_vars}{Vector de SO que recodifican el \strong{hijo} (why/otro)}
-
-\item{out_path}{Ruta del XLSX de salida}
-}
-\value{
-data.frame adaptado (también guardado en \code{out_path} si se provee)
-}
 \description{
-Función \strong{limpia y universal}:
 \itemize{
-\item \strong{SM}: genera \verb{<parent>_recod} (con overrides y nuevas hijas, normalización de códigos),
-lo inserta a la derecha del \code{parent} y lo colorea \strong{verde}.
-\item \strong{SO-padre}: genera \verb{<parent>_recod}, lo inserta y colorea \strong{azul}.
-\item \strong{SO-hijo}: genera \verb{<parent>_<alias>_recod} (p.ej. \code{CEPR01_why_recod}),
-lo inserta y colorea \strong{azul}.
-No deja columnas técnicas ni requiere “slim”.
+\item \strong{SM}: \verb{<parent>_recod} con overrides y nuevas hijas (verde).
+\item \strong{SO-padre}: \verb{<parent>_recod} con override por \code{text_col} de familias (azul).
+\item \strong{SO-hijo}: \verb{<parent>_<alias>_recod} (azul).
+Escribe en la \strong{hoja correcta} (main o repeat) e \strong{inserta al lado del parent}.
+Exporta un XLSX preservando \strong{todas las hojas} del archivo de datos.
 }
 }
