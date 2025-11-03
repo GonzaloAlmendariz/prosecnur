@@ -18,7 +18,7 @@ ppra_adaptar_instrumento(
 \arguments{
 \item{path_instrumento_in}{XLSX original (hojas \code{survey} y \code{choices})}
 
-\item{path_data_adaptada}{XLSX o \code{data.frame} con columnas *_recod generadas}
+\item{path_data_adaptada}{XLSX (multihoja) o \code{data.frame} con columnas *_recod}
 
 \item{path_instrumento_out}{XLSX de salida}
 
@@ -27,8 +27,7 @@ ppra_adaptar_instrumento(
 \item{so_parent_vars}{vector de select_one que recodifican el \strong{padre}}
 
 \item{so_child_vars}{vector de select_one cuyo recodificado está en el \strong{hijo};
-la/las columnas a agregar se detectan en la data como \verb{^<parent>_.*_recod$}
-(excluyendo \verb{<parent>_recod})}
+se detectan columnas \verb{^<parent>_.+_recod$} (excluyendo \verb{<parent>_recod}) en TODAS las hojas}
 
 \item{choices_order}{"original_first" (default), "by_first_seen", "alphabetical"}
 
@@ -38,14 +37,14 @@ la/las columnas a agregar se detectan en la data como \verb{^<parent>_.*_recod$}
 lista con \code{survey}, \code{choices}, \code{out_path}
 }
 \description{
-Genera un \strong{XLSForm adaptado} desde un instrumento base y una \strong{data ya adaptada}
-(salida de \code{ppra_adaptar_data_simple}), creando:
+Genera un \strong{XLSForm adaptado} desde un instrumento base y una \strong{data adaptada}
+(producida por tu flujo), creando:
 \itemize{
 \item \strong{SM}: \verb{<parent>_recod} (select_multiple).
-\item \strong{SO-padre}: \verb{<parent>_recod} (select_one) usando el catálogo del padre.
-\item \strong{SO-hijo}: \verb{<parent>_<alias>_recod} (select_one), con \strong{lista propia}
-(tokens observados en la data).
-Inserta cada nueva pregunta \strong{debajo} de su base y \strong{colorea}:
-SM (verde), SO (azul). También colorea las filas de \code{choices} del list creado.
+\item \strong{SO-padre}: \verb{<parent>_recod} (select_one) usando catálogo del padre + tokens observados.
+\item \strong{SO-hijo}: \verb{<parent>_<alias>_recod} (select_one), lista propia a partir de tokens
+observados en \strong{todas las hojas} donde aparezca.
+Inserta cada nueva pregunta \strong{debajo} de su base y colorea: SM (verde), SO (azul).
+Lee \strong{todas las hojas} del Excel de data adaptada; si es un data.frame, actúa como antes.
 }
 }

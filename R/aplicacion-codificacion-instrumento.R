@@ -1,5 +1,6 @@
 # =============================================================================
-# ppra_adaptar_instrumento: crea un XLSForm adaptado compatible con el flujo "simple"
+# ppra_adaptar_instrumento — ahora lee tokens desde TODAS las hojas de la data
+# (main + repeats), sin romper el comportamiento anterior.
 # =============================================================================
 suppressPackageStartupMessages({
   library(readxl)
@@ -60,6 +61,55 @@ suppressPackageStartupMessages({
   if (length(parts)>=2 && parts[1] %in% c("select_one","select_multiple")) parts[2] else NA_character_
 }
 
+# ---------- lectura multi-hojas ----------
+.read_all_sheets <- function(path_xlsx){
+  sh <- readxl::excel_sheets(path_xlsx)
+  setNames(lapply(sh, function(s){
+    tryCatch(readxl::read_xlsx(path_xlsx, sheet = s), error = function(e) NULL)
+  }), sh)
+}
+
+.collect_tokens_from_col <- function(df_or_path, col_name){
+  # Une tokens de col_name en todas las hojas donde exista.
+  if (is.character(df_or_path) && file.exists(df_or_path)) {
+    lst <- .read_all_sheets(df_or_path)
+  } else if (is.data.frame(df_or_path)) {
+    lst <- list(DATA = df_or_path)
+  } else stop("path_data_adaptada debe ser data.frame o ruta a XLSX con la data adaptada.")
+  toks <- character(0)
+  for (nm in names(lst)){
+    d <- lst[[nm]]; if (is.null(d) || !ncol(d)) next
+    if (col_name %in% names(d)) {
+      v <- d[[col_name]]
+      vv <- unique(unlist(.split_tokens(v)))
+      toks <- c(toks, vv)
+    }
+  }
+  unique(toks[nzchar(toks)])
+}
+
+.collect_child_cols <- function(df_or_path, parent){
+  # Devuelve nombres de columnas hijas *_recod a lo largo de todas las hojas:
+  # ^<parent>_.+_recod$, excluyendo <parent>_recod
+  rx  <- paste0("^", gsub("([\\W])","\\\\\\1", parent), "_.+_recod$")
+  main <- paste0(parent, "_recod")
+
+  if (is.character(df_or_path) && file.exists(df_or_path)) {
+    lst <- .read_all_sheets(df_or_path)
+  } else if (is.data.frame(df_or_path)) {
+    lst <- list(DATA = df_or_path)
+  } else stop("path_data_adaptada debe ser data.frame o ruta a XLSX con la data adaptada.")
+
+  out <- character(0)
+  for (nm in names(lst)){
+    d <- lst[[nm]]; if (is.null(d) || !ncol(d)) next
+    hits <- grep(rx, names(d), value = TRUE, perl = TRUE)
+    hits <- setdiff(hits, main)
+    out  <- c(out, hits)
+  }
+  unique(out)
+}
+
 # ---------- pintura ----------
 .style <- function(hex) openxlsx::createStyle(fgFill = hex)
 
@@ -87,10 +137,7 @@ suppressPackageStartupMessages({
   # list original (si existe)
   ln_orig <- .extract_listname(base_type)
 
-  # list nuevo:
-  # - SM y SO-padre: <ln_orig>_recod si hay ln_orig, si no: <sanitize(base)>_recod
-  # - SO-hijo (usaremos esta misma función también): si se pasa list_name_hint,
-  #   lo usamos; si no, generamos <sanitize(new_name)>_list.
+  # list destino
   base_list <- if (!is.null(list_name_hint)) list_name_hint else {
     if (!is.na(ln_orig)) paste0(ln_orig, "_recod") else paste0(.sanitize(base_name), "_recod")
   }
@@ -99,17 +146,18 @@ suppressPackageStartupMessages({
   new_name <- paste0(base_name, "_recod")
   new_type <- if (kind=="multiple") paste("select_multiple", base_list) else paste("select_one", base_list)
 
-  # catálogo a crear para el list_name destino
+  # catálogo a crear
   codes <- character(0); labels <- character(0)
 
-  # si ln_orig existe y coincidimos con SO-padre/SM, copiamos catálogo original
+  # copiar catálogo original si aplica
   if (is.null(list_name_hint) && !is.na(ln_orig) && ln_orig %in% choices$list_name) {
     orig <- choices %>% filter(list_name == ln_orig)
     codes  <- c(codes, as.character(orig$name))
-    labels <- c(labels, as.character(orig[[lab_col_c]]))
+    labcol <- .guess_label_col(orig)  # por si difiere
+    labels <- c(labels, as.character(orig[[labcol]]))
   }
 
-  # añadir tokens observados en data
+  # añadir tokens observados
   if (length(tokens_from_data)) {
     seen <- unique(tokens_from_data[nzchar(tokens_from_data)])
     new_codes <- setdiff(seen, codes)
@@ -122,9 +170,9 @@ suppressPackageStartupMessages({
   # ordenar catálogo
   if (choices_order == "alphabetical") {
     o <- order(codes); codes <- codes[o]; labels <- labels[o]
-  } # original_first/by_first_seen: dejamos el orden construido
+  }
 
-  # construir fila survey
+  # fila survey
   new_row <- survey[0,]; new_row[1, setdiff(names(survey), character(0))] <- NA
   new_row$type <- new_type
   new_row$name <- new_name
@@ -132,11 +180,19 @@ suppressPackageStartupMessages({
 
   survey2 <- .row_after(survey, i_base, new_row)
 
-  # inyectar choices del list destino: debajo del catálogo original si aplica, o al final
+  # inyectar choices del list destino (evitando duplicar filas existentes)
   if (length(codes)) {
+    lab_col_c <- .guess_label_col(choices)
     add_choices <- tibble(list_name = base_list, name = codes)
     add_choices[[lab_col_c]] <- labels
 
+    # evitar duplicados exactos (list_name + name)
+    dup_mask <- paste(choices$list_name, choices$name) %in% paste(add_choices$list_name, add_choices$name)
+    if (any(dup_mask)) {
+      choices <- choices[!dup_mask, , drop = FALSE]
+    }
+
+    # posición: debajo del catálogo original si existe, si no, al final
     below <- if (!is.na(ln_orig)) {
       hit <- which(choices$list_name == ln_orig)
       if (length(hit)) max(hit) else NA_integer_
@@ -156,41 +212,40 @@ suppressPackageStartupMessages({
   }
 
   list(survey = survey2, choices = choices2, new_name = new_name, list_name = base_list,
-       base_row = if (is.na(i_base)) nrow(survey2) else i_base + 1)  # +1 por la inserción
+       base_row = if (is.na(i_base)) nrow(survey2) else i_base + 1)
 }
 
 # =============================================================================
 #' @title ppra_adaptar_instrumento
 #' @description
-#' Genera un **XLSForm adaptado** desde un instrumento base y una **data ya adaptada**
-#' (salida de `ppra_adaptar_data_simple`), creando:
+#' Genera un **XLSForm adaptado** desde un instrumento base y una **data adaptada**
+#' (producida por tu flujo), creando:
 #' - **SM**: `<parent>_recod` (select_multiple).
-#' - **SO-padre**: `<parent>_recod` (select_one) usando el catálogo del padre.
-#' - **SO-hijo**: `<parent>_<alias>_recod` (select_one), con **lista propia**
-#'   (tokens observados en la data).
-#' Inserta cada nueva pregunta **debajo** de su base y **colorea**:
-#' SM (verde), SO (azul). También colorea las filas de `choices` del list creado.
+#' - **SO-padre**: `<parent>_recod` (select_one) usando catálogo del padre + tokens observados.
+#' - **SO-hijo**: `<parent>_<alias>_recod` (select_one), lista propia a partir de tokens
+#'   observados en **todas las hojas** donde aparezca.
+#' Inserta cada nueva pregunta **debajo** de su base y colorea: SM (verde), SO (azul).
+#' Lee **todas las hojas** del Excel de data adaptada; si es un data.frame, actúa como antes.
 #' @param path_instrumento_in XLSX original (hojas `survey` y `choices`)
-#' @param path_data_adaptada XLSX o `data.frame` con columnas *_recod generadas
+#' @param path_data_adaptada XLSX (multihoja) o `data.frame` con columnas *_recod
 #' @param path_instrumento_out XLSX de salida
 #' @param sm_vars vector de padres select_multiple
 #' @param so_parent_vars vector de select_one que recodifican el **padre**
 #' @param so_child_vars vector de select_one cuyo recodificado está en el **hijo**;
-#'   la/las columnas a agregar se detectan en la data como `^<parent>_.*_recod$`
-#'   (excluyendo `<parent>_recod`)
+#'   se detectan columnas `^<parent>_.+_recod$` (excluyendo `<parent>_recod`) en TODAS las hojas
 #' @param choices_order "original_first" (default), "by_first_seen", "alphabetical"
 #' @param paint TRUE para colorear filas nuevas
 #' @return lista con `survey`, `choices`, `out_path`
 #' @export
 # =============================================================================
 ppra_adaptar_instrumento <- function(path_instrumento_in,
-                                      path_data_adaptada,
-                                      path_instrumento_out = "instrumento_adaptado.xlsx",
-                                      sm_vars        = character(0),
-                                      so_parent_vars = character(0),
-                                      so_child_vars  = character(0),
-                                      choices_order  = c("original_first","by_first_seen","alphabetical"),
-                                      paint = TRUE){
+                                     path_data_adaptada,
+                                     path_instrumento_out = "instrumento_adaptado.xlsx",
+                                     sm_vars        = character(0),
+                                     so_parent_vars = character(0),
+                                     so_child_vars  = character(0),
+                                     choices_order  = c("original_first","by_first_seen","alphabetical"),
+                                     paint = TRUE){
 
   choices_order <- match.arg(choices_order)
   stopifnot(file.exists(path_instrumento_in))
@@ -204,18 +259,16 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
   lab_col_s <- .guess_label_col(survey)
   lab_col_c <- .guess_label_col(choices)
 
-  survey$name  <- as.character(survey$name)
-  choices$name <- as.character(choices$name)
-  choices$list_name <- as.character(choices$list_name)
+  survey$name      <- as.character(survey$name)
+  choices$name     <- as.character(choices$name)
+  choices$list_name<- as.character(choices$list_name)
 
-  # --- leer data adaptada ---
-  df <- if (is.character(path_data_adaptada) && file.exists(path_data_adaptada)) {
-    readxl::read_xlsx(path_data_adaptada)
-  } else if (is.data.frame(path_data_adaptada)) {
-    path_data_adaptada
-  } else stop("path_data_adaptada debe ser data.frame o ruta a XLSX con la data adaptada.")
+  # --- preparar acceso multi-hojas ---
+  df_is_xlsx <- is.character(path_data_adaptada) && file.exists(path_data_adaptada)
+  df_single  <- is.data.frame(path_data_adaptada)
 
-  nms <- names(df)
+  if (!df_is_xlsx && !df_single)
+    stop("path_data_adaptada debe ser data.frame o ruta a XLSX con la data adaptada.")
 
   # --- logs de filas nuevas en survey (para pintar) ---
   new_rows_sm  <- integer(0)
@@ -229,9 +282,10 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
   if (length(sm_vars)) {
     for (pv in sm_vars) {
       col_rec <- paste0(pv, "_recod")
-      if (!col_rec %in% nms) next
-      toks <- unique(unlist(.split_tokens(df[[col_rec]])))
-      toks <- toks[nzchar(toks)]
+
+      # tokens desde TODAS las hojas
+      toks <- .collect_tokens_from_col(path_data_adaptada, col_rec)
+
       res <- .add_recoded_q(survey, choices,
                             base_name = pv,
                             kind      = "multiple",
@@ -242,7 +296,7 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
                             choices_order = choices_order)
       survey  <- res$survey
       choices <- res$choices
-      new_rows_sm  <- c(new_rows_sm, res$base_row + 1)  # la línea insertada justo después
+      new_rows_sm  <- c(new_rows_sm, res$base_row + 1)
       new_lists_sm <- c(new_lists_sm, res$list_name)
     }
   }
@@ -253,15 +307,12 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
   if (length(so_parent_vars)) {
     for (pv in so_parent_vars) {
       col_rec <- paste0(pv, "_recod")
-      toks <- if (col_rec %in% nms) {
-        v <- .split_tokens(df[[col_rec]])
-        unique(unlist(v))
-      } else character(0)
+      toks <- .collect_tokens_from_col(path_data_adaptada, col_rec)
 
       res <- .add_recoded_q(survey, choices,
                             base_name = pv,
                             kind      = "one",
-                            list_name_hint = NULL,           # usa <ln_orig>_recod si existe
+                            list_name_hint = NULL,
                             tokens_from_data = toks,
                             lab_col_s = lab_col_s,
                             lab_col_c = lab_col_c,
@@ -278,22 +329,21 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
   # =======================
   if (length(so_child_vars)) {
     for (pv in so_child_vars) {
-      # detectar las columnas hijas *_recod: ^<parent>_.*_recod$ y != <parent>_recod
-      rx <- paste0("^", gsub("([\\W])","\\\\\\1", pv), "_.+_recod$")
-      child_cols <- grep(rx, nms, value = TRUE)
-      child_cols <- setdiff(child_cols, paste0(pv, "_recod"))
+      # columnas hijas en TODAS las hojas
+      child_cols <- .collect_child_cols(path_data_adaptada, pv)
       if (!length(child_cols)) next
 
       for (cc in child_cols) {
-        # p.ej. CEPR01_why_recod -> base_name = ese mismo (tratamos cada hijo como “base” independiente)
-        toks <- unique(unlist(.split_tokens(df[[cc]])))
+        toks <- .collect_tokens_from_col(path_data_adaptada, cc)
         toks <- toks[nzchar(toks)]
 
         # Lista PROPIA para el hijo: <sanitize(cc)>_list
         list_hint <- paste0(.sanitize(cc), "_list")
 
+        # Nota: por compatibilidad con tu flujo anterior, mantenemos
+        # base_name = cc (esto generará cc_recod como nombre nuevo).
         res <- .add_recoded_q(survey, choices,
-                              base_name = cc,       # la pregunta nueva se llama == columna hija *_recod
+                              base_name = cc,
                               kind      = "one",
                               list_name_hint = list_hint,
                               tokens_from_data = toks,
@@ -333,7 +383,8 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
 
       # pintar choices por list_name creados
       paint_choices <- function(list_names, hex){
-        ln_idx <- which(choices$list_name %in% list_names)
+        if (!length(list_names)) return()
+        ln_idx <- which(choices$list_name %in% unique(list_names))
         if (length(ln_idx)) {
           openxlsx::addStyle(wb, "choices", .style(hex),
                              rows = ln_idx + 1, cols = 1:ncol(choices),
