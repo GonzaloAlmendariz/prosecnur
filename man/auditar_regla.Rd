@@ -2,33 +2,20 @@
 % Please edit documentation in R/auditar_limpieza.R
 \name{auditar_regla}
 \alias{auditar_regla}
-\title{Auditar una regla específica del plan de limpieza}
+\title{Auditar reglas: nombre, objetivo, expresión y casos}
 \usage{
 auditar_regla(ev, ids, verbose = TRUE)
 }
 \arguments{
-\item{ev}{Objeto de evaluación de consistencia (devuelto por \code{\link[=evaluar_consistencia]{evaluar_consistencia()}}).}
+\item{ev}{Objeto de evaluar_consistencia()}
 
-\item{ids}{Vector de ID(s) de regla(s) a auditar (p. ej. \code{"INSE_025"}).}
+\item{ids}{Vector de IDs de regla (p.ej. c("INSE_025","ATRI_001"))}
 
-\item{verbose}{Lógico; si \code{TRUE} (por defecto) imprime en consola el resumen,
-la expresión y los casos. Si \code{FALSE}, devuelve solo la lista.}
+\item{verbose}{Si TRUE imprime por regla (formato texto plano)}
 }
 \value{
-Una lista con tres elementos:
-\describe{
-\item{resumen}{Tibble con id_regla, nombre_regla, n_inconsistencias y porcentaje.}
-\item{expresion}{Vector de texto con las expresiones R de procesamiento.}
-\item{casos}{Data frame con los casos que incumplen la regla.}
-}
+lista con: resumen (tibble), expresion (chr), objetivo (chr), casos (list)
 }
 \description{
-Extrae y muestra la información detallada de una o varias reglas del plan
-de limpieza, a partir del objeto de evaluación generado por
-\code{\link[=evaluar_consistencia]{evaluar_consistencia()}}.
-}
-\examples{
-\dontrun{
-auditar_regla(ev, ids = "INSE_025")
-}
+Auditar reglas: nombre, objetivo, expresión y casos
 }
