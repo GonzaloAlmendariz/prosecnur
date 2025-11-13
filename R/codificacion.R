@@ -1948,7 +1948,7 @@ leer_familias_clasificar_repeat <- function(path, inst, tabs, sheet = "familias"
 
 
 # ---------------------------------------------------------------------------
-# 5) CONSTRUCTOR DE PLANTILLA (prioriza labels desde inst)
+# 5) CONSTRUCTOR DE PLANTILLA
 # ---------------------------------------------------------------------------
 
 #' @title Construir plantilla (datos + metas) desde familias validadas (sin normalizar inst)
@@ -1999,6 +1999,33 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
     list_name = as.character(survey_dic$list_name)
   )
 
+  # --- INTEGER desde diccionario si split$integer viene vacío ----------------
+  # A partir del diccionario (survey), se construye una tabla mínima de familias
+  # para variables integer. Esto permite que, aunque el Excel de familias solo
+  # mapee SO/SM + textos, el constructor sí pueda generar hojas para INTEGER.
+  integer_dic <- diccionario %>%
+    dplyr::filter(
+      tipo_base == "integer",              # solo preguntas integer en el XLSForm
+      !is.na(variable), nzchar(variable),  # con nombre de variable no vacío
+      variable %in% names(dat$raw)         # y que existan en la base de datos
+    ) %>%
+    dplyr::transmute(
+      q_order      = q_order,              # respeta el orden del cuestionario
+      parent       = variable,             # nombre original de la pregunta
+      parent_col   = variable,             # columna en la base (igual nombre)
+      parent_label = etiqueta,             # etiqueta en español
+      list_name    = NA_character_,        # sin lista de opciones
+      list_norm    = NA_character_,        # se completará luego solo si falta
+      other_dummy_col = NA_character_,     # no aplica para integer
+      text_col        = NA_character_      # no aplica para integer
+    )
+
+  # Si el split original NO trae integer (caso típico), se rellena con integer_dic.
+  # Si ya viene algo en split$integer desde leer_familias_clasificar(), se respeta.
+  if (is.null(split$integer) || !nrow(split$integer)) {
+    split$integer <- integer_dic
+  }
+
   # --- FAMILIAS (apilan split) -----------------------------------------------
   fam_all <- dplyr::bind_rows(
     (split$select_one      %||% tibble::tibble()) %>% dplyr::mutate(tipo = "select_one"),
@@ -2042,8 +2069,26 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
     j <- match(fam_all$parent_clean, janitor::make_clean_names(diccionario$variable))
     fam_all$list_name <- dplyr::coalesce(as.character(fam_all$list_name), as.character(diccionario$list_name[j]))
   }
+  # completar list_name / list_norm desde diccionario si faltan ----------------
+  if (any(is.na(fam_all$list_name) | !nzchar(fam_all$list_name))) {
+    j <- match(fam_all$parent_clean, janitor::make_clean_names(diccionario$variable))
+    fam_all$list_name <- dplyr::coalesce(
+      as.character(fam_all$list_name),
+      as.character(diccionario$list_name[j])
+    )
+  }
+
+  # IMPORTANTE: solo generar list_norm para las filas que lo tienen vacío.
+  # No se toca list_norm cuando ya viene definido desde leer_familias_clasificar()
+  # (p.ej. 'apoyo', 'obstaculo', 'necesidad_empleo'), para no romper el cruce
+  # con choices_es_tbl(inst).
   if (any(is.na(fam_all$list_norm) | !nzchar(fam_all$list_norm))) {
-    fam_all$list_norm <- tolower(gsub("[^a-z0-9_]", "_", gsub("\\s+","_", as.character(fam_all$list_name))))
+    idx_missing <- which(is.na(fam_all$list_norm) | !nzchar(fam_all$list_norm))
+    fam_all$list_norm[idx_missing] <- tolower(
+      gsub("[^a-z0-9_]", "_",
+           gsub("\\s+","_", as.character(fam_all$list_name[idx_missing]))
+      )
+    )
   }
 
   # excluir TEXT adoptadas
@@ -2254,92 +2299,208 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
   if (!is.null(selm) && nrow(selm)){
     for (i in seq_len(nrow(selm))){
       row <- selm[i, ]
-      parent_col     <- row$parent_col
-      other_dummy_col<- row$other_dummy_col
-      text_col       <- row$text_col
-      tipo <- "select_multiple"
+      parent_col      <- row$parent_col
+      other_dummy_col <- row$other_dummy_col
+      text_col        <- row$text_col
+      tipo            <- "select_multiple"
 
+      # Opciones canónicas: código + label (fuente de verdad)
       opts <- choices_tbl %>%
         dplyr::filter(parent_col == !!parent_col) %>%
         dplyr::distinct(choice_code, choice_label) %>%
-        dplyr::transmute(choice_code, choice_label)
+        dplyr::mutate(
+          choice_code  = as.character(choice_code),
+          choice_label = as.character(choice_label)
+        )
 
-      dmm <- if (nrow(opts)) expand_sm_dummies(dat_raw, parent_col, opts) else tibble::tibble()
+      # Matriz de dummies SM a partir de la base:
+      # - columnas iniciales generadas por código (via expand_sm_dummies)
+      # - si no hay opciones, tibble vacío con n filas
+      dmm <- if (nrow(opts)) {
+        expand_sm_dummies(dat_raw, parent_col, opts)
+      } else {
+        tibble::tibble(.rows = nrow(dat_raw))
+      }
+
+      # Si hay opciones y dmm tiene columnas, renombrar por LABEL:
+      #   "1" -> "Falta de información...", etc.
       if (nrow(opts) && ncol(dmm)) {
         lab <- as.character(opts$choice_label)
         lab[is.na(lab) | !nzchar(lab)] <- as.character(opts$choice_code[is.na(lab) | !nzchar(lab)])
         names(dmm) <- lab
       }
 
-      # dummy Other
-      if (!is.na(other_dummy_col) && nzchar(other_dummy_col) && other_dummy_col %in% names(dat_raw)) {
+      # Mantendremos aquí el label correspondiente a la opción OTHER, si existe
+      other_label <- NA_character_
+
+      # --- Dummy de "other": solo si FAMILIAS trae una columna dummy ---------
+      # FAMILIAS ya define cuál es la dummy (other_dummy_col) y cuál es el texto (text_col).
+      # Aquí:
+      #   - NO inventamos dummies a partir del texto.
+      #   - Si existe other_dummy_col en la base, se usa ESA columna como fuente.
+      if (!is.na(other_dummy_col) && nzchar(other_dummy_col) &&
+          other_dummy_col %in% names(dat_raw) &&
+          nrow(opts) && ncol(dmm)) {
+
         other_dummy <- dat_raw[[other_dummy_col]]
+
+        # Normalizar a 0/1 desde 0/1 o TRUE/FALSE
         other01 <- suppressWarnings(as.integer(as.character(other_dummy)))
-        if (all(is.na(other01)))
-          other01 <- ifelse(tolower(as.character(other_dummy)) %in% c("true","t","1"), 1L,
-                            ifelse(tolower(as.character(other_dummy)) %in% c("false","f","0"), 0L, NA_integer_))
-        dmm[["Otro, por favor especificar"]] <- other01
-      } else if (nrow(opts)) {
-        tmp_txt <- if (!is.na(text_col) && nzchar(text_col) && text_col %in% names(dat_raw)) as.character(dat_raw[[text_col]]) else NA_character_
-        dmm[["Otro, por favor especificar"]] <- ifelse(!is.na(tmp_txt) & nzchar(tmp_txt), 1L, 0L)
+        if (all(is.na(other01))) {
+          other01 <- ifelse(
+            tolower(as.character(other_dummy)) %in% c("true","t","1"), 1L,
+            ifelse(tolower(as.character(other_dummy)) %in% c("false","f","0"), 0L, NA_integer_)
+          )
+        }
+
+        # Código y label asociados a esa dummy.
+        # Ejemplo: other_dummy_col = "necesidad_empleo/96" → other_code = "96"
+        other_code  <- sub("^.+/", "", other_dummy_col)
+        other_label <- opts$choice_label[match(other_code, opts$choice_code)]
+        if (is.na(other_label) || !nzchar(other_label)) {
+          # Fallback: si no hubiera label, usar el propio código
+          other_label <- other_code
+        }
+
+        # Si dmm ya tiene esa columna (por label), se sobreescribe; si no, se agrega.
+        if (other_label %in% names(dmm)) {
+          dmm[[other_label]] <- other01
+        } else {
+          dmm[[other_label]] <- other01
+        }
+
+        # Reordenar columnas para que la opción OTHER quede al final de las dummies
+        ord_labels <- as.character(opts$choice_label)
+        ord_labels[is.na(ord_labels) | !nzchar(ord_labels)] <-
+          as.character(opts$choice_code[is.na(ord_labels) | !nzchar(ord_labels)])
+        ord_labels <- intersect(ord_labels, names(dmm))
+
+        if (other_label %in% ord_labels) {
+          ord_labels <- c(setdiff(ord_labels, other_label), other_label)
+          dmm <- dmm[, ord_labels, drop = FALSE]
+        }
       }
 
-      # sin "Otro"
-      nm <- names(dmm); nm <- nm[!is.na(nm) & nzchar(nm)]
-      no_other <- setdiff(nm, "Otro, por favor especificar")
+      # Vector de nombres de columnas dummy
+      nm <- names(dmm)
+      nm <- nm[!is.na(nm) & nzchar(nm)]
 
-      # seleccionadas (labels y códigos)
-      sel_labels <- if (length(no_other)) apply(dmm[, no_other, drop = FALSE], 1, function(r){
-        idx <- which(r == 1); if (!length(idx)) "" else paste(names(r)[idx], collapse = "; ")
-      }) else rep("", nrow(dat_raw))
+      # Conjunto de columnas a usar para Seleccionadas (excluye la de OTHER, si existe)
+      no_other <- if (!is.na(other_label) && nzchar(other_label)) {
+        setdiff(nm, other_label)
+      } else {
+        nm
+      }
 
-      sel_codes <- if (length(no_other) && nrow(opts)) {
-        lab2code <- opts$choice_code; names(lab2code) <- as.character(opts$choice_label)
-        names(lab2code)[is.na(names(lab2code)) | !nzchar(names(lab2code))] <- as.character(opts$choice_code[is.na(opts$choice_label) | !nzchar(opts$choice_label)])
+      # Lookup label -> código (para Seleccionadas_cod)
+      lab2code <- opts$choice_code
+      names(lab2code) <- opts$choice_label
+      names(lab2code)[is.na(names(lab2code)) | !nzchar(names(lab2code))] <-
+        opts$choice_code[is.na(opts$choice_label) | !nzchar(opts$choice_label)]
+
+      # Seleccionadas (labels)
+      sel_labels <- if (length(no_other) && nrow(opts)) {
         apply(dmm[, no_other, drop = FALSE], 1, function(r){
-          idx <- which(r == 1); if (!length(idx)) "" else paste(lab2code[names(r)[idx]], collapse = "; ")
+          idx <- which(r == 1L)
+          if (!length(idx)) return("")
+          labs <- names(r)[idx]  # ya son labels
+          paste(labs, collapse = "; ")
         })
-      } else rep("", nrow(dat_raw))
+      } else {
+        rep("", nrow(dat_raw))
+      }
 
-      text_vec <- if (!is.na(text_col) && nzchar(text_col) && text_col %in% names(dat_raw)) as.character(dat_raw[[text_col]]) else NA_character_
+      # Seleccionadas_cod (códigos crudos)
+      sel_codes <- if (length(no_other) && nrow(opts)) {
+        apply(dmm[, no_other, drop = FALSE], 1, function(r){
+          idx <- which(r == 1L)
+          if (!length(idx)) return("")
+          labs  <- names(r)[idx]
+          codes <- lab2code[labs]
+          codes[is.na(codes) | !nzchar(codes)] <- labs[is.na(codes) | !nzchar(codes)]
+          paste(codes, collapse = "; ")
+        })
+      } else {
+        rep("", nrow(dat_raw))
+      }
 
+      # Texto abierto (columna de texto definida por FAMILIAS)
+      text_vec <- if (!is.na(text_col) && nzchar(text_col) &&
+                      text_col %in% names(dat_raw)) {
+        as.character(dat_raw[[text_col]])
+      } else {
+        NA_character_
+      }
+
+      # Construir base: IDs + Seleccionadas + dummies + texto
       base <- id_base %>%
-        dplyr::mutate(Seleccionadas     = sel_labels,
-                      Seleccionadas_cod = sel_codes) %>%
+        dplyr::mutate(
+          Seleccionadas     = sel_labels,
+          Seleccionadas_cod = sel_codes
+        ) %>%
         dplyr::bind_cols(dmm) %>%
         dplyr::mutate(!!text_col := text_vec)
 
-      # recods intercalados (no para Seleccionadas / Seleccionadas_cod)
-      skip_cols <- c("_uuid","_index","Código pulso","Seleccionadas","Seleccionadas_cod")
-      for (dc in setdiff(names(base), skip_cols)) base[[paste0(dc,"_recod")]] <- NA_character_
+      # Recods intercalados:
+      #   - NO se recodifica: _uuid, _index, Código pulso
+      #   - NO se recodifica: Seleccionadas, Seleccionadas_cod
+      #   - NO se recodifica: el texto abierto (text_col)
+      skip_cols <- c("_uuid","_index","Código pulso",
+                     "Seleccionadas","Seleccionadas_cod",
+                     text_col)
+      skip_cols <- unique(skip_cols[!is.na(skip_cols) & nzchar(skip_cols)])
+
+      for (dc in setdiff(names(base), skip_cols)) {
+        base[[paste0(dc,"_recod")]] <- NA_character_
+      }
       base[["Control"]] <- NA_character_
 
-      cn <- colnames(base)
+      # Reordenar: base + su _recod al costado
+      cn        <- colnames(base)
       base_cols <- cn[!grepl("_recod$", cn)]
-      rec_cols  <- cn[grepl("_recod$", cn)]
+      rec_cols  <- cn[grepl("_recod$",  cn)]
       order_cols <- c()
       for (b in base_cols){
         order_cols <- c(order_cols, b)
-        r <- paste0(b, "_recod")
+        r <- paste0(b,"_recod")
         if (r %in% rec_cols) order_cols <- c(order_cols, r)
       }
       orphan_rec <- setdiff(rec_cols, paste0(base_cols, "_recod"))
       base <- base[, unique(c(order_cols, orphan_rec)), drop = FALSE]
 
-      hdr_raw <- names(base); hdr_lab <- hdr_raw
-      hdr_lab[hdr_raw=="_uuid"]             <- "UUID"
-      hdr_lab[hdr_raw=="_index"]            <- "Índice"
-      hdr_lab[hdr_raw=="Código pulso"]      <- "Código pulso"
-      hdr_lab[hdr_raw=="Seleccionadas"]     <- s_lab_from_original(parent_col, inst)
-      hdr_lab[hdr_raw=="Seleccionadas_cod"] <- "Seleccionadas (código)"
-      if (!is.na(text_col) && nzchar(text_col)) hdr_lab[hdr_raw==text_col] <- s_lab_from_original(text_col, inst)
-      hdr_lab[grepl("_recod$", hdr_raw)]    <- "Recodificación"
+      # ---------- encabezados (fila 1 crudo / fila 2 labels) -----------------
+      hdr_raw <- names(base)
+      hdr_lab <- hdr_raw
+
+      # Etiquetas fijas
+      hdr_lab[hdr_raw == "_uuid"]        <- "UUID"
+      hdr_lab[hdr_raw == "_index"]       <- "Índice"
+      hdr_lab[hdr_raw == "Código pulso"] <- "Código pulso"
+      hdr_lab[hdr_raw == "Seleccionadas"]     <- s_lab_from_original(parent_col, inst)
+      hdr_lab[hdr_raw == "Seleccionadas_cod"] <- "Seleccionadas (código)"
+      if (!is.na(text_col) && nzchar(text_col)) {
+        hdr_lab[hdr_raw == text_col] <- s_lab_from_original(text_col, inst)
+      }
+      hdr_lab[grepl("_recod$", hdr_raw)] <- "Recodificación"
+
+      # Etiquetas para las columnas de dummies (labels ya vienen de opts)
+      # Aquí no necesitamos tocar nada extra: dmm ya tiene nombres = labels.
 
       stitle <- parent_col
-      sheets_list[[stitle]] <- structure(base, header_raw = hdr_raw, label_row = hdr_lab, tipo = tipo)
-      nav_rows[[length(nav_rows)+1]] <- tibble::tibble(hoja = stitle, tipo = tipo, n = nrow(base))
+      sheets_list[[stitle]] <- structure(
+        base,
+        header_raw = hdr_raw,
+        label_row  = hdr_lab,
+        tipo       = tipo
+      )
+      nav_rows[[length(nav_rows)+1]] <- tibble::tibble(
+        hoja = stitle, tipo = tipo, n = nrow(base)
+      )
     }
   }
+
+
+
 
   # ---------- INTEGER ----------
   if (!is.null(sint) && nrow(sint)){
@@ -2536,6 +2697,7 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
   openxlsx::addStyle(wb, st_nav, border_all_black,
                      rows = 1:(nrow(nav)+1), cols = 1:3, gridExpand = TRUE, stack = TRUE)
 
+
   # ===== 2) FAMILIAS =====
   st_fam <- add_sheet("FAMILIAS")
   fam_tbl <- plantilla$familias
@@ -2661,25 +2823,34 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
 
     if (identical(tolower(tipo_hoja), "select_multiple")) {
       parent_col <- nm
+
+      # Tabla código–label para ESTA variable SM
       map_lab_code <- plantilla$choices %>%
         dplyr::filter(.data$parent_col == parent_col) %>%
-        dplyr::distinct(choice_code, choice_label)
+        dplyr::distinct(choice_code, choice_label) %>%
+        dplyr::mutate(
+          choice_code  = as.character(choice_code),
+          choice_label = as.character(choice_label)
+        )
 
-      map_no_recod <- function(cc){
+      # mapea el encabezado "bonito" (label) a la forma cruda parent_col/código
+      map_no_recod <- function(cc) {
+        # IDs y columnas especiales se dejan tal cual
         if (cc %in% especiales) return(cc)
-        if (identical(cc, "Otro, por favor especificar")) {
-          return(paste0(parent_col, "/Other"))
-        }
+
+        # Buscar el código asociado a este label
         if (nrow(map_lab_code)) {
           i <- which(map_lab_code$choice_label == cc)[1]
           if (length(i) == 1 && !is.na(i)) {
             return(paste0(parent_col, "/", map_lab_code$choice_code[i]))
           }
         }
+
+        # Si no hay match (no es una opción de choices), se deja como está
         cc
       }
 
-      hdr_raw <- vapply(hdr_base, function(cc){
+      hdr_raw <- vapply(hdr_base, function(cc) {
         if (grepl("_recod$", cc)) {
           base0 <- sub("_recod$", "", cc)
           paste0(map_no_recod(base0), "_recod")
