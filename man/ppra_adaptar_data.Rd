@@ -11,6 +11,7 @@ ppra_adaptar_data(
   sm_vars = character(0),
   so_parent_vars = character(0),
   so_child_vars = character(0),
+  int_vars = character(0),
   out_path = NULL,
   path_familias = NULL
 )
@@ -20,6 +21,7 @@ ppra_adaptar_data(
 \item \strong{SM}: \verb{<parent>_recod} con overrides y nuevas hijas (verde).
 \item \strong{SO-padre}: \verb{<parent>_recod} con override por \code{text_col} de familias (azul).
 \item \strong{SO-hijo}: \verb{<parent>_<alias>_recod} (azul).
+\item \strong{INTEGER}: \verb{<var>_recod} desde plantilla (morado).
 Escribe en la \strong{hoja correcta} (main o repeat) e \strong{inserta al lado del parent}.
 Exporta un XLSX preservando \strong{todas las hojas} del archivo de datos.
 }

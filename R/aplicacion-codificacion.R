@@ -535,8 +535,7 @@ ppra_so_child <- function(df, parent, path_plantilla, path_familias = NULL, path
     df <- insert_right_of(df, parent, out_col)
     return(list(
       df = df, new_col = out_col,
-      repeat_sheet = NULL, repeat_df = NULL,
-      repeat_cols_to_color = character(0)
+      repeat_sheet = NULL, repeat_df = NULL, repeat_cols_to_color = character(0)
     ))
   } else {
     if (!(out_col %in% names(df_work))) df_work[[out_col]] <- NA_character_
@@ -544,8 +543,107 @@ ppra_so_child <- function(df, parent, path_plantilla, path_familias = NULL, path
     df_work <- insert_right_of(df_work, parent, out_col)
     return(list(
       df = df, new_col = character(0),
-      repeat_sheet = where$sheet, repeat_df = df_work,
-      repeat_cols_to_color = out_col
+      repeat_sheet = where$sheet, repeat_df = df_work, repeat_cols_to_color = out_col
+    ))
+  }
+}
+
+# ====================== INTEGER ================================================
+ppra_integer_recod <- function(df, parent, path_plantilla,
+                               path_familias = NULL, path_datos = NULL){
+  where   <- if (!is.null(path_datos)) locate_var_sheet(parent, path_datos, path_familias) else list(source="main", sheet=NA)
+  df_work <- if (identical(where$source, "main")) df else read_sheet_ci(path_datos, where$sheet)
+
+  tpl <- NULL
+  if (file.exists(path_plantilla)) {
+    sheet <- ppra_resolve_template_sheet(path_plantilla, parent)
+    if (!is.na(sheet)) {
+      tpl <- readxl::read_excel(path_plantilla, sheet = sheet)
+      tpl <- .ensure_unique_names(tpl)
+      names(tpl) <- trimws(names(tpl))
+    }
+  }
+
+  if (is.null(tpl)) {
+    out_col <- paste0(parent, "_recod")
+    if (identical(where$source, "main")) {
+      if (!(out_col %in% names(df))) df[[out_col]] <- NA
+      return(list(
+        df = df, new_col = out_col,
+        repeat_sheet = NULL, repeat_df = NULL, repeat_cols_to_color = character(0)
+      ))
+    } else {
+      if (!(out_col %in% names(df_work))) df_work[[out_col]] <- NA
+      df_work <- insert_right_of(df_work, parent, out_col)
+      return(list(
+        df = df, new_col = character(0),
+        repeat_sheet = where$sheet, repeat_df = df_work, repeat_cols_to_color = out_col
+      ))
+    }
+  }
+
+  kd <- pick_join_key_pair(df_work, tpl)
+  if (is.na(kd)) {
+    message("[INTEGER] Sin clave común para '", parent, "'. Omito.")
+    out_col <- paste0(parent, "_recod")
+    if (identical(where$source, "main")) {
+      if (!(out_col %in% names(df))) df[[out_col]] <- NA
+      return(list(
+        df = df, new_col = out_col,
+        repeat_sheet = NULL, repeat_df = NULL, repeat_cols_to_color = character(0)
+      ))
+    } else {
+      if (!(out_col %in% names(df_work))) df_work[[out_col]] <- NA
+      df_work <- insert_right_of(df_work, parent, out_col)
+      return(list(
+        df = df, new_col = character(0),
+        repeat_sheet = where$sheet, repeat_df = df_work, repeat_cols_to_color = out_col
+      ))
+    }
+  }
+
+  nm_tpl <- names(tpl)
+  src <- nm_tpl[match(tolower(paste0(parent,"_recod")), tolower(nm_tpl))]
+  if (is.na(src)) {
+    message("[INTEGER] No hallé columna *_recod para '", parent, "'. Omito.")
+    out_col <- paste0(parent, "_recod")
+    if (identical(where$source, "main")) {
+      if (!(out_col %in% names(df))) df[[out_col]] <- NA
+      return(list(
+        df = df, new_col = out_col,
+        repeat_sheet = NULL, repeat_df = NULL, repeat_cols_to_color = character(0)
+      ))
+    } else {
+      if (!(out_col %in% names(df_work))) df_work[[out_col]] <- NA
+      df_work <- insert_right_of(df_work, parent, out_col)
+      return(list(
+        df = df, new_col = character(0),
+        repeat_sheet = where$sheet, repeat_df = df_work, repeat_cols_to_color = out_col
+      ))
+    }
+  }
+
+  tmp <- .safe_left_join_by(df_work[, c(kd), drop = FALSE], tpl[, c(kd, src), drop = FALSE], kd)
+  val <- tmp[[src]]
+  val[val==""] <- NA
+
+  out_col <- paste0(parent, "_recod")
+
+  if (identical(where$source, "main")) {
+    if (!(out_col %in% names(df))) df[[out_col]] <- NA
+    i <- which(!is.na(val)); if (length(i)) df[[out_col]][i] <- val[i]
+    df <- insert_right_of(df, parent, out_col)
+    return(list(
+      df = df, new_col = out_col,
+      repeat_sheet = NULL, repeat_df = NULL, repeat_cols_to_color = out_col
+    ))
+  } else {
+    if (!(out_col %in% names(df_work))) df_work[[out_col]] <- NA
+    j <- which(!is.na(val)); if (length(j)) df_work[[out_col]][j] <- val[j]
+    df_work <- insert_right_of(df_work, parent, out_col)
+    return(list(
+      df = df, new_col = character(0),
+      repeat_sheet = where$sheet, repeat_df = df_work, repeat_cols_to_color = out_col
     ))
   }
 }
@@ -553,9 +651,12 @@ ppra_so_child <- function(df, parent, path_plantilla, path_familias = NULL, path
 # ====================== Export preservando hojas ===============================
 ppra_export_preserving_sheets <- function(path_datos, out_path,
                                           df_main,
-                                          main_cols_color = list(sm = character(0),
-                                                                 sop = character(0),
-                                                                 soh = character(0)),
+                                          main_cols_color = list(
+                                            sm  = character(0),
+                                            sop = character(0),
+                                            soh = character(0),
+                                            int = character(0)
+                                          ),
                                           repeat_updates = list()) {
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     warning("No se encontró 'openxlsx'. No se exporta Excel.")
@@ -584,13 +685,16 @@ ppra_export_preserving_sheets <- function(path_datos, out_path,
       openxlsx::writeData(wb, s, df_main)
       paint_cols(wb, s, df_main, unique(main_cols_color$sm),  "#DFF5DF")
       paint_cols(wb, s, df_main, unique(c(main_cols_color$sop, main_cols_color$soh)), "#DCEBFF")
+      paint_cols(wb, s, df_main, unique(main_cols_color$int), "#E6D9F2")
     } else if (s %in% names(repeat_updates)) {
       df_rep  <- repeat_updates[[s]]$df
-      cols_sm <- repeat_updates[[s]]$sm %||% character(0)
-      cols_so <- repeat_updates[[s]]$so %||% character(0)
+      cols_sm <- repeat_updates[[s]]$sm  %||% character(0)
+      cols_so <- repeat_updates[[s]]$so  %||% character(0)
+      cols_int<- repeat_updates[[s]]$int %||% character(0)
       openxlsx::writeData(wb, s, df_rep)
-      paint_cols(wb, s, df_rep, unique(cols_sm), "#DFF5DF")
-      paint_cols(wb, s, df_rep, unique(cols_so), "#DCEBFF")
+      paint_cols(wb, s, df_rep, unique(cols_sm),  "#DFF5DF")
+      paint_cols(wb, s, df_rep, unique(cols_so),  "#DCEBFF")
+      paint_cols(wb, s, df_rep, unique(cols_int), "#E6D9F2")
     } else {
       df0 <- read_sheet_ci(path_datos, s)
       openxlsx::writeData(wb, s, df0)
@@ -610,6 +714,7 @@ ppra_export_preserving_sheets <- function(path_datos, out_path,
 #' - **SM**: `<parent>_recod` con overrides y nuevas hijas (verde).
 #' - **SO-padre**: `<parent>_recod` con override por `text_col` de familias (azul).
 #' - **SO-hijo**: `<parent>_<alias>_recod` (azul).
+#' - **INTEGER**: `<var>_recod` desde plantilla (morado).
 #' Escribe en la **hoja correcta** (main o repeat) e **inserta al lado del parent**.
 #' Exporta un XLSX preservando **todas las hojas** del archivo de datos.
 #' @export
@@ -619,6 +724,7 @@ ppra_adaptar_data <- function(path_instrumento,
                               sm_vars        = character(0),
                               so_parent_vars = character(0),
                               so_child_vars  = character(0),
+                              int_vars       = character(0),
                               out_path       = NULL,
                               path_familias  = NULL){
 
@@ -630,21 +736,24 @@ ppra_adaptar_data <- function(path_instrumento,
   sm_cols_to_color  <- character(0)
   sop_cols_to_color <- character(0)
   soh_cols_to_color <- character(0)
+  int_cols_to_color <- character(0)
 
   # registro de hojas repeat modificadas
-  rep_updates <- list()   # nombre_hoja -> list(df=..., sm=c(...), so=c(...))
+  rep_updates <- list()   # nombre_hoja -> list(df=..., sm=c(...), so=c(...), int=c(...))
 
-  add_rep_update <- function(sheet, df_rep, cols, kind = c("sm","so")){
+  add_rep_update <- function(sheet, df_rep, cols, kind = c("sm","so","int")){
     kind <- match.arg(kind)
     if (!sheet %in% names(rep_updates)) {
-      rep_updates[[sheet]] <<- list(df = df_rep, sm = character(0), so = character(0))
+      rep_updates[[sheet]] <<- list(df = df_rep, sm = character(0), so = character(0), int = character(0))
     } else {
       rep_updates[[sheet]]$df <<- df_rep
     }
     if (kind == "sm") {
       rep_updates[[sheet]]$sm <<- unique(c(rep_updates[[sheet]]$sm, cols))
-    } else {
+    } else if (kind == "so") {
       rep_updates[[sheet]]$so <<- unique(c(rep_updates[[sheet]]$so, cols))
+    } else {
+      rep_updates[[sheet]]$int <<- unique(c(rep_updates[[sheet]]$int, cols))
     }
   }
 
@@ -696,6 +805,22 @@ ppra_adaptar_data <- function(path_instrumento,
     }
   }
 
+  # ---- INTEGER
+  if (length(int_vars)) {
+    for (iv in int_vars) {
+      res <- ppra_integer_recod(df, iv, path_plantilla,
+                                path_familias = path_familias, path_datos = path_datos)
+      df  <- res$df
+      if (length(res$new_col)) {
+        df  <- insert_right_of(df, iv, res$new_col)
+        int_cols_to_color <- c(int_cols_to_color, res$new_col)
+      }
+      if (!is.null(res$repeat_sheet)) {
+        add_rep_update(res$repeat_sheet, res$repeat_df, res$repeat_cols_to_color, kind = "int")
+      }
+    }
+  }
+
   # Export preservando TODAS las hojas
   if (!is.null(out_path)) {
     ppra_export_preserving_sheets(
@@ -705,7 +830,8 @@ ppra_adaptar_data <- function(path_instrumento,
       main_cols_color = list(
         sm  = unique(sm_cols_to_color),
         sop = unique(sop_cols_to_color),
-        soh = unique(soh_cols_to_color)
+        soh = unique(soh_cols_to_color),
+        int = unique(int_cols_to_color)
       ),
       repeat_updates = rep_updates
     )

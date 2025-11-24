@@ -2,7 +2,7 @@
 % Please edit documentation in R/aplicacion-codificacion-instrumento.R
 \name{ppra_adaptar_instrumento}
 \alias{ppra_adaptar_instrumento}
-\title{ppra_adaptar_instrumento}
+\title{Adaptar instrumento XLSForm a partir de una data recodificada}
 \usage{
 ppra_adaptar_instrumento(
   path_instrumento_in,
@@ -11,40 +11,106 @@ ppra_adaptar_instrumento(
   sm_vars = character(0),
   so_parent_vars = character(0),
   so_child_vars = character(0),
+  integer_vars = character(0),
   choices_order = c("original_first", "by_first_seen", "alphabetical"),
   paint = TRUE
 )
 }
 \arguments{
-\item{path_instrumento_in}{XLSX original (hojas \code{survey} y \code{choices})}
+\item{path_instrumento_in}{Ruta al XLSX del instrumento original. Debe contener,
+al menos, las hojas \code{"survey"} y \code{"choices"}.}
 
-\item{path_data_adaptada}{XLSX (multihoja) o \code{data.frame} con columnas *_recod}
+\item{path_data_adaptada}{Data adaptada sobre la cual se construyen los nuevos
+catálogos y preguntas. Puede ser:
+\itemize{
+\item una ruta a un archivo XLSX (potencialmente con varias hojas), o
+\item un \code{data.frame} con las columnas \code{*_recod}.
+}
+Si es XLSX, la función lee todas las hojas para recolectar los tokens.}
 
-\item{path_instrumento_out}{XLSX de salida}
+\item{path_instrumento_out}{Ruta del XLSX de salida con el instrumento
+adaptado. Por defecto \code{"instrumento_adaptado.xlsx"}.}
 
-\item{sm_vars}{vector de padres select_multiple}
+\item{sm_vars}{Vector de nombres de variables \code{select_multiple} (padres)
+para las que se creará \code{<parent>_recod} como \code{select_multiple}.}
 
-\item{so_parent_vars}{vector de select_one que recodifican el \strong{padre}}
+\item{so_parent_vars}{Vector de nombres de variables \code{select_one} (padres)
+para las que se creará \code{<parent>_recod} como \code{select_one}, usando
+el catálogo del padre más los códigos observados en la data.}
 
-\item{so_child_vars}{vector de select_one cuyo recodificado está en el \strong{hijo};
-se detectan columnas \verb{^<parent>_.+_recod$} (excluyendo \verb{<parent>_recod}) en TODAS las hojas}
+\item{so_child_vars}{Vector de nombres de variables \code{select_one} cuyos
+recodificados están en columnas hijas \code{<parent>_<alias>_recod}. Para
+cada hija detectada se crea una nueva pregunta (con el mismo nombre de la
+columna hija) con lista propia, basada en los valores observados en la data
+adaptada.}
 
-\item{choices_order}{"original_first" (default), "by_first_seen", "alphabetical"}
+\item{integer_vars}{Vector de nombres de variables \code{integer} para las
+que se creará una nueva pregunta \code{<var>_recod} de tipo
+\code{select_one <var>_recod_lista}, donde \code{<var>_recod_lista} se
+construye a partir de los valores únicos observados en \code{<var>_recod}.}
 
-\item{paint}{TRUE para colorear filas nuevas}
+\item{choices_order}{Criterio de orden para los códigos en las nuevas listas.
+Puede ser \code{"original_first"} (por defecto), \code{"alphabetical"} o
+\code{"by_first_seen"}.}
+
+\item{paint}{Lógico; si es \code{TRUE}, colorea las filas nuevas en
+\code{survey} y las listas nuevas en \code{choices} para facilitar la
+inspección visual.}
 }
 \value{
-lista con \code{survey}, \code{choices}, \code{out_path}
+Invisiblemente, una lista con:
+\itemize{
+\item \code{survey}: data.frame de la hoja \code{survey} adaptada.
+\item \code{choices}: data.frame de la hoja \code{choices} adaptada.
+\item \code{out_path}: ruta al XLSX escrito en disco.
+}
 }
 \description{
-Genera un \strong{XLSForm adaptado} desde un instrumento base y una \strong{data adaptada}
-(producida por tu flujo), creando:
+Genera una versión adaptada de un instrumento XLSForm (hojas \code{survey} y
+\code{choices}) a partir de una data ya recodificada (output de
+\code{ppra_adaptar_data}), creando preguntas y listas nuevas para documentar
+los códigos de recodificación.
+
+La función:
 \itemize{
-\item \strong{SM}: \verb{<parent>_recod} (select_multiple).
-\item \strong{SO-padre}: \verb{<parent>_recod} (select_one) usando catálogo del padre + tokens observados.
-\item \strong{SO-hijo}: \verb{<parent>_<alias>_recod} (select_one), lista propia a partir de tokens
-observados en \strong{todas las hojas} donde aparezca.
-Inserta cada nueva pregunta \strong{debajo} de su base y colorea: SM (verde), SO (azul).
-Lee \strong{todas las hojas} del Excel de data adaptada; si es un data.frame, actúa como antes.
+\item Para variables \strong{select\_multiple} (\code{sm_vars}): crea una nueva
+pregunta \code{<parent>_recod} de tipo \code{select_multiple} con una lista
+derivada del catálogo original más los códigos observados en la data. La nueva
+lista se inserta \emph{debajo} del catálogo original en \code{choices}.
+
+\item Para variables \strong{select\_one} que recodifican al padre
+(\code{so_parent_vars}): crea una nueva pregunta \code{<parent>_recod} de tipo
+\code{select_one} con una lista derivada del catálogo original más los códigos
+observados en la data. La nueva lista también se inserta \emph{debajo} del
+catálogo original en \code{choices}.
+
+\item Para variables \strong{select\_one} cuyo recodificado está en el hijo
+(\code{so_child_vars}): detecta columnas hijas
+\code{^<parent>_.+_recod$} (excluyendo \code{<parent>_recod}) en todas
+las hojas de la data adaptada y crea, para cada una, una nueva pregunta
+cuyo nombre coincide con la columna hija (por ejemplo,
+\code{calidad_docente_why_recod}) de tipo \code{select_one} con una lista
+propia construida a partir de los valores observados en dicha columna.
+Estas listas se añaden al final de \code{choices}, con nombres del tipo
+\code{<child>_lista} (por ejemplo, \code{calidad_docente_why_recod_lista},
+sin sufijo extra \code{_recod}).
+
+\item Para variables \strong{integer} (\code{integer_vars}): crea una nueva
+pregunta \code{<var>_recod} de tipo \code{select_one <var>_recod_lista}.
+La lista \code{<var>_recod_lista} se construye a partir de los valores
+únicos observados en \code{<var>_recod} en la data adaptada (todas las hojas)
+y se añade al final de \code{choices}.
+}
+
+En todos los casos, la nueva pregunta hereda exactamente la misma etiqueta
+(\code{label}) que la pregunta base, sin añadir sufijos como \code{"[recod]"}.
+
+Además, si \code{paint = TRUE}, la función colorea:
+\itemize{
+\item Las nuevas filas de \code{survey}: verde para \code{sm_vars}, azul
+para \code{so_parent_vars} y \code{so_child_vars}, y morado para
+\code{integer_vars}.
+\item Las filas de \code{choices} correspondientes a las nuevas listas:
+verde claro (SM), azul claro (SO) y morado claro (integer).
 }
 }

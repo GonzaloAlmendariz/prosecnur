@@ -529,62 +529,120 @@ build_required_g <- function(survey, section_map, meta, gmap){
 
 
 # ---- Relevant (saltos) ------------------------------------------------------
-build_relevant_g <- function(survey, section_map, meta, choices, gmap){
-  dat <- survey %>%
-    filter(!is.na(.data$name)) %>%
-    mutate(type_base = tolower(trimws(sub("\\s.*$", "", .data$type)))) %>%
-    filter(type_base %in% c("select_one","select_multiple","integer","decimal","text","date","datetime","string"),
-           !.data$type_base %in% c("note","begin_group","end_group","acknowledge","calculate"))
-  if (!nrow(dat)) return(tibble())
+build_relevant_g <- function(survey, section_map, meta, choices, gmap) {
 
-  pmap_dfr(dat, function(...){
-    row <- list(...)
+  dat <- survey %>%
+    dplyr::filter(!is.na(.data$name)) %>%
+    dplyr::mutate(
+      type_base = tolower(trimws(sub("\\s.*$", "", .data$type)))
+    ) %>%
+    # Solo tipos que tienen sentido para saltos
+    dplyr::filter(
+      type_base %in% c("select_one", "select_multiple", "integer",
+                       "decimal", "text", "date", "datetime", "string"),
+      !type_base %in% c("note", "begin_group", "end_group",
+                        "acknowledge", "calculate")
+    )
+
+  if (!nrow(dat)) return(tibble::tibble())
+
+  purrr::pmap_dfr(dat, function(...) {
+    row  <- list(...)
     var  <- row$name
     lab1 <- lab_pregunta(survey, meta, var)
     tipo <- as_chr1(row$type_base)
-    gname<- as_chr1(row$group_name); secc <- gname
-    tabla<- tabla_destino_de(gname, section_map, main_name = "(principal)"); nivel <- nivel_scope(tabla)
 
+    gname <- as_chr1(row$group_name)
+    secc  <- gname
+    tabla <- tabla_destino_de(gname, section_map, main_name = "(principal)")
+    nivel <- nivel_scope(tabla)
+
+    # Condición de apertura de grupo (G_expr, G_humano)
     G_row <- gmap[gmap$group_name == gname, , drop = FALSE]
-    G_r <- as_chr1(if (nrow(G_row)) G_row$G_expr[[1]] else "")
-    G_h <- as_chr1(if (nrow(G_row)) G_row$G_humano[[1]] else "")
+    G_r   <- as_chr1(if (nrow(G_row)) G_row$G_expr[[1]]   else "")
+    G_h   <- as_chr1(if (nrow(G_row)) G_row$G_humano[[1]] else "")
 
+    # Condición relevant específica de la pregunta
     rel_parsed <- relevant_a_r_y_humano(as_chr1(row$relevant %||% ""), survey, choices, meta)
-    REL_r <- as_chr1(rel_parsed$expr_r); REL_h <- as_chr1(rel_parsed$human)
-    cond_r <- if (nz1(G_r) && nz1(REL_r)) paste0("(", G_r, ") & (", REL_r, ")") else if (nz1(G_r)) G_r else if (nz1(REL_r)) REL_r else ""
-    if (!nz1(cond_r)) return(tibble())
+    REL_r <- as_chr1(rel_parsed$expr_r)
+    REL_h <- as_chr1(rel_parsed$human)
 
-    drivers <- .drivers_from_expr(REL_r, survey$name); drs <- .take_var2_var3(drivers)
+    # Condición total en R (grupo + relevant)
+    cond_r <- dplyr::case_when(
+      nz1(G_r)  && nz1(REL_r) ~ paste0("(", G_r, ") & (", REL_r, ")"),
+      nz1(G_r)               ~ G_r,
+      nz1(REL_r)             ~ REL_r,
+      TRUE                   ~ ""
+    )
+    if (!nz1(cond_r)) return(tibble::tibble())
+
+    # Variables "driver" del salto
+    drivers <- .drivers_from_expr(REL_r, survey$name)
+    drs     <- .take_var2_var3(drivers)
+
     secc_label <- .section_label(gname, section_map)
-    apertura   <- if (nz1(G_h) || nz1(REL_h)) {
+
+    # --- NUEVA REDACCIÓN HUMANA ---
+    # Texto humano para condición DEBE
+    apertura_debe <- if (nz1(G_h) || nz1(REL_h)) {
       if (nz1(G_h) && nz1(REL_h)) {
-        if (identical(trimws(G_h), trimws(REL_h))) sprintf("Si la sección «%s» se abre (%s), ", secc_label, G_h)
-        else sprintf("Si la sección «%s» se abre (%s) y además (%s), ", secc_label, G_h, REL_h)
-      } else if (nz1(G_h)) sprintf("Si la sección «%s» se abre (%s), ", secc_label, G_h)
-      else sprintf("Si (%s), ", REL_h)
+        if (identical(trimws(G_h), trimws(REL_h))) {
+          sprintf("Si la sección «%s» se abre (%s), entonces ", secc_label, G_h)
+        } else {
+          sprintf("Si la sección «%s» se abre (%s) y además (%s), entonces ",
+                  secc_label, G_h, REL_h)
+        }
+      } else if (nz1(G_h)) {
+        sprintf("Si la sección «%s» se abre (%s), entonces ", secc_label, G_h)
+      } else {
+        sprintf("Si (%s), entonces ", REL_h)
+      }
     } else ""
 
+    # Texto humano para la condición NODEBE (negación consistente)
+    apertura_nodebe <- if (nz1(G_h) || nz1(REL_h)) {
+      if (nz1(G_h) && nz1(REL_h)) {
+        sprintf("Si la sección «%s» NO se abre o NO se cumple (%s), entonces ", secc_label, REL_h)
+      } else if (nz1(G_h)) {
+        sprintf("Si la sección «%s» NO se abre, entonces ", secc_label)
+      } else {
+        sprintf("Si NO se cumple (%s), entonces ", REL_h)
+      }
+    } else {
+      "Si NO se cumple la condición de apertura, entonces "
+    }
+
+    # Objetivos
     obj1 <- paste0(
       if (.is_repeat_group(gname, section_map)) sprintf("En la hoja de datos «%s» (sección repetida «%s»), ", tabla, secc) else "",
-      apertura, "«", lab1, "» debe responderse."
+      apertura_debe, "«", lab1, "» debe responderse."
     )
+
     obj2 <- paste0(
       if (.is_repeat_group(gname, section_map)) sprintf("En la hoja de datos «%s» (sección repetida «%s»), ", tabla, secc) else "",
-      apertura, "«", lab1, "» no debe responderse."
+      apertura_nodebe, "«", lab1, "» no debe responderse."
     )
 
-    nom1 <- .norm_rule_name(paste0("salto_", sanitize_id(var), "_debe"))
-    nom2 <- .norm_rule_name(paste0("salto_", sanitize_id(var), "_nodebe"))
-    proc1<- paste0(nom1, " <- ( (", cond_r, ") & ", es_vacio(var), " )")
-    proc2<- paste0(nom2, " <- ( !(", cond_r, ") & ", no_vacio(var), " )")
+    # Nombres de reglas y expresiones en R
+    nom1  <- .norm_rule_name(paste0("salto_", sanitize_id(var), "_debe"))
+    nom2  <- .norm_rule_name(paste0("salto_", sanitize_id(var), "_nodebe"))
+    proc1 <- paste0(nom1, " <- ( (", cond_r, ") & ", es_vacio(var), " )")
+    proc2 <- paste0(nom2, " <- ( !(", cond_r, ") & ", no_vacio(var), " )")
 
-    tibble(
-      ID = NA_character_, Tabla = tabla, `Sección` = secc,
-      Categoría = "Saltos de preguntas", Tipo = tipo,
-      `Nombre de regla` = c(nom1, nom2), Objetivo = c(obj1, obj2),
-      `Variable 1` = var, `Variable 1 - Etiqueta` = lab1,
-      `Variable 2` = drs$v2, `Variable 2 - Etiqueta` = if (!is.na(drs$v2)) lab_pregunta(survey, meta, drs$v2) else NA_character_,
-      `Variable 3` = drs$v3, `Variable 3 - Etiqueta` = if (!is.na(drs$v3)) lab_pregunta(survey, meta, drs$v3) else NA_character_,
+    tibble::tibble(
+      ID = NA_character_,
+      Tabla = tabla,
+      `Sección` = secc,
+      Categoría = "Saltos de preguntas",
+      Tipo = tipo,
+      `Nombre de regla` = c(nom1, nom2),
+      Objetivo         = c(obj1, obj2),
+      `Variable 1` = var,
+      `Variable 1 - Etiqueta` = lab1,
+      `Variable 2` = drs$v2,
+      `Variable 2 - Etiqueta` = if (!is.na(drs$v2)) lab_pregunta(survey, meta, drs$v2) else NA_character_,
+      `Variable 3` = drs$v3,
+      `Variable 3 - Etiqueta` = if (!is.na(drs$v3)) lab_pregunta(survey, meta, drs$v3) else NA_character_,
       `Procesamiento` = c(proc1, proc2),
       .grp = gname
     )
