@@ -180,15 +180,27 @@ get_categorias <- function(var,
   codes  <- character(0)
   labels <- character(0)
 
-  # 1) orders_list del instrumento (coherente con reporte_instrumento)
-  if (!is.null(orders_list) && !is.na(ln) && ln %in% names(orders_list)) {
-    obj <- orders_list[[ln]]
+  # 1) orders_list: primero por variable, luego por list_name
+  obj <- NULL
+  if (!is.null(orders_list)) {
+    if (var %in% names(orders_list)) {
+      # mismo esquema que frecuencias: orders_list[[var]]
+      obj <- orders_list[[var]]
+    } else if (!is.na(ln) && ln %in% names(orders_list)) {
+      # fallback: algunas implementaciones guardan por list_name
+      obj <- orders_list[[ln]]
+    }
+  }
+
+  if (!is.null(obj)) {
     codes  <- as.character(obj$names)
     labels <- as.character(obj$labels)
+
   } else if (!is.null(lab_attr) && length(lab_attr) > 0) {
     # 2) attr(labels) de la data (reporte_data)
     codes  <- names(lab_attr)
     labels <- as.character(unname(lab_attr))
+
   } else {
     # 3) fallback: categorías en los datos
     codes  <- sort(unique(na.omit(as.character(x))))
