@@ -1,5 +1,5 @@
 # ============================
-# Helpers internos (no exportar)
+# Helpers internos
 # ============================
 
 #' @noRd
@@ -68,6 +68,54 @@
   }
 
   if (!is.null(total) && nrow(total)) dplyr::bind_rows(body, total) else body
+}
+
+#' Completar categorías faltantes con n = 0 según orders_list
+#'
+#' @noRd
+.completar_categorias <- function(tab, var, orders_list, denom = NULL,
+                                  mostrar_todo = FALSE) {
+
+  if (!isTRUE(mostrar_todo)) return(tab)
+  if (is.null(orders_list))  return(tab)
+  if (!("Opciones" %in% names(tab))) return(tab)
+  if (!(var %in% names(orders_list))) return(tab)
+
+  is_total <- tab$Opciones == "Total"
+  body  <- if (any(is_total)) tab[!is_total, , drop = FALSE] else tab
+  total <- if (any(is_total)) tab[ is_total, , drop = FALSE] else NULL
+
+  if (!nrow(body)) return(tab)
+
+  ord_lbl <- tryCatch(orders_list[[var]]$labels, error = function(e) NULL)
+  if (is.null(ord_lbl)) return(tab)
+
+  full_lbl <- as.character(ord_lbl)
+  full_lbl <- full_lbl[!is.na(full_lbl) & nzchar(full_lbl)]
+
+  # labels que no aparecen en la tabla actual
+  faltan <- setdiff(full_lbl, body$Opciones)
+
+  if (length(faltan)) {
+    add <- tibble::tibble(
+      Opciones = faltan,
+      n        = 0,
+      pct      = if (!is.null(denom) && denom > 0) 0 else NA_real_
+    )
+    body <- dplyr::bind_rows(body, add)
+  }
+
+  # reordenar según el orden del instrumento
+  body <- body |>
+    dplyr::mutate(.orden_aux = match(Opciones, full_lbl)) |>
+    dplyr::arrange(.orden_aux) |>
+    dplyr::select(-.orden_aux)
+
+  if (!is.null(total) && nrow(total)) {
+    dplyr::bind_rows(body, total)
+  } else {
+    body
+  }
 }
 
 #' @noRd
@@ -158,7 +206,19 @@ tipo_pregunta_spss <- function(var, survey, sm_vars_force = NULL) {
 
 #' @noRd
 split_sm_tokens <- function(x) {
-  stringr::str_split(x, "\\s*[;]+\\s*", simplify = FALSE)
+  x <- as.character(x)
+
+  lapply(x, function(xx) {
+    # descartar vacíos / NA
+    if (is.na(xx) || !nzchar(xx) || xx == "NA") {
+      return(character(0))
+    }
+
+    # SIEMPRE explotar en espacios y/o ';'
+    toks <- unlist(strsplit(xx, "\\s*[;\\s]+\\s*"))
+    toks <- toks[nzchar(toks)]
+    toks
+  })
 }
 
 # ============================
@@ -194,6 +254,9 @@ split_sm_tokens <- function(x) {
 #'   como `select_multiple` aunque el instrumento no las marque como tales.
 #' @param orders_list Lista opcional con información de orden de categorías
 #'   por variable (por ejemplo, `instrumento$orders_list`).
+#' @param mostrar_todo Lógico; si `TRUE`, incluye en la tabla todas las
+#'   categorías definidas en `orders_list[[var]]$labels`, incluso si su
+#'   frecuencia es 0.
 #'
 #' @return Un tibble con las columnas:
 #' \describe{
@@ -204,7 +267,7 @@ split_sm_tokens <- function(x) {
 #'
 #' @export
 freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
-                            orders_list = NULL) {
+                            orders_list = NULL, mostrar_todo = FALSE) {
 
   stopifnot(var %in% names(data))
   tipo <- tipo_pregunta_spss(var, survey, sm_vars_force)
@@ -247,6 +310,7 @@ freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
 
       tab <- .map_from_attr_labels(tab, var, data)
       tab <- .map_to_labels(tab, var, orders_list)
+      tab <- .completar_categorias(tab, var, orders_list, denom, mostrar_todo)
       tab <- .reordenar_por_instrumento(tab, var, orders_list)
       tab <- .move_ns_pref_last(tab)
 
@@ -290,6 +354,7 @@ freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
         )
 
       tab <- .map_to_labels(tab, var, orders_list)
+      tab <- .completar_categorias(tab, var, orders_list, denom, mostrar_todo)
       tab <- .reordenar_por_instrumento(tab, var, orders_list)
       tab <- .move_ns_pref_last(tab)
 
@@ -323,6 +388,7 @@ freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
 
     tab <- .map_from_attr_labels(tab, var, data)
     tab <- .map_to_labels(tab, var, orders_list)
+    tab <- .completar_categorias(tab, var, orders_list, denom, mostrar_todo)
     tab <- .reordenar_por_instrumento(tab, var, orders_list)
     tab <- .move_ns_pref_last(tab)
 
@@ -434,7 +500,8 @@ write_one_freq <- function(wb, sheet, data, var, dic_vars,
                            labels_override = NULL,
                            start_row = 1, start_col = 1,
                            fuente = "Pulso PUCP",
-                           orders_list = NULL) {
+                           orders_list = NULL,
+                           mostrar_todo = FALSE) {
   st <- mk_styles_spss()
   fila <- start_row
 
@@ -475,7 +542,8 @@ write_one_freq <- function(wb, sheet, data, var, dic_vars,
     var,
     survey        = survey,
     sm_vars_force = sm_vars_force,
-    orders_list   = orders_list
+    orders_list   = orders_list,
+    mostrar_todo  = mostrar_todo
   )
 
   if (!nrow(tab)) {
@@ -582,6 +650,9 @@ write_one_freq <- function(wb, sheet, data, var, dic_vars,
 #'   por variable.
 #' @param survey Tibble con la hoja `survey` del instrumento (para detectar
 #'   `select_one` y `select_multiple`).
+#' @param mostrar_todo Lógico; si `TRUE`, las tablas internas se construyen con
+#'   `mostrar_todo = TRUE` en [freq_table_spss()], es decir, se incluyen las
+#'   categorías con frecuencia 0 definidas en el instrumento.
 #'
 #' @return Invisiblemente, la ruta normalizada del archivo Excel generado.
 #'
@@ -596,7 +667,8 @@ exportar_frecuencias_spss <- function(
     sm_vars_force = NULL,
     fuente = "Pulso PUCP",
     orders_list = NULL,
-    survey = NULL
+    survey = NULL,
+    mostrar_todo = FALSE
 ){
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop("El paquete 'openxlsx' es necesario para `exportar_frecuencias_spss()`. ",
@@ -637,7 +709,8 @@ exportar_frecuencias_spss <- function(
         v,
         survey        = survey,
         sm_vars_force = sm_vars_force,
-        orders_list   = orders_list
+        orders_list   = orders_list,
+        mostrar_todo  = mostrar_todo
       )
 
       if (nrow(tab)) {
@@ -660,12 +733,13 @@ exportar_frecuencias_spss <- function(
         var   = v,
         dic_vars = dic_vars,
         survey   = survey,
-        sm_vars_force = sm_vars_force,
+        sm_vars_force   = sm_vars_force,
         labels_override = labels_override,
         start_row = fila,
         start_col = 1,
         fuente = fuente,
-        orders_list = orders_list
+        orders_list  = orders_list,
+        mostrar_todo = mostrar_todo
       )
     }
 
@@ -704,6 +778,10 @@ exportar_frecuencias_spss <- function(
 #' @param sm_vars_force Vector opcional de variables que deben tratarse como
 #'   `select_multiple` aunque el instrumento no las marque como tales.
 #' @param fuente Texto de fuente que se mostrará al pie de cada tabla.
+#' @param mostrar_todo Lógico; si `TRUE`, se pasa como tal a
+#'   [exportar_frecuencias_spss()] y, en consecuencia, a [freq_table_spss()],
+#'   mostrando todas las categorías definidas en el instrumento, incluso con
+#'   frecuencia 0.
 #'
 #' @return Invisiblemente, la ruta normalizada del archivo Excel generado.
 #'
@@ -714,7 +792,8 @@ reporte_frecuencias <- function(data,
                                 path_xlsx   = "frecuencias_spss.xlsx",
                                 orden       = c("desc", "asc", "original"),
                                 sm_vars_force = NULL,
-                                fuente      = "Pulso PUCP") {
+                                fuente      = "Pulso PUCP",
+                                mostrar_todo = FALSE) {
 
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop("El paquete 'openxlsx' es necesario para `reporte_frecuencias()`. ",
@@ -790,16 +869,17 @@ reporte_frecuencias <- function(data,
   }
 
   exportar_frecuencias_spss(
-    data           = data,
-    dic_vars       = dic_vars,
-    SECCIONES      = SECCIONES,
+    data            = data,
+    dic_vars        = dic_vars,
+    SECCIONES       = SECCIONES,
     labels_override = NULL,
-    path_xlsx      = path_xlsx,
-    orden          = orden,
-    sm_vars_force  = sm_vars_force,
-    fuente         = fuente,
-    orders_list    = orders_list,
-    survey         = survey
+    path_xlsx       = path_xlsx,
+    orden           = orden,
+    sm_vars_force   = sm_vars_force,
+    fuente          = fuente,
+    orders_list     = orders_list,
+    survey          = survey,
+    mostrar_todo    = mostrar_todo
   )
 
   invisible(normalizePath(path_xlsx, winslash = "/"))

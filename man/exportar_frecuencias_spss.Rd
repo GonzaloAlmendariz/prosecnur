@@ -14,7 +14,8 @@ exportar_frecuencias_spss(
   sm_vars_force = NULL,
   fuente = "Pulso PUCP",
   orders_list = NULL,
-  survey = NULL
+  survey = NULL,
+  mostrar_todo = FALSE
 )
 }
 \arguments{
@@ -43,6 +44,10 @@ por variable.}
 
 \item{survey}{Tibble con la hoja \code{survey} del instrumento (para detectar
 \code{select_one} y \code{select_multiple}).}
+
+\item{mostrar_todo}{Lógico; si \code{TRUE}, las tablas internas se construyen con
+\code{mostrar_todo = TRUE} en \code{\link[=freq_table_spss]{freq_table_spss()}}, es decir, se incluyen las
+categorías con frecuencia 0 definidas en el instrumento.}
 }
 \value{
 Invisiblemente, la ruta normalizada del archivo Excel generado.

@@ -11,7 +11,8 @@ reporte_frecuencias(
   path_xlsx = "frecuencias_spss.xlsx",
   orden = c("desc", "asc", "original"),
   sm_vars_force = NULL,
-  fuente = "Pulso PUCP"
+  fuente = "Pulso PUCP",
+  mostrar_todo = FALSE
 )
 }
 \arguments{
@@ -34,6 +35,11 @@ categorías dentro de cada tabla.}
 \code{select_multiple} aunque el instrumento no las marque como tales.}
 
 \item{fuente}{Texto de fuente que se mostrará al pie de cada tabla.}
+
+\item{mostrar_todo}{Lógico; si \code{TRUE}, se pasa como tal a
+\code{\link[=exportar_frecuencias_spss]{exportar_frecuencias_spss()}} y, en consecuencia, a \code{\link[=freq_table_spss]{freq_table_spss()}},
+mostrando todas las categorías definidas en el instrumento, incluso con
+frecuencia 0.}
 }
 \value{
 Invisiblemente, la ruta normalizada del archivo Excel generado.

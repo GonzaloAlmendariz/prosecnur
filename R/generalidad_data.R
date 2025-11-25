@@ -166,95 +166,43 @@ reporte_data <- function(data,
 
     for (v in sm_vars) {
 
-      # dummies detectadas por patrón var/... (estado previo a limpiar nombres)
+      # Buscar todas las dummies detectadas por patrón var/...
       dummy_cols <- grep(paste0("^", v, "/"), names(data), value = TRUE)
-      if (length(dummy_cols) == 0L) next
 
-      # 2.1 Normalizar a 0/1 (con control de NA -> 0 o NA)
-      data[dummy_cols] <- lapply(data[dummy_cols], function(col) {
-        x_num <- suppressWarnings(as.numeric(col))
-        res   <- rep(NA_real_, length(x_num))
+      # También buscar madres alternativas tipo p122_recod, p122_b, etc.
+      madre_alt <- grep(paste0("^", v, "(_recod|_sm|_filtro|_aux|_tmp)?$"),
+                        names(data), value = TRUE)
 
-        res[!is.na(x_num) & x_num == 1] <- 1
-        res[!is.na(x_num) & x_num != 1] <- 0
+      # Asegurarnos de que madre_alt incluye la madre real si ya existe
+      madre_alt <- unique(c(intersect(names(data), v), madre_alt))
 
-        if (dummies_na_to_zero) {
-          res[is.na(x_num)] <- 0
-        }
-        res
-      })
+      # ---------------------------------------------------------
+      # (2.1) Normalizar las dummies a 0/1
+      # ---------------------------------------------------------
+      if (length(dummy_cols) > 0) {
+        data[dummy_cols] <- lapply(data[dummy_cols], function(col) {
+          x_num <- suppressWarnings(as.numeric(col))
+          res <- rep(NA_real_, length(x_num))
 
-      # 2.2 Etiquetar dummies con label de la opción (si choices está disponible)
-      if (!is.null(choices)) {
-        ln <- survey$list_name[survey$name == v][1]
-        if (!is.na(ln)) {
-          for (d in dummy_cols) {
-            code_opt_raw <- sub("^[^/]+/", "", d)   # sufijo después de "/"
+          res[!is.na(x_num) & x_num == 1] <- 1
+          res[!is.na(x_num) & x_num != 1] <- 0
 
-            lab_opt <- NA_character_
-
-            # a) si tenemos dicc_label_to_code podemos intentar canonizar label
-            if (!is.null(dicc_label_to_code[[ln]])) {
-              dict_lc   <- dicc_label_to_code[[ln]]  # label -> code
-              labs_orig <- names(dict_lc)
-
-              suf_canon  <- canon_txt(code_opt_raw)
-              labs_canon <- canon_txt(labs_orig)
-
-              idx <- match(suf_canon, labs_canon)
-              if (!is.na(idx)) {
-                code_match <- dict_lc[[labs_orig[idx]]]
-                lab_opt <- choices$label[
-                  choices$list_name == ln &
-                    as.character(choices$name) == as.character(code_match)
-                ][1]
-              }
-            }
-
-            # b) si no encontramos nada, intento directo por nombre en choices
-            if (is.na(lab_opt) || is.null(lab_opt)) {
-              lab_opt <- choices$label[
-                choices$list_name == ln &
-                  canon_txt(choices$name) == canon_txt(code_opt_raw)
-              ][1]
-            }
-
-            if (!is.na(lab_opt) && !is.null(lab_opt)) {
-              attr(data[[d]], "label") <- as.character(lab_opt)
-            }
-          }
-        }
+          if (dummies_na_to_zero) res[is.na(x_num)] <- 0
+          res
+        })
       }
 
-      # 2.3 Renombrar dummies usando CODE y no LABEL en la parte después de "/"
-      if (!is.null(dicc_label_to_code)) {
-        ln <- survey$list_name[survey$name == v][1]
-        if (!is.na(ln) && ln %in% names(dicc_label_to_code)) {
-          dict_lc    <- dicc_label_to_code[[ln]]  # label -> code
-          labs_orig  <- names(dict_lc)
-          labs_canon <- canon_txt(labs_orig)
+      # ---------------------------------------------------------
+      # (2.2) Construir diccionario de opciones (label/code)
+      # ---------------------------------------------------------
+      ln <- survey$list_name[survey$name == v][1]
+      dict_lc <- if (!is.na(ln) && ln %in% names(dicc_label_to_code))
+        dicc_label_to_code[[ln]] else NULL
 
-          for (d in dummy_cols) {
-            suf_raw   <- sub("^.+/", "", d)
-            suf_canon <- canon_txt(suf_raw)
-
-            idx <- match(suf_canon, labs_canon)
-            if (!is.na(idx)) {
-              code_opt     <- dict_lc[[labs_orig[idx]]]
-              nuevo_nombre <- paste0(v, "/", code_opt)
-              names(data)[names(data) == d] <- nuevo_nombre
-            }
-          }
-        }
-      }
-
-      # actualizar dummy_cols después de posibles renombres
-      dummy_cols <- grep(paste0("^", v, "/"), names(data), value = TRUE)
-      if (length(dummy_cols) == 0L) next
-
-      # 2.4 Reconstruir variable madre (códigos separados por ";")
-      #     SOLO si no existe ya en `data`
-      if (!v %in% names(data)) {
+      # ---------------------------------------------------------
+      # (2.3) Reconstruir la madre si faltaba
+      # ---------------------------------------------------------
+      if (!v %in% names(data) && length(dummy_cols) > 0) {
         codigos <- sub(paste0("^", v, "/"), "", dummy_cols)
         mat <- as.matrix(data[, dummy_cols, drop = FALSE])
 
@@ -264,22 +212,50 @@ reporte_data <- function(data,
           paste(codigos[sel], collapse = ";")
         })
 
-        # insertar madre al inicio de las dummies
+        # Insertar madre antes de las dummies
         pos_dummy1 <- which(names(data) == dummy_cols[1])[1]
         data[[v]] <- madre_vec
-
         if (!is.na(pos_dummy1) && pos_dummy1 > 1) {
           data <- dplyr::relocate(
-            data,
-            dplyr::all_of(v),
-            .before = dplyr::all_of(dummy_cols[1])
+            data, dplyr::all_of(v), .before = dplyr::all_of(dummy_cols[1])
           )
         }
       }
 
-      # 2.5 Asignar labels "No"/"Sí" a dummies
-      for (d in dummy_cols) {
-        attr(data[[d]], "labels") <- c(`0` = "No", `1` = "Sí")
+      # ---------------------------------------------------------
+      # (2.4) NORMALIZACIÓN GLOBAL de madres originales y recodificadas
+      # ---------------------------------------------------------
+      madres_candidatas <- madre_alt[madre_alt %in% names(data)]
+
+      for (m in madres_candidatas) {
+        x <- as.character(data[[m]])
+
+        # NA o vacío → NA
+        x[is.na(x) | !nzchar(x) | x == "NA"] <- NA_character_
+
+        # Unificar separadores:
+        # 1) espacios múltiples → ;
+        x <- gsub("\\s+", ";", x)
+
+        # 2) comas → ;
+        x <- gsub(",", ";", x)
+
+        # 3) limpiar ; repetidos
+        x <- gsub(";{2,}", ";", x)
+
+        # 4) limpiar ; al inicio/final
+        x <- gsub("^;|;$", "", x)
+
+        data[[m]] <- x
+      }
+
+      # ---------------------------------------------------------
+      # (2.5) Etiquetar dummies con NO/SÍ
+      # ---------------------------------------------------------
+      if (length(dummy_cols) > 0) {
+        for (d in dummy_cols) {
+          attr(data[[d]], "labels") <- c(`0` = "No", `1` = "Sí")
+        }
       }
     }
   }

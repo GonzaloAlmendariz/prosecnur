@@ -9,7 +9,8 @@ freq_table_spss(
   var,
   survey = NULL,
   sm_vars_force = NULL,
-  orders_list = NULL
+  orders_list = NULL,
+  mostrar_todo = FALSE
 )
 }
 \arguments{
@@ -26,6 +27,10 @@ como \code{select_multiple} aunque el instrumento no las marque como tales.}
 
 \item{orders_list}{Lista opcional con información de orden de categorías
 por variable (por ejemplo, \code{instrumento$orders_list}).}
+
+\item{mostrar_todo}{Lógico; si \code{TRUE}, incluye en la tabla todas las
+categorías definidas en \code{orders_list[[var]]$labels}, incluso si su
+frecuencia es 0.}
 }
 \value{
 Un tibble con las columnas:
