@@ -84,6 +84,11 @@ mk_styles_cruces <- function() {
       borderStyle  = "thin",
       borderColour = "#000000"
     ),
+    footer_top = openxlsx::createStyle(
+      border       = "top",
+      borderStyle  = "thin",
+      borderColour = "#000000"
+    ),
     cell = openxlsx::createStyle(
       fontSize = 10,
       halign   = "center",
@@ -795,6 +800,14 @@ exportar_cruces_multi <- function(data,
       openxlsx::writeData(wb, hoja, pie_txt, startRow = fila, startCol = 1)
       openxlsx::addStyle(wb, hoja, st$note, rows = fila, cols = 1, gridExpand = TRUE)
       openxlsx::mergeCells(wb, hoja, rows = fila, cols = 1:ncol_tbl)
+
+      # borde superior para cerrar la tabla justo sobre el pie de página
+      openxlsx::addStyle(
+        wb, hoja, st$footer_top,
+        rows = fila, cols = 1:ncol_tbl,
+        gridExpand = TRUE, stack = TRUE
+      )
+
       fila <- fila + 1
 
       # ---------- tabla de significancia (letras) ----------
@@ -966,6 +979,14 @@ exportar_cruces_multi <- function(data,
           openxlsx::addStyle(wb, hoja, st$note,
                              rows = fila_note, cols = 1, gridExpand = TRUE)
           openxlsx::mergeCells(wb, hoja, rows = fila_note, cols = 1:(col_cursor - 1))
+
+          # borde superior para cerrar la tabla de letras justo sobre el pie
+          openxlsx::addStyle(
+            wb, hoja, st$footer_top,
+            rows = fila_note, cols = 1:(col_cursor - 1),
+            gridExpand = TRUE, stack = TRUE
+          )
+
           openxlsx::setRowHeights(wb, hoja, rows = fila_note, heights = 80)
 
           fila <- fila_note + 2

@@ -249,16 +249,62 @@ reporte_data <- function(data,
         data[[m]] <- x
       }
 
-      # ---------------------------------------------------------
-      # (2.5) Etiquetar dummies con NO/SÍ
-      # ---------------------------------------------------------
+      # -----------------------------------------------------------------
+      # (2.5) Etiquetar dummies con NO/SÍ + label de variable + measure
+      # -----------------------------------------------------------------
       if (length(dummy_cols) > 0) {
+
+        # Diccionario code -> label del list_name, si existe
+        dict_code_to_lab <- NULL
+        if (!is.na(ln) && !is.null(ln) &&
+            !is.null(dicc_code_to_label) &&
+            ln %in% names(dicc_code_to_label)) {
+
+          dict_code_to_lab <- dicc_code_to_label[[ln]]
+        }
+
+        # Determinar el measure sugerido para la madre (si existe)
+        mother_measure <- NULL
+        if (!is.null(measure_rules) &&
+            "name" %in% names(measure_rules) &&
+            "measure_sugerida" %in% names(measure_rules)) {
+
+          mm <- measure_rules$measure_sugerida[measure_rules$name == v]
+          if (length(mm) > 0 && !is.na(mm[1])) {
+            mother_measure <- as.character(mm[1])
+          }
+        }
+
+        # Aplicar a cada dummy
         for (d in dummy_cols) {
+
+          # --- Value labels genéricos ---
           attr(data[[d]], "labels") <- c(`0` = "No", `1` = "Sí")
+
+          # --- Variable label: texto de la opción ---
+          if (!is.null(dict_code_to_lab)) {
+
+            # d = "P16/4" → extraer "4"
+            code_raw <- sub(paste0("^", v, "/"), "", d)
+
+            if (code_raw %in% names(dict_code_to_lab)) {
+              opt_label <- as.character(dict_code_to_lab[[code_raw]])
+              attr(data[[d]], "label") <- opt_label
+            }
+          }
+
+          # --- Asignar measure (nominal normalmente) ---
+          if (!is.null(mother_measure)) {
+            attr(data[[d]], "measure") <- mother_measure
+          } else {
+            # default si nada se encuentra
+            attr(data[[d]], "measure") <- "nominal"
+          }
         }
       }
     }
-  }
+    }
+
 
   # -------------------------------------------------------------------------
   # 3) Asignar etiquetas de variable (attr(, "label"))
