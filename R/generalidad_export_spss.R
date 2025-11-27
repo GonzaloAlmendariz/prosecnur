@@ -251,3 +251,87 @@ reporte_spss <- function(data,
 
   invisible(df)
 }
+
+
+
+#' Generar sintaxis SPSS para niveles de medida (ordinal / scale)
+#'
+#' A partir de una base de reporte (típicamente devuelta por [reporte_data()]),
+#' identifica las variables que tienen el atributo `measure` y genera un
+#' archivo `.sps` con instrucciones `VARIABLE LEVEL` para SPSS.
+#'
+#' En particular:
+#' - `measure = "ordinal"` -> `VARIABLE LEVEL ... (ORDINAL).`
+#' - `measure = "scale"`   -> `VARIABLE LEVEL ... (SCALE).`
+#'
+#' @param data Un `data.frame` o `tibble`, preferentemente el objeto devuelto
+#'   por [reporte_data()] (clase `"prosecnur_reporte_tbl"`).
+#' @param path_sps Ruta del archivo `.sps` a generar.
+#' @param verbose Lógico; si `TRUE` imprime un mensaje con la ruta generada.
+#'
+#' @return Invisiblemente, una lista con los vectores de variables ordinales y
+#'   de escala, junto con la ruta del archivo `.sps`.
+#' @export
+generar_spss_niveles <- function(data,
+                                 path_sps = "niveles_medida.sps",
+                                 verbose = TRUE) {
+
+  if (!is.data.frame(data)) {
+    stop("`data` debe ser un data.frame o tibble.", call. = FALSE)
+  }
+
+  # Detectar medida desde el atributo 'measure'
+  vars_ordinal <- names(data)[vapply(
+    data,
+    function(x) identical(attr(x, "measure", exact = TRUE), "ordinal"),
+    logical(1)
+  )]
+
+  vars_scale_raw <- names(data)[vapply(
+    data,
+    function(x) identical(attr(x, "measure", exact = TRUE), "scale"),
+    logical(1)
+  )]
+
+  # Excluir fechas y horas del grupo SCALE
+  vars_scale <- vars_scale_raw[!vapply(
+    data[vars_scale_raw],
+    function(x) inherits(x, c("Date", "POSIXct", "hms")),
+    logical(1)
+  )]
+
+  lineas <- character(0L)
+
+  # Helper para partir en bloques de hasta 20 vars
+  add_variable_level_blocks <- function(vars, level) {
+    if (length(vars) == 0L) return(character(0L))
+    split_vars <- split(vars, ceiling(seq_along(vars) / 20))
+    vapply(split_vars, function(v) {
+      sprintf("VARIABLE LEVEL %s (%s).", paste(v, collapse = " "), toupper(level))
+    }, character(1L))
+  }
+
+  lineas <- c(
+    lineas,
+    add_variable_level_blocks(vars_ordinal, "ordinal"),
+    add_variable_level_blocks(vars_scale,   "scale")
+  )
+
+  if (length(lineas) == 0L) {
+    warning("No se encontraron variables con atributo 'measure' = 'ordinal' o 'scale'.")
+  }
+
+  lineas <- c(lineas, "EXECUTE.")
+
+  writeLines(lineas, path_sps, useBytes = TRUE)
+
+  if (verbose) {
+    message("Sintaxis SPSS guardada en: ", normalizePath(path_sps, winslash = "/"))
+  }
+
+  invisible(list(
+    vars_ordinal = vars_ordinal,
+    vars_scale   = vars_scale,
+    path_sps     = path_sps
+  ))
+}
