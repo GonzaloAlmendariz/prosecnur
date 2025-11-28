@@ -221,6 +221,18 @@ split_sm_tokens <- function(x) {
   })
 }
 
+#' Verificar si existe la variable o alguna dummy asociada
+#'
+#' Considera formatos de dummies `var/cod` (KoBo) y `var.cod` (SPSS normalizado).
+#'
+#' @noRd
+.has_var_or_dummies <- function(data, var) {
+  if (!is.data.frame(data)) return(FALSE)
+  if (var %in% names(data)) return(TRUE)
+  var_esc <- gsub("([\\W])", "\\\\\\1", var)
+  any(grepl(paste0("^", var_esc, "[/\\.]"), names(data)))
+}
+
 # ============================
 # freq_table_spss (pública)
 # ============================
@@ -232,13 +244,25 @@ split_sm_tokens <- function(x) {
 #' codificadas como:
 #' \itemize{
 #'   \item Variable madre con códigos separados por `";"` (p. ej. `"1;3;4"`).
-#'   \item Dummies derivadas (`var/cod`) recodificadas a 0/1.
+#'   \item Dummies derivadas:
+#'     \itemize{
+#'       \item Formato original tipo KoBo: `var/cod`.
+#'       \item Formato normalizado tipo SPSS: `var.cod` (solo dummies, sin madre).
+#'     }
+#' }
+#'
+#' La identificación de que una variable es `select_multiple` se basa en:
+#' \itemize{
+#'   \item El `survey` (tipo `select_multiple` para `name == var`), o
+#'   \item El argumento `sm_vars_force`, o
+#'   \item La existencia de dummies asociadas (`var/cod` o `var.cod`) aunque
+#'         la madre no exista como columna.
 #' }
 #'
 #' La función utiliza, cuando están disponibles:
 #' \itemize{
 #'   \item Atributos `labels` de la variable en `data` (para mapear códigos a
-#'         etiquetas).
+#'         etiquetas), en el caso de madres “pegadas”.
 #'   \item `orders_list` (si se proporciona) para ordenar las categorías según
 #'         el instrumento.
 #'   \item Una variable de peso llamada `peso` en `data`. Si no existe, se
@@ -247,6 +271,8 @@ split_sm_tokens <- function(x) {
 #'
 #' @param data Data frame o tibble con la base de datos.
 #' @param var Nombre de la variable (como cadena) para la que se desea la tabla.
+#'   Puede ser el nombre de la madre (`"p106"`, `"p106_recod"`) aunque en la
+#'   base solo existan las dummies (`p106.1`, `p106.2`, etc.).
 #' @param survey Tibble con metadatos del instrumento (hoja `survey`), que
 #'   debe contener al menos las columnas `name` y `type`. Se utiliza para
 #'   diferenciar `select_one` y `select_multiple`. Puede ser `NULL`.
@@ -269,14 +295,51 @@ split_sm_tokens <- function(x) {
 freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
                             orders_list = NULL, mostrar_todo = FALSE) {
 
-  stopifnot(var %in% names(data))
+  if (!is.data.frame(data)) {
+    stop("`data` debe ser un data.frame o tibble.", call. = FALSE)
+  }
+
+  # -----------------------------
+  # Detectar presencia de madre y dummies
+  # -----------------------------
+  has_main <- var %in% names(data)
+
+  # Dummies tipo "var/cod"
+  var_escaped <- gsub("([\\W])", "\\\\\\1", var)
+  subvars_slash <- names(data)[grepl(paste0("^", var_escaped, "/"), names(data))]
+
+  # Dummies tipo "var.cod" (sufijo arbitrario sin punto adicional: 1, 2, 70, other, texto, etc.)
+  subvars_dot <- names(data)[grepl(paste0("^", var_escaped, "\\.[^.]+$"), names(data))]
+
+  subvars_all <- c(subvars_slash, subvars_dot)
+  has_dummies <- length(subvars_all) > 0L
+
+  if (!has_main && !has_dummies) {
+    stop("`", var, "` no se encuentra en `data` ni se detectaron dummies asociadas.",
+         call. = FALSE)
+  }
+
+  # Tipo base según survey / sm_vars_force
   tipo <- tipo_pregunta_spss(var, survey, sm_vars_force)
+
+  # Si no se detectó como SM pero existen dummies, forzar a SM
+  if (tipo != "sm" && has_dummies) {
+    tipo <- "sm"
+  }
+
   w <- .peso_vec(data)
 
+  # ============================
+  # Caso select_multiple
+  # ============================
   if (tipo == "sm") {
 
-    # Caso 1: madre "pegada" (ej. "1;3;4")
-    if (is.character(data[[var]]) || is.factor(data[[var]])) {
+    # -------------------------
+    # Caso 1: madre "pegada" (ej. "1;3;4") presente en data
+    # -------------------------
+    if (has_main &&
+        (is.character(data[[var]]) || is.factor(data[[var]]))) {
+
       vec <- as.character(data[[var]])
       df_long <- tibble::tibble(id = seq_len(nrow(data)), valor = vec) |>
         dplyr::filter(!is.na(valor) & nzchar(valor) & valor != "NA") |>
@@ -320,73 +383,44 @@ freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
         pct      = 1
       )
       return(dplyr::bind_rows(tab, total_row))
-
-    } else {
-      # Caso 2: dummies var/cod ya en columnas
-      subvars <- names(data)[grepl(paste0("^", stringr::fixed(var), "/"), names(data))]
-      if (!length(subvars)) {
-        return(tibble::tibble(Opciones = character(), n = numeric(), pct = numeric()))
-      }
-      mat <- as.data.frame(data[, subvars, drop = FALSE])
-      mat[] <- lapply(mat, function(v) suppressWarnings(as.numeric(as.character(v))))
-
-      has_any <- rowSums(mat == 1, na.rm = TRUE) > 0
-      denom <- sum(w[has_any], na.rm = TRUE)
-
-      n_w <- vapply(subvars, function(sv){
-        v <- suppressWarnings(as.numeric(as.character(mat[[sv]])))
-        sum(w[v == 1 & !is.na(v)], na.rm = TRUE)
-      }, numeric(1))
-
-      tab <- tibble::tibble(subvar = subvars, n = as.numeric(n_w)) |>
-        dplyr::mutate(
-          Opciones = sub(
-            paste0("^", gsub("([\\W])", "\\\\\\1", var), "/"),
-            "",
-            subvar
-          )
-        ) |>
-        dplyr::arrange(dplyr::desc(n)) |>
-        dplyr::transmute(
-          Opciones,
-          n,
-          pct = if (denom > 0) n/denom else NA_real_
-        )
-
-      tab <- .map_to_labels(tab, var, orders_list)
-      tab <- .completar_categorias(tab, var, orders_list, denom, mostrar_todo)
-      tab <- .reordenar_por_instrumento(tab, var, orders_list)
-      tab <- .move_ns_pref_last(tab)
-
-      total_row <- tibble::tibble(
-        Opciones = "Total",
-        n        = as.numeric(denom),
-        pct      = 1
-      )
-      return(dplyr::bind_rows(tab, total_row))
     }
 
-  } else {
-
-    col <- var
-    tib <- data |>
-      dplyr::transmute(.op = as.character(.data[[col]]), peso = w) |>
-      dplyr::filter(!is.na(.op) & nzchar(.op) & .op != "NA")
-
-    if (!nrow(tib)) {
+    # -------------------------
+    # Caso 2: solo dummies (`var/cod` o `var.cod`)
+    # -------------------------
+    if (!length(subvars_all)) {
       return(tibble::tibble(Opciones = character(), n = numeric(), pct = numeric()))
     }
 
-    denom <- sum(tib$peso, na.rm = TRUE)
+    mat <- as.data.frame(data[, subvars_all, drop = FALSE])
+    mat[] <- lapply(mat, function(v) suppressWarnings(as.numeric(as.character(v))))
 
-    tab <- tib |>
-      dplyr::group_by(.op) |>
-      dplyr::summarise(n = sum(peso, na.rm = TRUE), .groups = "drop") |>
+    # Denominador: casos con al menos una marca (1)
+    has_any <- rowSums(mat == 1, na.rm = TRUE) > 0
+    denom <- sum(w[has_any], na.rm = TRUE)
+
+    # Conteo ponderado de cada dummy
+    n_w <- vapply(subvars_all, function(sv){
+      v <- suppressWarnings(as.numeric(as.character(mat[[sv]])))
+      sum(w[v == 1 & !is.na(v)], na.rm = TRUE)
+    }, numeric(1))
+
+    tab <- tibble::tibble(subvar = subvars_all, n = as.numeric(n_w)) |>
+      dplyr::mutate(
+        # eliminar el prefijo "var/" o "var." y quedarse solo con el código
+        Opciones = sub(
+          paste0("^", var_escaped, "[/\\.]"),
+          "",
+          subvar
+        )
+      ) |>
       dplyr::arrange(dplyr::desc(n)) |>
-      dplyr::mutate(pct = if (denom > 0) n/denom else NA_real_) |>
-      dplyr::rename(Opciones = .op)
+      dplyr::transmute(
+        Opciones,
+        n,
+        pct = if (denom > 0) n/denom else NA_real_
+      )
 
-    tab <- .map_from_attr_labels(tab, var, data)
     tab <- .map_to_labels(tab, var, orders_list)
     tab <- .completar_categorias(tab, var, orders_list, denom, mostrar_todo)
     tab <- .reordenar_por_instrumento(tab, var, orders_list)
@@ -394,12 +428,52 @@ freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
 
     total_row <- tibble::tibble(
       Opciones = "Total",
-      n        = sum(tab$n, na.rm = TRUE),
+      n        = as.numeric(denom),
       pct      = 1
     )
-    dplyr::bind_rows(tab, total_row)
+    return(dplyr::bind_rows(tab, total_row))
   }
+
+  # ============================
+  # Caso select_one / abierta
+  # ============================
+  if (!has_main) {
+    stop("`", var, "` no existe como columna en `data` y no se detectó como ",
+         "pregunta de respuesta múltiple con dummies.", call. = FALSE)
+  }
+
+  col <- var
+  tib <- data |>
+    dplyr::transmute(.op = as.character(.data[[col]]), peso = w) |>
+    dplyr::filter(!is.na(.op) & nzchar(.op) & .op != "NA")
+
+  if (!nrow(tib)) {
+    return(tibble::tibble(Opciones = character(), n = numeric(), pct = numeric()))
+  }
+
+  denom <- sum(tib$peso, na.rm = TRUE)
+
+  tab <- tib |>
+    dplyr::group_by(.op) |>
+    dplyr::summarise(n = sum(peso, na.rm = TRUE), .groups = "drop") |>
+    dplyr::arrange(dplyr::desc(n)) |>
+    dplyr::mutate(pct = if (denom > 0) n/denom else NA_real_) |>
+    dplyr::rename(Opciones = .op)
+
+  tab <- .map_from_attr_labels(tab, var, data)
+  tab <- .map_to_labels(tab, var, orders_list)
+  tab <- .completar_categorias(tab, var, orders_list, denom, mostrar_todo)
+  tab <- .reordenar_por_instrumento(tab, var, orders_list)
+  tab <- .move_ns_pref_last(tab)
+
+  total_row <- tibble::tibble(
+    Opciones = "Total",
+    n        = sum(tab$n, na.rm = TRUE),
+    pct      = 1
+  )
+  dplyr::bind_rows(tab, total_row)
 }
+
 
 # ============================
 # Estilos y escritura en Excel
@@ -685,7 +759,14 @@ exportar_frecuencias_spss <- function(
 
   for (sec in names(SECCIONES)) {
     vars_sec <- SECCIONES[[sec]]
-    vars_sec <- vars_sec[vars_sec %in% names(data)]
+
+    # Mantener solo variables que existan como columna o tengan dummies asociadas
+    vars_sec <- vars_sec[vapply(
+      vars_sec,
+      function(v) .has_var_or_dummies(data, v),
+      logical(1)
+    )]
+
     if (!length(vars_sec)) next
 
     openxlsx::writeData(wb, sheet, toupper(sec),
@@ -858,14 +939,20 @@ reporte_frecuencias <- function(data,
     }
   }
 
+  # Mantener, por sección, solo variables que existan o tengan dummies asociadas
   SECCIONES <- lapply(secciones, function(vars) {
-    intersect(vars, names(data))
+    vars[vapply(
+      vars,
+      function(v) .has_var_or_dummies(data, v),
+      logical(1)
+    )]
   })
   SECCIONES <- SECCIONES[vapply(SECCIONES, length, integer(1)) > 0L]
 
   if (length(SECCIONES) == 0L) {
-    stop("Después de intersectar con `data`, ninguna sección tiene variables. ",
-         "Revisar los nombres en `secciones`.", call. = FALSE)
+    stop("Después de filtrar por presencia en `data` (variable o dummies), ",
+         "ninguna sección tiene variables válidas. Revisar `secciones` y la base.",
+         call. = FALSE)
   }
 
   exportar_frecuencias_spss(

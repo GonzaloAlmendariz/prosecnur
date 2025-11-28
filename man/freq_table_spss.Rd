@@ -16,7 +16,9 @@ freq_table_spss(
 \arguments{
 \item{data}{Data frame o tibble con la base de datos.}
 
-\item{var}{Nombre de la variable (como cadena) para la que se desea la tabla.}
+\item{var}{Nombre de la variable (como cadena) para la que se desea la tabla.
+Puede ser el nombre de la madre (\code{"p106"}, \code{"p106_recod"}) aunque en la
+base solo existan las dummies (\code{p106.1}, \code{p106.2}, etc.).}
 
 \item{survey}{Tibble con metadatos del instrumento (hoja \code{survey}), que
 debe contener al menos las columnas \code{name} y \code{type}. Se utiliza para
@@ -46,14 +48,26 @@ base de reporte. Soporta variables de tipo elección múltiple (\code{select_mul
 codificadas como:
 \itemize{
 \item Variable madre con códigos separados por \code{";"} (p. ej. \code{"1;3;4"}).
-\item Dummies derivadas (\code{var/cod}) recodificadas a 0/1.
+\item Dummies derivadas:
+\itemize{
+\item Formato original tipo KoBo: \code{var/cod}.
+\item Formato normalizado tipo SPSS: \code{var.cod} (solo dummies, sin madre).
+}
 }
 }
 \details{
+La identificación de que una variable es \code{select_multiple} se basa en:
+\itemize{
+\item El \code{survey} (tipo \code{select_multiple} para \code{name == var}), o
+\item El argumento \code{sm_vars_force}, o
+\item La existencia de dummies asociadas (\code{var/cod} o \code{var.cod}) aunque
+la madre no exista como columna.
+}
+
 La función utiliza, cuando están disponibles:
 \itemize{
 \item Atributos \code{labels} de la variable en \code{data} (para mapear códigos a
-etiquetas).
+etiquetas), en el caso de madres “pegadas”.
 \item \code{orders_list} (si se proporciona) para ordenar las categorías según
 el instrumento.
 \item Una variable de peso llamada \code{peso} en \code{data}. Si no existe, se
