@@ -21,6 +21,12 @@
 #'         separadas.
 #' }
 #'
+#' El argumento `codigos_solo_si_presentes` permite que ciertos códigos
+#' (por ejemplo, 96, 97, 98, 99) solo se documenten en el bloque de "Valores
+#' válidos" si efectivamente aparecen en la base de datos para la variable
+#' correspondiente. De esta forma, se evita llenar el codebook con códigos
+#' de respuesta especiales que no se usaron en la práctica.
+#'
 #' @param data Un `data.frame` o `tibble`, idealmente el objeto devuelto por
 #'   [reporte_data()], que contiene los atributos `label` y `labels`.
 #' @param path_xlsx Ruta del archivo Excel a generar. Por defecto
@@ -31,20 +37,29 @@
 #'   (por ejemplo, `orders_list` generado en fases previas). Si es `NULL`,
 #'   la función intentará recuperarla desde
 #'   `attr(data, "instrumento_reporte")$orders_list`, si existe.
+#' @param codigos_solo_si_presentes Vector opcional de códigos (por ejemplo
+#'   `c(96, 97, 98, 99)`) que solo se mostrarán en el bloque de "Valores
+#'   válidos" si aparecen al menos una vez en la variable correspondiente
+#'   dentro de `data`. Los demás códigos se muestran siempre.
 #'
 #' @return Invisiblemente, la ruta normalizada del archivo Excel generado.
 #'
 #' @examples
 #' \dontrun{
 #'   rp_data <- reporte_data(data_cruda_adaptada, rp_inst)
-#'   reporte_codebook(rp_data, path_xlsx = "codebook_OPS_EES.xlsx")
+#'   reporte_codebook(
+#'     rp_data,
+#'     path_xlsx = "codebook_OPS_EES.xlsx",
+#'     codigos_solo_si_presentes = c(96, 97, 98, 99)
+#'   )
 #' }
 #'
 #' @export
 reporte_codebook <- function(data,
                              path_xlsx = "codebook_from_data.xlsx",
                              sheet     = "Codebook",
-                             ord       = NULL) {
+                             ord       = NULL,
+                             codigos_solo_si_presentes = NULL) {
 
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop("El paquete 'openxlsx' es necesario para `reporte_codebook()`. ",
@@ -63,7 +78,7 @@ reporte_codebook <- function(data,
     }
   }
 
-  # Nombre simbólico del data.frame (para dejarlo registrado si se quisiera)
+  # Nombre simbólico del data.frame (por si se quisiera registrar)
   df_name <- deparse(substitute(data))
 
   .write_codebook_from_df(
@@ -71,24 +86,32 @@ reporte_codebook <- function(data,
     ord     = ord,
     outfile = path_xlsx,
     sheet   = sheet,
-    df_name = df_name
+    df_name = df_name,
+    codigos_solo_si_presentes = codigos_solo_si_presentes
   )
 }
 
 # -------------------------------------------------------------------
 # Helper interno: escritura del codebook en Excel
-# (adaptación de tu write_codebook_from_df original)
 # -------------------------------------------------------------------
 #' @noRd
 .write_codebook_from_df <- function(df,
                                     ord     = NULL,  # opcional: ord$orders_list
                                     outfile = "codebook_from_data.xlsx",
                                     sheet   = "Codebook",
-                                    df_name = "df") {
+                                    df_name = "df",
+                                    codigos_solo_si_presentes = NULL) {
 
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop("El paquete 'openxlsx' es necesario para generar el codebook.",
          call. = FALSE)
+  }
+
+  # Normalizar códigos condicionales a carácter (para comparar con names(labels))
+  codigos_cond_chr <- if (is.null(codigos_solo_si_presentes)) {
+    character(0)
+  } else {
+    as.character(codigos_solo_si_presentes)
   }
 
   wb <- openxlsx::createWorkbook()
@@ -119,6 +142,30 @@ reporte_codebook <- function(data,
     return(NA_character_)
   }
 
+  # ---- helper: filtrar códigos según presencia en la data ----
+  filter_codes_by_data <- function(v, codes, labels) {
+    if (!length(codes)) return(list(codes = codes, labels = labels))
+    if (!length(codigos_cond_chr)) {
+      return(list(codes = codes, labels = labels))
+    }
+    if (!(v %in% names(df))) {
+      return(list(codes = codes, labels = labels))
+    }
+
+    # valores usados en la variable (convertidos a carácter)
+    used_vals  <- df[[v]]
+    used_codes <- unique(as.character(used_vals))
+    used_codes <- used_codes[!is.na(used_codes) & nzchar(used_codes)]
+
+    # regla: si el código está en codigos_cond_chr y no está usado, se omite
+    keep <- !(codes %in% codigos_cond_chr & !(codes %in% used_codes))
+
+    list(
+      codes  = codes[keep],
+      labels = labels[keep]
+    )
+  }
+
   # ---- helper: value-labels (códigos y etiquetas) ----
   get_value_labels <- function(v) {
     lab_attr <- attr(df[[v]], "labels", exact = TRUE)
@@ -127,17 +174,24 @@ reporte_codebook <- function(data,
       # En este flujo: NOMBRES = códigos, VALORES = etiquetas
       codes_vec  <- as.character(names(lab_attr))       # "1", "2", "99"
       labels_vec <- as.character(unname(lab_attr))      # "Sí", "No", etc.
-      return(list(codes = codes_vec, labels = labels_vec))
+
+      flt <- filter_codes_by_data(v, codes_vec, labels_vec)
+      if (!length(flt$codes)) return(NULL)
+
+      return(list(codes = flt$codes, labels = flt$labels))
     }
 
     # fallback a ord$orders_list, si lo usas
     if (!is.null(ord) && !is.null(ord[[v]])) {
       ordv <- ord[[v]]
       if (!is.null(ordv$labels) && !is.null(ordv$names)) {
-        return(list(
-          codes  = as.character(ordv$names),
-          labels = as.character(ordv$labels)
-        ))
+        codes_vec  <- as.character(ordv$names)
+        labels_vec <- as.character(ordv$labels)
+
+        flt <- filter_codes_by_data(v, codes_vec, labels_vec)
+        if (!length(flt$codes)) return(NULL)
+
+        return(list(codes = flt$codes, labels = flt$labels))
       }
     }
 
@@ -215,7 +269,8 @@ reporte_codebook <- function(data,
     )
     cur_row <- cur_row + 1L
 
-    # 3) fila de atributos estándar: A = "Atributos estándar", B = "Etiqueta", C = <varlabel>
+    # 3) fila de atributos estándar: A = "Atributos estándar",
+    #    B = "Etiqueta", C = <varlabel>
     openxlsx::writeData(
       wb, sheet, x = "Atributos estándar",
       startCol = 1, startRow = cur_row, colNames = FALSE

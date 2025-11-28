@@ -8,7 +8,8 @@ reporte_codebook(
   data,
   path_xlsx = "codebook_from_data.xlsx",
   sheet = "Codebook",
-  ord = NULL
+  ord = NULL,
+  codigos_solo_si_presentes = NULL
 )
 }
 \arguments{
@@ -25,6 +26,11 @@ reporte_codebook(
 (por ejemplo, \code{orders_list} generado en fases previas). Si es \code{NULL},
 la función intentará recuperarla desde
 \code{attr(data, "instrumento_reporte")$orders_list}, si existe.}
+
+\item{codigos_solo_si_presentes}{Vector opcional de códigos (por ejemplo
+\code{c(96, 97, 98, 99)}) que solo se mostrarán en el bloque de "Valores
+válidos" si aparecen al menos una vez en la variable correspondiente
+dentro de \code{data}. Los demás códigos se muestran siempre.}
 }
 \value{
 Invisiblemente, la ruta normalizada del archivo Excel generado.
@@ -51,11 +57,21 @@ El layout del Excel sigue una estructura pensada para documentación:
 \item Bloque "Valores válidos" con códigos y etiquetas, en columnas
 separadas.
 }
+
+El argumento \code{codigos_solo_si_presentes} permite que ciertos códigos
+(por ejemplo, 96, 97, 98, 99) solo se documenten en el bloque de "Valores
+válidos" si efectivamente aparecen en la base de datos para la variable
+correspondiente. De esta forma, se evita llenar el codebook con códigos
+de respuesta especiales que no se usaron en la práctica.
 }
 \examples{
 \dontrun{
   rp_data <- reporte_data(data_cruda_adaptada, rp_inst)
-  reporte_codebook(rp_data, path_xlsx = "codebook_OPS_EES.xlsx")
+  reporte_codebook(
+    rp_data,
+    path_xlsx = "codebook_OPS_EES.xlsx",
+    codigos_solo_si_presentes = c(96, 97, 98, 99)
+  )
 }
 
 }
