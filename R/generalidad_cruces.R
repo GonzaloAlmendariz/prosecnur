@@ -114,13 +114,28 @@ get_pesos <- function(data, weight_col = "peso") {
   rep(1, nrow(data))
 }
 
-tipo_pregunta <- function(var, survey = NULL, sm_vars_force = NULL) {
+# Detectar si existe la variable o alguna dummy asociada (var/cod, var.cod)
+.has_var_or_dummies <- function(data, var) {
+  if (!is.data.frame(data)) return(FALSE)
+  if (var %in% names(data)) return(TRUE)
+  var_esc <- gsub("([\\W])", "\\\\\\1", var)
+  any(grepl(paste0("^", var_esc, "[/\\.]"), names(data)))
+}
+
+tipo_pregunta <- function(var, survey = NULL, sm_vars_force = NULL, data = NULL) {
   if (!is.null(sm_vars_force) && var %in% sm_vars_force) return("sm")
+
   if (!is.null(survey) && any(survey$name == var)) {
     tipos <- unique(na.omit(survey$type[survey$name == var]))
     if (any(grepl("^select_multiple(\\s|$)", tipos))) return("sm")
     if (any(grepl("^select_one(\\s|$)", tipos)))      return("so")
   }
+
+  # Si no está marcado en survey pero hay dummies asociadas, tratar como SM
+  if (!is.null(data) && .has_var_or_dummies(data, var)) {
+    return("sm")
+  }
+
   "so"
 }
 
@@ -178,8 +193,8 @@ get_categorias <- function(var,
                            survey          = NULL,
                            orders_list     = NULL,
                            opciones_excluir = NULL) {
-  x <- data[[var]]
-  lab_attr <- attr(x, "labels", exact = TRUE)
+  x <- if (var %in% names(data)) data[[var]] else NULL
+  lab_attr <- if (!is.null(x)) attr(x, "labels", exact = TRUE) else NULL
 
   ln <- get_list_name(var, survey)
   codes  <- character(0)
@@ -189,10 +204,8 @@ get_categorias <- function(var,
   obj <- NULL
   if (!is.null(orders_list)) {
     if (var %in% names(orders_list)) {
-      # mismo esquema que frecuencias: orders_list[[var]]
       obj <- orders_list[[var]]
     } else if (!is.na(ln) && ln %in% names(orders_list)) {
-      # fallback: algunas implementaciones guardan por list_name
       obj <- orders_list[[ln]]
     }
   }
@@ -206,8 +219,8 @@ get_categorias <- function(var,
     codes  <- names(lab_attr)
     labels <- as.character(unname(lab_attr))
 
-  } else {
-    # 3) fallback: categorías en los datos
+  } else if (!is.null(x)) {
+    # 3) fallback: categorías en los datos (solo si existe la columna)
     codes  <- sort(unique(na.omit(as.character(x))))
     labels <- codes
   }
@@ -257,9 +270,11 @@ contar_por_opcion <- function(data,
         sum(w[ids_j], na.rm = TRUE)
       }, numeric(1))
     } else {
-      subs <- grep(paste0("^", stringr::fixed(var), "/"), names(data), value = TRUE)
+      # Dummies: var/cod o var.cod (sufijo numérico o texto)
+      subs <- grep(paste0("^", stringr::fixed(var), "[/\\.]"),
+                   names(data), value = TRUE)
       if (!length(subs)) return(rep(0, length(codes)))
-      codes_dummy <- sub(paste0("^", var, "/"), "", subs)
+      codes_dummy <- sub(paste0("^", var, "[/\\.]"), "", subs)
 
       vapply(seq_along(codes), function(j) {
         code_j   <- codes[j]
@@ -307,9 +322,11 @@ denominador_validos <- function(data,
       denom_ids <- unique(long$id)
       return(sum(w[denom_ids], na.rm = TRUE))
     } else {
-      subs <- grep(paste0("^", stringr::fixed(var), "/"), names(data), value = TRUE)
+      # Dummies: var/cod o var.cod
+      subs <- grep(paste0("^", stringr::fixed(var), "[/\\.]"),
+                   names(data), value = TRUE)
       if (!length(subs)) return(0)
-      codes_dummy <- sub(paste0("^", var, "/"), "", subs)
+      codes_dummy <- sub(paste0("^", var, "[/\\.]"), "", subs)
       subs_keep   <- subs[codes_dummy %in% codes]
       if (!length(subs_keep)) return(0)
       mat <- sapply(subs_keep, function(col) {
@@ -445,7 +462,11 @@ exportar_cruces_multi <- function(data,
                                   show_sig         = TRUE,
                                   alpha            = 0.05) {
 
-  SECCIONES  <- lapply(SECCIONES, function(v) v[v %in% names(data)])
+  # Mantener en SECCIONES variables que existan como columna o tengan dummies
+  SECCIONES <- lapply(SECCIONES, function(v) {
+    v[vapply(v, function(x) .has_var_or_dummies(data, x), logical(1))]
+  })
+  # Variables de cruce: por simplicidad, solo columnas reales
   CRUZAR_CON <- CRUZAR_CON[CRUZAR_CON %in% names(data)]
   stopifnot(length(CRUZAR_CON) > 0)
 
@@ -524,7 +545,7 @@ exportar_cruces_multi <- function(data,
     # ---------- loop por variable de la sección ----------
     for (var in vars_sec) {
 
-      tp <- tipo_pregunta(var, survey = survey, sm_vars_force = sm_vars_force)
+      tp <- tipo_pregunta(var, survey = survey, sm_vars_force = sm_vars_force, data = data)
       cats_var <- get_categorias(
         var              = var,
         data             = data,
@@ -611,7 +632,7 @@ exportar_cruces_multi <- function(data,
         # Clave con la que vamos a comparar en la data:
         #   - si la data contiene los códigos, usamos códigos
         #   - si no, pero contiene labels, usamos labels
-        #   - si ambos, priorizamos códigos (es el caso clásico haven/labelled)
+        #   - si ambos, priorizamos códigos (caso haven/labelled)
         keys_vec <- if (usa_codes || !usa_labels) estr_codes else estr_labels
 
         bloques <- lapply(seq_along(keys_vec), function(j) {
@@ -846,7 +867,7 @@ exportar_cruces_multi <- function(data,
             var             = var,
             opciones_labels = opciones,
             codes_row       = codes_row,
-            estratos        = estr_codes,  # columnas por CÓDIGOS
+            estratos        = estr_codes,
             var_estrato     = s,
             tp              = tp,
             weight_col      = weight_col
@@ -903,7 +924,6 @@ exportar_cruces_multi <- function(data,
           }
           runs1 <- merge_runs(sig_h1)
           for (r in runs1) if ((r[2] - r[1] + 1) > 1) {
-            # OJO: aquí ya NO se suma +1, se usa el índice tal cual
             openxlsx::mergeCells(wb, hoja,
                                  rows = fila,
                                  cols = r[1]:r[2])
@@ -1005,12 +1025,12 @@ exportar_cruces_multi <- function(data,
   openxlsx::setColWidths(wb, hoja, cols = 2:200, widths = 12)
 
   openxlsx::saveWorkbook(wb, path_xlsx, overwrite = TRUE)
-  message("✅ Cruces exportados a: ", normalizePath(path_xlsx))
+  message("Cruces exportados a: ", normalizePath(path_xlsx))
   invisible(path_xlsx)
 }
 
 # =============================================================================
-# Wrapper de alto nivel: reporte_cruces
+# reporte_cruces()
 # =============================================================================
 
 #' Generar reporte de cruces en Excel

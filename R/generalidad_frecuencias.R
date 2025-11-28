@@ -234,7 +234,7 @@ split_sm_tokens <- function(x) {
 }
 
 # ============================
-# freq_table_spss (pública)
+# freq_table_spss
 # ============================
 
 #' Tabla de frecuencias ponderadas para una variable
@@ -696,7 +696,7 @@ write_one_freq <- function(wb, sheet, data, var, dic_vars,
 }
 
 # ============================
-# exportar_frecuencias_spss (pública)
+# exportar_frecuencias_spss
 # ============================
 
 #' Exportar tablas de frecuencias a Excel por secciones
@@ -833,7 +833,7 @@ exportar_frecuencias_spss <- function(
 }
 
 # ============================
-# reporte_frecuencias (wrapper alto nivel)
+# reporte_frecuencias
 # ============================
 
 #' Generar reporte de frecuencias en Excel a partir de una base de reporte
