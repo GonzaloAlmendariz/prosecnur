@@ -13,9 +13,18 @@
 #'         Los códigos ya presentes se conservan sin modificación.
 #'   \item Normaliza las variables derivadas de `select_multiple`:
 #'         dummies en 0/1, con `label` de la opción, `labels` = `"No"/"Sí"`,
-#'         y nombres `var.codigo` (punto) en lugar de `var/opción`, tal como
-#'         se espera en un flujo orientado a SPSS. La variable madre se
-#'         reconstruye solo si no existe ya en la base.
+#'         y nombres `var.codigo` (punto) en lugar de `var/opción`. La lógica
+#'         de valores es:
+#'         \itemize{
+#'           \item `1` = opción marcada;
+#'           \item `0` = opción no marcada, pero se marcó alguna otra opción
+#'                 en esa pregunta;
+#'           \item `NA` = la pregunta no fue respondida (ninguna opción
+#'                 marcada, todas las dummies quedan en `NA`).
+#'         }
+#'         Si existen variables madre (`var` o `var_recod`) se usan para
+#'         generar dummies y luego se eliminan, de modo que en la base final
+#'         solo queden las dummies.
 #' }
 #'
 #' La función no escribe ningún archivo ni crea objetos `labelled_spss`. La
@@ -35,19 +44,19 @@
 #'   `"No"` / `"Sí"`. Todas las variables cuyo nombre contenga `"/"` se tratan
 #'   automáticamente como dummies de `select_multiple`, por lo que este
 #'   argumento es únicamente complementario.
-#' @param dummies_na_to_zero Lógico; si `TRUE` (por defecto), las dummies de
-#'   `select_multiple` se normalizan de modo que los `NA` se imputan a 0.
-#'   Si `FALSE`, se dejan como `NA` cuando no hay información.
+#' @param dummies_na_to_zero (Obsoleto) Se mantiene por compatibilidad, pero
+#'   la lógica actual trata las filas sin ninguna opción marcada como `NA`
+#'   en todas las dummies, independientemente de este argumento.
 #'
 #' @return El mismo objeto `data` pero:
 #'   \itemize{
 #'     \item Con variables `select_one` en códigos cuando se detectan labels
 #'           provenientes del instrumento.
-#'     \item Con dummies 0/1 renombradas `var.codigo` (punto) y etiquetadas con
-#'           `label` (texto de la opción) y `labels` = `"No"` / `"Sí"`.
-#'     \item Con variables madre de `select_multiple` reconstruidas como
-#'           cadenas de códigos separados por `";"` cuando no existían en la
-#'           base original.
+#'     \item Con dummies 0/1 de `select_multiple` renombradas `var.codigo`
+#'           (punto) y etiquetadas con `label` (texto de la opción) y
+#'           `labels` = `"No"` / `"Sí"`.
+#'     \item Sin variables madre de `select_multiple` (ni originales ni
+#'           recodificadas): solo se conservan las dummies.
 #'     \item Con atributos `label`, `labels` y `measure` según el instrumento.
 #'     \item Con atributos a nivel de objeto:
 #'       \describe{
@@ -140,12 +149,9 @@ reporte_data <- function(data,
 
       if (!length(vals)) next
 
-      # ¿hay al menos algún valor que coincida con un label del diccionario?
       prop_labels <- mean(vals %in% labels_vec)
-      prop_codes  <- mean(vals %in% codes_vec)  # se mantiene por si luego se usa
+      prop_codes  <- mean(vals %in% codes_vec)
 
-      # Si hay labels presentes, recodificamos esos labels a código.
-      # Los códigos existentes se mantienen porque .default = x_chr
       if (prop_labels > 0) {
         x_rec <- dplyr::recode(
           x_chr,
@@ -158,153 +164,154 @@ reporte_data <- function(data,
   }
 
   # -------------------------------------------------------------------------
-  # 2) Tratamiento de select_multiple: dummies 0/1, renombrar y madre (si falta)
+  # 2) Tratamiento de select_multiple: generación de dummies y semántica NA/0/1
   # -------------------------------------------------------------------------
+  sm_mothers_to_drop <- character(0)
+
   if (!is.null(survey) && all(c("name", "type", "list_name") %in% names(survey))) {
 
     sm_vars <- survey$name[grepl("^select_multiple", survey$type)]
 
     for (v in sm_vars) {
 
-      # Buscar todas las dummies detectadas por patrón var/...
-      dummy_cols <- grep(paste0("^", v, "/"), names(data), value = TRUE)
+      ln <- survey$list_name[survey$name == v][1]
 
-      # También buscar madres alternativas tipo p122_recod, p122_b, etc.
-      madre_alt <- grep(paste0("^", v, "(_recod|_sm|_filtro|_aux|_tmp)?$"),
-                        names(data), value = TRUE)
+      dict_code_to_lab <- NULL
+      if (!is.na(ln) &&
+          !is.null(dicc_code_to_label) &&
+          ln %in% names(dicc_code_to_label)) {
 
-      # Asegurarnos de que madre_alt incluye la madre real si ya existe
-      madre_alt <- unique(c(intersect(names(data), v), madre_alt))
-
-      # ---------------------------------------------------------
-      # (2.1) Normalizar las dummies a 0/1
-      # ---------------------------------------------------------
-      if (length(dummy_cols) > 0) {
-        data[dummy_cols] <- lapply(data[dummy_cols], function(col) {
-          x_num <- suppressWarnings(as.numeric(col))
-          res <- rep(NA_real_, length(x_num))
-
-          res[!is.na(x_num) & x_num == 1] <- 1
-          res[!is.na(x_num) & x_num != 1] <- 0
-
-          if (dummies_na_to_zero) res[is.na(x_num)] <- 0
-          res
-        })
+        dict_code_to_lab <- dicc_code_to_label[[ln]]  # code -> label
       }
 
-      # ---------------------------------------------------------
-      # (2.2) Construir diccionario de opciones (label/code)
-      # ---------------------------------------------------------
-      ln <- survey$list_name[survey$name == v][1]
-      dict_lc <- if (!is.na(ln) && ln %in% names(dicc_label_to_code))
-        dicc_label_to_code[[ln]] else NULL
+      mother_measure <- NULL
+      if (!is.null(measure_rules) &&
+          "name" %in% names(measure_rules) &&
+          "measure_sugerida" %in% names(measure_rules)) {
 
-      # ---------------------------------------------------------
-      # (2.3) Reconstruir la madre si faltaba
-      # ---------------------------------------------------------
-      if (!v %in% names(data) && length(dummy_cols) > 0) {
-        codigos <- sub(paste0("^", v, "/"), "", dummy_cols)
-        mat <- as.matrix(data[, dummy_cols, drop = FALSE])
-
-        madre_vec <- apply(mat, 1, function(row) {
-          sel <- row == 1
-          if (!any(sel)) return(NA_character_)
-          paste(codigos[sel], collapse = ";")
-        })
-
-        # Insertar madre antes de las dummies
-        pos_dummy1 <- which(names(data) == dummy_cols[1])[1]
-        data[[v]] <- madre_vec
-        if (!is.na(pos_dummy1) && pos_dummy1 > 1) {
-          data <- dplyr::relocate(
-            data, dplyr::all_of(v), .before = dplyr::all_of(dummy_cols[1])
-          )
+        mm <- measure_rules$measure_sugerida[measure_rules$name == v]
+        if (length(mm) > 0 && !is.na(mm[1])) {
+          mother_measure <- as.character(mm[1])
         }
       }
 
-      # ---------------------------------------------------------
-      # (2.4) NORMALIZACIÓN GLOBAL de madres originales y recodificadas
-      # ---------------------------------------------------------
-      madres_candidatas <- madre_alt[madre_alt %in% names(data)]
+      # Madres asociadas a esta múltiple (original + recodificadas/auxiliares)
+      mothers_candidatas <- c(
+        v,
+        paste0(v, c("_recod", "_sm", "_filtro", "_aux", "_tmp"))
+      )
+      mothers_candidatas <- intersect(mothers_candidatas, names(data))
 
-      for (m in madres_candidatas) {
+      # -------------------------------------------------------------------
+      # 2.1 Generar dummies a partir de madres (incluyendo var_recod)
+      # -------------------------------------------------------------------
+      for (m in mothers_candidatas) {
+
         x <- as.character(data[[m]])
 
-        # NA o vacío → NA
-        x[is.na(x) | !nzchar(x) | x == "NA"] <- NA_character_
-
-        # Unificar separadores:
-        # 1) espacios múltiples → ;
+        # Normalizar separadores a ";"
+        x[is.na(x) | x == "NA" | !nzchar(x)] <- NA_character_
         x <- gsub("\\s+", ";", x)
-
-        # 2) comas → ;
         x <- gsub(",", ";", x)
-
-        # 3) limpiar ; repetidos
         x <- gsub(";{2,}", ";", x)
-
-        # 4) limpiar ; al inicio/final
         x <- gsub("^;|;$", "", x)
-
         data[[m]] <- x
-      }
 
-      # -----------------------------------------------------------------
-      # (2.5) Etiquetar dummies con NO/SÍ + label de variable + measure
-      # -----------------------------------------------------------------
-      if (length(dummy_cols) > 0) {
+        codigos <- unique(unlist(strsplit(x[!is.na(x)], ";", fixed = TRUE)))
+        codigos <- codigos[!is.na(codigos) & nzchar(codigos)]
 
-        # Diccionario code -> label del list_name, si existe
-        dict_code_to_lab <- NULL
-        if (!is.na(ln) && !is.null(ln) &&
-            !is.null(dicc_code_to_label) &&
-            ln %in% names(dicc_code_to_label)) {
+        if (length(codigos) == 0L) next
 
-          dict_code_to_lab <- dicc_code_to_label[[ln]]
-        }
+        for (codi in codigos) {
+          dummy_name <- paste0(m, "/", codi)
 
-        # Determinar el measure sugerido para la madre (si existe)
-        mother_measure <- NULL
-        if (!is.null(measure_rules) &&
-            "name" %in% names(measure_rules) &&
-            "measure_sugerida" %in% names(measure_rules)) {
+          if (!dummy_name %in% names(data)) {
+            nueva <- rep(NA_real_, length(x))
 
-          mm <- measure_rules$measure_sugerida[measure_rules$name == v]
-          if (length(mm) > 0 && !is.na(mm[1])) {
-            mother_measure <- as.character(mm[1])
+            no_na <- !is.na(x)
+            if (any(no_na)) {
+              split_list <- strsplit(x[no_na], ";", fixed = TRUE)
+              nueva[no_na] <- vapply(
+                split_list,
+                function(vec) as.numeric(codi %in% vec),
+                numeric(1L)
+              )
+            }
+
+            data[[dummy_name]] <- nueva
           }
         }
+      }
 
-        # Aplicar a cada dummy
-        for (d in dummy_cols) {
+      # Dummies totales vinculadas a esta múltiple
+      all_dummies_v <- grep(paste0("^", v, "(_recod|_sm|_filtro|_aux|_tmp)?/"),
+                            names(data), value = TRUE)
 
-          # --- Value labels genéricos ---
+      # Grupos (madres) a partir de las dummies: P14, P14_recod, etc.
+      grupos <- unique(sub("/.*$", "", all_dummies_v))
+
+      # -------------------------------------------------------------------
+      # 2.2 Semántica NA/0/1 por grupo de madre
+      # -------------------------------------------------------------------
+      for (m in grupos) {
+        group_dummies <- grep(paste0("^", m, "/"), names(data), value = TRUE)
+        if (length(group_dummies) == 0L) next
+
+        mat <- sapply(group_dummies, function(col) {
+          suppressWarnings(as.numeric(data[[col]]))
+        })
+        if (is.null(dim(mat))) {
+          mat <- matrix(mat, ncol = 1L)
+          colnames(mat) <- group_dummies
+        }
+
+        responded <- apply(mat == 1, 1, any, na.rm = TRUE)
+
+        for (d in group_dummies) {
+          x_num <- suppressWarnings(as.numeric(data[[d]]))
+
+          x_num[!is.na(x_num) & x_num == 1] <- 1
+          x_num[!is.na(x_num) & x_num != 1 & responded] <- 0
+          x_num[is.na(x_num) & responded] <- 0
+          x_num[!responded] <- NA_real_
+
+          data[[d]] <- x_num
+        }
+
+        # Marcar madre para eliminar si existe
+        if (m %in% names(data)) {
+          sm_mothers_to_drop <- union(sm_mothers_to_drop, m)
+        }
+
+        # Etiquetas "No"/"Sí" y measure para las dummies de este grupo
+        for (d in group_dummies) {
           attr(data[[d]], "labels") <- c(`0` = "No", `1` = "Sí")
 
-          # --- Variable label: texto de la opción ---
-          if (!is.null(dict_code_to_lab)) {
+          if (!is.null(mother_measure)) {
+            attr(data[[d]], "measure") <- mother_measure
+          } else if (is.null(attr(data[[d]], "measure"))) {
+            attr(data[[d]], "measure") <- "nominal"
+          }
 
-            # d = "P16/4" → extraer "4"
-            code_raw <- sub(paste0("^", v, "/"), "", d)
-
+          if (!is.null(dict_code_to_lab) && m %in% c(v, paste0(v, "_recod"))) {
+            code_raw <- sub(paste0("^", m, "/"), "", d)
             if (code_raw %in% names(dict_code_to_lab)) {
               opt_label <- as.character(dict_code_to_lab[[code_raw]])
               attr(data[[d]], "label") <- opt_label
             }
           }
-
-          # --- Asignar measure (nominal normalmente) ---
-          if (!is.null(mother_measure)) {
-            attr(data[[d]], "measure") <- mother_measure
-          } else {
-            # default si nada se encuentra
-            attr(data[[d]], "measure") <- "nominal"
-          }
         }
       }
     }
-    }
+  }
 
+  # Eliminar madres de select_multiple (originales y recodificadas)
+  if (length(sm_mothers_to_drop) > 0L) {
+    sm_mothers_to_drop <- intersect(sm_mothers_to_drop, names(data))
+    if (length(sm_mothers_to_drop) > 0L) {
+      data <- data[, setdiff(names(data), sm_mothers_to_drop), drop = FALSE]
+    }
+  }
 
   # -------------------------------------------------------------------------
   # 3) Asignar etiquetas de variable (attr(, "label"))
@@ -321,7 +328,7 @@ reporte_data <- function(data,
   # -------------------------------------------------------------------------
   if (!is.null(survey) && all(c("name", "type", "list_name") %in% names(survey))) {
 
-    so_vars <- unique(survey$name[grepl("^select_one", survey$type)])
+    so_vars    <- unique(survey$name[grepl("^select_one", survey$type)])
     so_comunes <- intersect(so_vars, names(data))
 
     for (v in so_comunes) {
@@ -346,6 +353,9 @@ reporte_data <- function(data,
     if (length(dummy_add) > 0L) {
       for (d in dummy_add) {
         attr(data[[d]], "labels") <- c(`0` = "No", `1` = "Sí")
+        if (is.null(attr(data[[d]], "measure"))) {
+          attr(data[[d]], "measure") <- "nominal"
+        }
       }
     }
   }
@@ -372,6 +382,63 @@ reporte_data <- function(data,
   dummy_idx <- grepl("/", names(data))
   if (any(dummy_idx)) {
     names(data)[dummy_idx] <- clean_dummy_name(names(data)[dummy_idx])
+  }
+
+  # -------------------------------------------------------------------------
+  # 7b) ORDENAR BLOQUES DE select_multiple:
+  #     v.1, v.2, ..., v.70, v_otro, v_recod.1, ..., v_recod.70
+  # -------------------------------------------------------------------------
+  if (!is.null(survey) && "name" %in% names(survey) && "type" %in% names(survey)) {
+
+    sm_vars <- survey$name[grepl("^select_multiple", survey$type)]
+
+    # helper: ordenar nombres por el sufijo numérico después del último "."
+    sort_by_suffix <- function(vars) {
+      if (!length(vars)) return(vars)
+      suf <- sub(".*\\.", "", vars)
+      ord <- suppressWarnings(order(as.numeric(suf)))
+      vars[ord]
+    }
+
+    for (v in sm_vars) {
+
+      dummies_orig  <- grep(paste0("^", v, "\\.[0-9]+$"), names(data), value = TRUE)
+      otro_name     <- paste0(v, "_otro")
+      dummies_recod <- grep(paste0("^", v, "_recod\\.[0-9]+$"), names(data), value = TRUE)
+
+      group_members <- c(dummies_orig, otro_name, dummies_recod)
+      group_members <- unique(group_members[group_members %in% names(data)])
+      if (length(group_members) <= 1) next
+
+      dummies_orig_sorted  <- sort_by_suffix(intersect(dummies_orig, names(data)))
+      dummies_recod_sorted <- sort_by_suffix(intersect(dummies_recod, names(data)))
+      otro_vec <- if (otro_name %in% names(data)) otro_name else character(0)
+
+      group_seq <- c(dummies_orig_sorted, otro_vec, dummies_recod_sorted)
+      group_seq <- group_seq[group_seq %in% names(data)]
+      if (length(group_seq) <= 1) next
+
+      cols_old <- names(data)
+      cols_new <- character(0)
+      already  <- FALSE
+      group_set <- group_seq
+
+      for (nm in cols_old) {
+        if (!already && nm %in% group_set) {
+          cols_new <- c(cols_new, group_seq)
+          already  <- TRUE
+        } else if (already && nm %in% group_set) {
+          # ya se insertó el bloque completo, saltar duplicados
+          next
+        } else {
+          cols_new <- c(cols_new, nm)
+        }
+      }
+
+      if (length(cols_new) == length(cols_old)) {
+        data <- data[, cols_new, drop = FALSE]
+      }
+    }
   }
 
   # -------------------------------------------------------------------------

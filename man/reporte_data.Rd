@@ -29,20 +29,20 @@ dummy (0/1) a las que se desee asignar etiquetas de valor genéricas
 automáticamente como dummies de \code{select_multiple}, por lo que este
 argumento es únicamente complementario.}
 
-\item{dummies_na_to_zero}{Lógico; si \code{TRUE} (por defecto), las dummies de
-\code{select_multiple} se normalizan de modo que los \code{NA} se imputan a 0.
-Si \code{FALSE}, se dejan como \code{NA} cuando no hay información.}
+\item{dummies_na_to_zero}{(Obsoleto) Se mantiene por compatibilidad, pero
+la lógica actual trata las filas sin ninguna opción marcada como \code{NA}
+en todas las dummies, independientemente de este argumento.}
 }
 \value{
 El mismo objeto \code{data} pero:
 \itemize{
 \item Con variables \code{select_one} en códigos cuando se detectan labels
 provenientes del instrumento.
-\item Con dummies 0/1 renombradas \code{var.codigo} (punto) y etiquetadas con
-\code{label} (texto de la opción) y \code{labels} = \code{"No"} / \code{"Sí"}.
-\item Con variables madre de \code{select_multiple} reconstruidas como
-cadenas de códigos separados por \code{";"} cuando no existían en la
-base original.
+\item Con dummies 0/1 de \code{select_multiple} renombradas \code{var.codigo}
+(punto) y etiquetadas con \code{label} (texto de la opción) y
+\code{labels} = \code{"No"} / \code{"Sí"}.
+\item Sin variables madre de \code{select_multiple} (ni originales ni
+recodificadas): solo se conservan las dummies.
 \item Con atributos \code{label}, \code{labels} y \code{measure} según el instrumento.
 \item Con atributos a nivel de objeto:
 \describe{
@@ -70,9 +70,18 @@ la base hay valores que coinciden con las etiquetas del instrumento.
 Los códigos ya presentes se conservan sin modificación.
 \item Normaliza las variables derivadas de \code{select_multiple}:
 dummies en 0/1, con \code{label} de la opción, \code{labels} = \code{"No"/"Sí"},
-y nombres \code{var.codigo} (punto) en lugar de \code{var/opción}, tal como
-se espera en un flujo orientado a SPSS. La variable madre se
-reconstruye solo si no existe ya en la base.
+y nombres \code{var.codigo} (punto) en lugar de \code{var/opción}. La lógica
+de valores es:
+\itemize{
+\item \code{1} = opción marcada;
+\item \code{0} = opción no marcada, pero se marcó alguna otra opción
+en esa pregunta;
+\item \code{NA} = la pregunta no fue respondida (ninguna opción
+marcada, todas las dummies quedan en \code{NA}).
+}
+Si existen variables madre (\code{var} o \code{var_recod}) se usan para
+generar dummies y luego se eliminan, de modo que en la base final
+solo queden las dummies.
 }
 }
 \details{
