@@ -23,6 +23,8 @@ graficar_barras_agrupadas(
   subtitulo = NULL,
   nota_pie = NULL,
   nota_pie_derecha = NULL,
+  pos_titulo = c("centro", "izquierda", "derecha"),
+  pos_nota_pie = c("derecha", "izquierda", "centro"),
   color_titulo = "#000000",
   size_titulo = 11,
   color_subtitulo = "#000000",
@@ -37,6 +39,7 @@ graficar_barras_agrupadas(
   size_barra_extra = 3,
   color_ejes = "#000000",
   size_ejes = 9,
+  color_fondo = NA,
   extra_derecha_rel = 0.1,
   mostrar_leyenda = TRUE,
   invertir_leyenda = FALSE,
@@ -110,8 +113,13 @@ agrega encabezado.}
 
 \item{nota_pie_derecha}{Texto adicional para el pie de página que se
 concatenará a la derecha de \code{nota_pie} (por ejemplo,
-\code{"N total = 52"}). Ambos se muestran en una única línea de caption,
-alineada a la derecha.}
+\code{"N total = 52"}). Ambos se muestran en una única línea de caption.}
+
+\item{pos_titulo}{Alineación horizontal del título. Puede ser
+\code{"centro"}, \code{"izquierda"} o \code{"derecha"}.}
+
+\item{pos_nota_pie}{Alineación horizontal de la nota al pie (caption). Puede ser
+\code{"derecha"}, \code{"izquierda"} o \code{"centro"}.}
 
 \item{color_titulo}{Color del título.}
 
@@ -140,6 +148,9 @@ alineada a la derecha.}
 \item{color_ejes}{Color del texto de las categorías en el eje.}
 
 \item{size_ejes}{Tamaño del texto de las categorías en el eje.}
+
+\item{color_fondo}{Color de fondo del gráfico. Si es \code{NA} (por defecto),
+el fondo será transparente (útil para insertar en PPT/Word).}
 
 \item{extra_derecha_rel}{Porcentaje adicional de espacio a la derecha,
 relativo a la barra más larga, para ubicar la barra extra.}

@@ -61,8 +61,11 @@
 #'   `"Fuente: Pulso PUCP 2025"`).
 #' @param nota_pie_derecha Texto adicional para el pie de página que se
 #'   concatenará a la derecha de \code{nota_pie} (por ejemplo,
-#'   `"N total = 52"`). Ambos se muestran en una única línea de caption,
-#'   alineada a la derecha.
+#'   `"N total = 52"`). Ambos se muestran en una única línea de caption.
+#' @param pos_titulo Alineación horizontal del título. Puede ser
+#'   \code{"centro"}, \code{"izquierda"} o \code{"derecha"}.
+#' @param pos_nota_pie Alineación horizontal de la nota al pie (caption). Puede ser
+#'   \code{"derecha"}, \code{"izquierda"} o \code{"centro"}.
 #'
 #' @param color_titulo Color del título.
 #' @param size_titulo Tamaño del título.
@@ -78,6 +81,8 @@
 #' @param size_barra_extra Tamaño del texto de la barra extra (N).
 #' @param color_ejes Color del texto de las categorías en el eje.
 #' @param size_ejes Tamaño del texto de las categorías en el eje.
+#' @param color_fondo Color de fondo del gráfico. Si es \code{NA} (por defecto),
+#'   el fondo será transparente (útil para insertar en PPT/Word).
 #'
 #' @param extra_derecha_rel Porcentaje adicional de espacio a la derecha,
 #'   relativo a la barra más larga, para ubicar la barra extra.
@@ -122,6 +127,8 @@ graficar_barras_agrupadas <- function(
     subtitulo                 = NULL,
     nota_pie                  = NULL,
     nota_pie_derecha          = NULL,
+    pos_titulo                = c("centro", "izquierda", "derecha"),
+    pos_nota_pie              = c("derecha", "izquierda", "centro"),
     # Estilo de texto y layout
     color_titulo              = "#000000",
     size_titulo               = 11,
@@ -137,6 +144,7 @@ graficar_barras_agrupadas <- function(
     size_barra_extra          = 3,
     color_ejes                = "#000000",
     size_ejes                 = 9,
+    color_fondo               = NA,
     extra_derecha_rel         = 0.10,
     mostrar_leyenda           = TRUE,
     invertir_leyenda          = FALSE,
@@ -153,6 +161,20 @@ graficar_barras_agrupadas <- function(
 
   escala_valor <- match.arg(escala_valor)
   exportar     <- match.arg(exportar)
+  pos_titulo   <- match.arg(pos_titulo)
+  pos_nota_pie <- match.arg(pos_nota_pie)
+
+  hjust_from_pos <- function(x) {
+    switch(x,
+           "izquierda" = 0,
+           "centro"    = 0.5,
+           "derecha"   = 1,
+           0.5
+    )
+  }
+
+  hjust_titulo  <- hjust_from_pos(pos_titulo)
+  hjust_caption <- hjust_from_pos(pos_nota_pie)
 
   # ---------------------------------------------------------------------------
   # 0. Validaciones básicas
@@ -355,7 +377,7 @@ graficar_barras_agrupadas <- function(
       ggplot2::scale_fill_manual(values = colores_series)
   }
 
-  # Construir caption combinado (derecha)
+  # Construir caption combinado
   caption_text <- NULL
   if (!is.null(nota_pie) && nzchar(nota_pie) &&
       !is.null(nota_pie_derecha) && nzchar(nota_pie_derecha)) {
@@ -393,21 +415,23 @@ graficar_barras_agrupadas <- function(
       ),
       plot.margin        = ggplot2::margin(t = 15, r = 80, b = 15, l = 5),
       plot.title         = ggplot2::element_text(
-        hjust = 0.5,
+        hjust = hjust_titulo,
         color = color_titulo,
         size  = size_titulo,
         face  = if ("titulo" %in% textos_negrita) "bold" else "plain"
       ),
       plot.subtitle      = ggplot2::element_text(
-        hjust = 0.5,
+        hjust = hjust_titulo,
         color = color_subtitulo,
         size  = size_subtitulo
       ),
       plot.caption       = ggplot2::element_text(
-        hjust = 1,  # SIEMPRE alineado a la derecha
+        hjust = hjust_caption,
         color = color_nota_pie,
         size  = size_nota_pie
-      )
+      ),
+      plot.background    = ggplot2::element_rect(fill = color_fondo, color = NA),
+      panel.background   = ggplot2::element_rect(fill = color_fondo, color = NA)
     )
 
   # Leyenda invertida si se pide
@@ -439,7 +463,8 @@ graficar_barras_agrupadas <- function(
       plot     = p,
       width    = ancho,
       height   = alto,
-      dpi      = dpi
+      dpi      = dpi,
+      bg       = if (is.na(color_fondo)) "transparent" else color_fondo
     )
     return(invisible(p))
   }
