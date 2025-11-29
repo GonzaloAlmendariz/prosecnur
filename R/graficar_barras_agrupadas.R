@@ -75,7 +75,10 @@
 #' @param size_nota_pie Tamaño del texto del pie de página (caption).
 #' @param color_leyenda Color del texto de la leyenda.
 #' @param size_leyenda Tamaño del texto de la leyenda.
-#' @param color_texto_barras Color del texto de los porcentajes.
+#' @param color_texto_barras Color del texto de los porcentajes cuando la
+#'   etiqueta se dibuja dentro de la barra.
+#' @param color_texto_barras_fuera Color del texto de los porcentajes cuando
+#'   la etiqueta se dibuja fuera de la barra.
 #' @param size_texto_barras Tamaño del texto de los porcentajes.
 #' @param color_barra_extra Color del texto de la barra extra (N).
 #' @param size_barra_extra Tamaño del texto de la barra extra (N).
@@ -139,6 +142,7 @@ graficar_barras_agrupadas <- function(
     color_leyenda             = "#000000",
     size_leyenda              = 8,
     color_texto_barras        = "white",
+    color_texto_barras_fuera  = "#000000",
     size_texto_barras         = 3,
     color_barra_extra         = "#000000",
     size_barra_extra          = 3,
@@ -165,11 +169,12 @@ graficar_barras_agrupadas <- function(
   pos_nota_pie <- match.arg(pos_nota_pie)
 
   hjust_from_pos <- function(x) {
-    switch(x,
-           "izquierda" = 0,
-           "centro"    = 0.5,
-           "derecha"   = 1,
-           0.5
+    switch(
+      x,
+      "izquierda" = 0,
+      "centro"    = 0.5,
+      "derecha"   = 1,
+      0.5
     )
   }
 
@@ -282,24 +287,51 @@ graficar_barras_agrupadas <- function(
       df_lab$.valor_plot + offset_lab
     )
 
-    p <- p +
-      ggplot2::geom_text(
-        data        = df_lab,
-        mapping     = ggplot2::aes_string(
-          x     = var_categoria,
-          y     = "valor_label",
-          label = "lab",
-          group = ".serie"
-        ),
-        inherit.aes = FALSE,
-        position    = ggplot2::position_dodge(width = 0.7),
-        hjust       = ifelse(df_lab$.valor_plot >= umbral_posicion, 0.5, 0),
-        vjust       = 0.5,
-        color       = color_texto_barras,
-        size        = size_texto_barras,
-        fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-        show.legend = FALSE
-      )
+    # Split: dentro vs fuera
+    df_in <- df_lab[df_lab$.valor_plot >= umbral_posicion & df_lab$lab != "", , drop = FALSE]
+    df_out <- df_lab[df_lab$.valor_plot < umbral_posicion & df_lab$lab != "", , drop = FALSE]
+
+    if (nrow(df_in)) {
+      p <- p +
+        ggplot2::geom_text(
+          data        = df_in,
+          mapping     = ggplot2::aes_string(
+            x     = var_categoria,
+            y     = "valor_label",
+            label = "lab",
+            group = ".serie"
+          ),
+          inherit.aes = FALSE,
+          position    = ggplot2::position_dodge(width = 0.7),
+          hjust       = 0.5,
+          vjust       = 0.5,
+          color       = color_texto_barras,
+          size        = size_texto_barras,
+          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+          show.legend = FALSE
+        )
+    }
+
+    if (nrow(df_out)) {
+      p <- p +
+        ggplot2::geom_text(
+          data        = df_out,
+          mapping     = ggplot2::aes_string(
+            x     = var_categoria,
+            y     = "valor_label",
+            label = "lab",
+            group = ".serie"
+          ),
+          inherit.aes = FALSE,
+          position    = ggplot2::position_dodge(width = 0.7),
+          hjust       = 0,   # fuera, a la derecha del extremo de la barra
+          vjust       = 0.5,
+          color       = color_texto_barras_fuera,
+          size        = size_texto_barras,
+          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+          show.legend = FALSE
+        )
+    }
   }
 
   # ---------------------------------------------------------------------------

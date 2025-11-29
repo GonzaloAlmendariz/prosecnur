@@ -16,11 +16,15 @@ graficar_barras_apiladas(
   decimales = 1,
   umbral_etiqueta = 0.03,
   mostrar_barra_extra = TRUE,
+  barra_extra_preset = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
   prefijo_barra_extra = "N=",
   titulo_barra_extra = NULL,
   titulo = NULL,
   subtitulo = NULL,
   nota_pie = NULL,
+  nota_pie_derecha = NULL,
+  pos_titulo = c("centro", "izquierda", "derecha"),
+  pos_nota_pie = c("derecha", "izquierda", "centro"),
   color_titulo = "#000000",
   size_titulo = 11,
   color_subtitulo = "#000000",
@@ -35,7 +39,9 @@ graficar_barras_apiladas(
   size_barra_extra = 3,
   color_ejes = "#000000",
   size_ejes = 9,
+  color_fondo = NA,
   extra_derecha_rel = 0.1,
+  mostrar_leyenda = TRUE,
   invertir_leyenda = FALSE,
   invertir_barras = FALSE,
   textos_negrita = NULL,
@@ -51,7 +57,7 @@ graficar_barras_apiladas(
 y las columnas de porcentajes.}
 
 \item{var_categoria}{Nombre (string) de la columna que define cada barra
-(por ejemplo, "condicion").}
+(por ejemplo, \code{"condicion"}).}
 
 \item{var_n}{Nombre (string) de la columna con el N total por categoría
 (se usa como base para la barra extra; típicamente el N).}
@@ -64,7 +70,7 @@ etiquetas legibles a las columnas de \code{cols_porcentaje}. Los nombres
 deben coincidir exactamente con los nombres de \code{cols_porcentaje}.}
 
 \item{escala_valor}{Escala de los porcentajes: \code{"proporcion_1"} si los
-valores están en 0-1, o \code{"proporcion_100"} si están en 0-100.}
+valores están en 0–1, o \code{"proporcion_100"} si están en 0–100.}
 
 \item{colores_grupos}{Vector de colores HEX con nombre (opcional) para los
 segmentos, usando como nombres las etiquetas de \code{etiquetas_grupos}.
@@ -76,24 +82,45 @@ de cada segmento.}
 \item{decimales}{Número de decimales para los porcentajes internos.}
 
 \item{umbral_etiqueta}{Mínima proporción para mostrar texto dentro de un
-segmento (por ejemplo, 0.03 equivale a 3\%).}
+segmento (por ejemplo, 0.03 equivale a 3\\%).}
 
 \item{mostrar_barra_extra}{Lógico; si \code{TRUE}, agrega una “barra extra”
 de texto al extremo derecho de cada barra (típicamente para mostrar el N
 o algún indicador agregado como “Top 2 Box”).}
 
+\item{barra_extra_preset}{Preset para la barra extra. Puede ser:
+\itemize{
+\item \code{"ninguno"}: comportamiento manual, usa \code{prefijo_barra_extra}
+y \code{titulo_barra_extra} con el valor de \code{var_n}.
+\item \code{"totales"}: muestra N total; por defecto
+\code{prefijo_barra_extra = "N="}, \code{titulo_barra_extra = "Total"}.
+\item \code{"top2box"}: suma los 2 valores más altos de cada fila.
+\item \code{"top3box"}: suma los 3 valores más altos de cada fila.
+\item \code{"bottom2box"}: suma los 2 valores más bajos de cada fila.
+}}
+
 \item{prefijo_barra_extra}{Texto añadido antes del valor mostrado en la
-barra extra (por defecto \code{"N="}).}
+barra extra (por defecto \code{"N="}). Puede ser sobreescrito por el preset.}
 
 \item{titulo_barra_extra}{Texto que se coloca como encabezado encima de la
 columna de barra extra (por ejemplo, "Total", "Top 2 Box"). Si es
-\code{NULL}, no se agrega encabezado.}
+\code{NULL}, no se agrega encabezado. Puede ser sobreescrito por el preset.}
 
 \item{titulo}{Título del gráfico.}
 
 \item{subtitulo}{Subtítulo opcional del gráfico.}
 
 \item{nota_pie}{Nota o fuente para colocar en el pie de página del gráfico.}
+
+\item{nota_pie_derecha}{Texto adicional para el pie de página que se
+concatenará a la derecha de \code{nota_pie} (por ejemplo, "N total = 52").
+Ambos se muestran en una única línea de caption.}
+
+\item{pos_titulo}{Alineación horizontal del título. Puede ser
+\code{"centro"}, \code{"izquierda"} o \code{"derecha"}.}
+
+\item{pos_nota_pie}{Alineación horizontal de la nota al pie (caption). Puede ser
+\code{"derecha"}, \code{"izquierda"} o \code{"centro"}.}
 
 \item{color_titulo}{Color del título.}
 
@@ -115,7 +142,8 @@ columna de barra extra (por ejemplo, "Total", "Top 2 Box"). Si es
 
 \item{size_texto_barras}{Tamaño del texto dentro de los segmentos.}
 
-\item{color_barra_extra}{Color del texto de la barra extra.}
+\item{color_barra_extra}{Color base del texto de la barra extra (se puede
+sobreescribir internamente si se usa un preset).}
 
 \item{size_barra_extra}{Tamaño del texto de la barra extra.}
 
@@ -123,8 +151,13 @@ columna de barra extra (por ejemplo, "Total", "Top 2 Box"). Si es
 
 \item{size_ejes}{Tamaño del texto de las categorías en el eje Y.}
 
+\item{color_fondo}{Color de fondo del gráfico. Si es \code{NA} (por defecto),
+el fondo será transparente (útil para insertar en PPT/Word).}
+
 \item{extra_derecha_rel}{Porcentaje adicional a la derecha para ubicar la
 barra extra, relativo a la longitud de la barra más larga.}
+
+\item{mostrar_leyenda}{Lógico; si \code{FALSE}, oculta la leyenda.}
 
 \item{invertir_leyenda}{Lógico; si \code{TRUE}, invierte el orden de los
 ítems de la leyenda sin alterar el orden de las barras ni de los segmentos.}
@@ -160,40 +193,4 @@ barra compuesta por proporciones asociadas a diferentes estados o respuestas.
 La función está pensada para usarse directamente con tablas de indicadores
 ya calculadas (formato ancho), sin necesidad de reestructurar los datos
 manualmente.
-}
-\examples{
-\dontrun{
-colores_frec <- c(
-  "Nunca faltan"          = "#F6D55C",
-  "Rara vez faltan"       = "#88CC88",
-  "A veces faltan"        = "#1B9E77",
-  "Faltan frecuentemente" = "#F4A261",
-  "Siempre faltan"        = "#D95F02"
-)
-
-p <- graficar_barras_apiladas(
-  data             = tab_stock,
-  var_categoria    = "condicion",
-  var_n            = "n_base",
-  cols_porcentaje  = c("pct_nunca","pct_rara","pct_aveces","pct_freq","pct_siempre"),
-  etiquetas_grupos = c(
-    pct_nunca   = "Nunca faltan",
-    pct_rara    = "Rara vez faltan",
-    pct_aveces  = "A veces faltan",
-    pct_freq    = "Faltan frecuentemente",
-    pct_siempre = "Siempre faltan"
-  ),
-  escala_valor        = "proporcion_100",
-  colores_grupos      = colores_frec,
-  titulo              = "Disponibilidad de medicamentos básicos",
-  nota_pie            = "Fuente: Pulso PUCP 2025",
-  mostrar_barra_extra = TRUE,
-  prefijo_barra_extra = "N=",
-  titulo_barra_extra  = "Total",
-  textos_negrita      = c("titulo", "porcentajes", "barra_extra"),
-  invertir_barras     = FALSE,
-  invertir_leyenda    = TRUE
-)
-}
-
 }

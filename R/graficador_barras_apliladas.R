@@ -17,7 +17,7 @@
 #' @param data Data frame en formato ancho que contiene la categoría, la base N
 #'   y las columnas de porcentajes.
 #' @param var_categoria Nombre (string) de la columna que define cada barra
-#'   (por ejemplo, "condicion").
+#'   (por ejemplo, `"condicion"`).
 #' @param var_n Nombre (string) de la columna con el N total por categoría
 #'   (se usa como base para la barra extra; típicamente el N).
 #' @param cols_porcentaje Vector de nombres de columnas con los porcentajes
@@ -26,7 +26,7 @@
 #'   etiquetas legibles a las columnas de \code{cols_porcentaje}. Los nombres
 #'   deben coincidir exactamente con los nombres de \code{cols_porcentaje}.
 #' @param escala_valor Escala de los porcentajes: \code{"proporcion_1"} si los
-#'   valores están en 0-1, o \code{"proporcion_100"} si están en 0-100.
+#'   valores están en 0–1, o \code{"proporcion_100"} si están en 0–100.
 #' @param colores_grupos Vector de colores HEX con nombre (opcional) para los
 #'   segmentos, usando como nombres las etiquetas de \code{etiquetas_grupos}.
 #'   Si se omite, \pkg{ggplot2} asignará colores por defecto.
@@ -34,20 +34,37 @@
 #'   de cada segmento.
 #' @param decimales Número de decimales para los porcentajes internos.
 #' @param umbral_etiqueta Mínima proporción para mostrar texto dentro de un
-#'   segmento (por ejemplo, 0.03 equivale a 3%).
+#'   segmento (por ejemplo, 0.03 equivale a 3\%).
 #'
 #' @param mostrar_barra_extra Lógico; si \code{TRUE}, agrega una “barra extra”
 #'   de texto al extremo derecho de cada barra (típicamente para mostrar el N
 #'   o algún indicador agregado como “Top 2 Box”).
+#' @param barra_extra_preset Preset para la barra extra. Puede ser:
+#'   \itemize{
+#'     \item \code{"ninguno"}: comportamiento manual, usa \code{prefijo_barra_extra}
+#'       y \code{titulo_barra_extra} con el valor de \code{var_n}.
+#'     \item \code{"totales"}: muestra N total; por defecto
+#'       \code{prefijo_barra_extra = "N="}, \code{titulo_barra_extra = "Total"}.
+#'     \item \code{"top2box"}: suma los 2 valores más altos de cada fila.
+#'     \item \code{"top3box"}: suma los 3 valores más altos de cada fila.
+#'     \item \code{"bottom2box"}: suma los 2 valores más bajos de cada fila.
+#'   }
 #' @param prefijo_barra_extra Texto añadido antes del valor mostrado en la
-#'   barra extra (por defecto \code{"N="}).
+#'   barra extra (por defecto \code{"N="}). Puede ser sobreescrito por el preset.
 #' @param titulo_barra_extra Texto que se coloca como encabezado encima de la
 #'   columna de barra extra (por ejemplo, "Total", "Top 2 Box"). Si es
-#'   \code{NULL}, no se agrega encabezado.
+#'   \code{NULL}, no se agrega encabezado. Puede ser sobreescrito por el preset.
 #'
 #' @param titulo Título del gráfico.
 #' @param subtitulo Subtítulo opcional del gráfico.
 #' @param nota_pie Nota o fuente para colocar en el pie de página del gráfico.
+#' @param nota_pie_derecha Texto adicional para el pie de página que se
+#'   concatenará a la derecha de \code{nota_pie} (por ejemplo, "N total = 52").
+#'   Ambos se muestran en una única línea de caption.
+#' @param pos_titulo Alineación horizontal del título. Puede ser
+#'   \code{"centro"}, \code{"izquierda"} o \code{"derecha"}.
+#' @param pos_nota_pie Alineación horizontal de la nota al pie (caption). Puede ser
+#'   \code{"derecha"}, \code{"izquierda"} o \code{"centro"}.
 #'
 #' @param color_titulo Color del título.
 #' @param size_titulo Tamaño del título.
@@ -59,13 +76,17 @@
 #' @param size_leyenda Tamaño del texto de la leyenda.
 #' @param color_texto_barras Color del texto dentro de los segmentos.
 #' @param size_texto_barras Tamaño del texto dentro de los segmentos.
-#' @param color_barra_extra Color del texto de la barra extra.
+#' @param color_barra_extra Color base del texto de la barra extra (se puede
+#'   sobreescribir internamente si se usa un preset).
 #' @param size_barra_extra Tamaño del texto de la barra extra.
 #' @param color_ejes Color del texto de las categorías en el eje Y.
 #' @param size_ejes Tamaño del texto de las categorías en el eje Y.
+#' @param color_fondo Color de fondo del gráfico. Si es \code{NA} (por defecto),
+#'   el fondo será transparente (útil para insertar en PPT/Word).
 #'
 #' @param extra_derecha_rel Porcentaje adicional a la derecha para ubicar la
 #'   barra extra, relativo a la longitud de la barra más larga.
+#' @param mostrar_leyenda Lógico; si \code{FALSE}, oculta la leyenda.
 #' @param invertir_leyenda Lógico; si \code{TRUE}, invierte el orden de los
 #'   ítems de la leyenda sin alterar el orden de las barras ni de los segmentos.
 #' @param invertir_barras Lógico; si \code{TRUE}, invierte el orden en que las
@@ -86,41 +107,6 @@
 #' @return Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
 #'   invisible, el gráfico exportado si se utiliza \code{"png"} o \code{"ppt"}.
 #'
-#' @examples
-#' \dontrun{
-#' colores_frec <- c(
-#'   "Nunca faltan"          = "#F6D55C",
-#'   "Rara vez faltan"       = "#88CC88",
-#'   "A veces faltan"        = "#1B9E77",
-#'   "Faltan frecuentemente" = "#F4A261",
-#'   "Siempre faltan"        = "#D95F02"
-#' )
-#'
-#' p <- graficar_barras_apiladas(
-#'   data             = tab_stock,
-#'   var_categoria    = "condicion",
-#'   var_n            = "n_base",
-#'   cols_porcentaje  = c("pct_nunca","pct_rara","pct_aveces","pct_freq","pct_siempre"),
-#'   etiquetas_grupos = c(
-#'     pct_nunca   = "Nunca faltan",
-#'     pct_rara    = "Rara vez faltan",
-#'     pct_aveces  = "A veces faltan",
-#'     pct_freq    = "Faltan frecuentemente",
-#'     pct_siempre = "Siempre faltan"
-#'   ),
-#'   escala_valor        = "proporcion_100",
-#'   colores_grupos      = colores_frec,
-#'   titulo              = "Disponibilidad de medicamentos básicos",
-#'   nota_pie            = "Fuente: Pulso PUCP 2025",
-#'   mostrar_barra_extra = TRUE,
-#'   prefijo_barra_extra = "N=",
-#'   titulo_barra_extra  = "Total",
-#'   textos_negrita      = c("titulo", "porcentajes", "barra_extra"),
-#'   invertir_barras     = FALSE,
-#'   invertir_leyenda    = TRUE
-#' )
-#' }
-#'
 #' @export
 graficar_barras_apiladas <- function(
     data,
@@ -134,11 +120,15 @@ graficar_barras_apiladas <- function(
     decimales           = 1,
     umbral_etiqueta     = 0.03,
     mostrar_barra_extra = TRUE,
+    barra_extra_preset  = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
     prefijo_barra_extra = "N=",
     titulo_barra_extra  = NULL,
     titulo              = NULL,
     subtitulo           = NULL,
     nota_pie            = NULL,
+    nota_pie_derecha    = NULL,
+    pos_titulo          = c("centro", "izquierda", "derecha"),
+    pos_nota_pie        = c("derecha", "izquierda", "centro"),
     # Estilo de texto y layout
     color_titulo        = "#000000",
     size_titulo         = 11,
@@ -154,7 +144,9 @@ graficar_barras_apiladas <- function(
     size_barra_extra    = 3,
     color_ejes          = "#000000",
     size_ejes           = 9,
+    color_fondo         = NA,
     extra_derecha_rel   = 0.10,
+    mostrar_leyenda     = TRUE,
     invertir_leyenda    = FALSE,
     invertir_barras     = FALSE,
     textos_negrita      = NULL,
@@ -168,8 +160,31 @@ graficar_barras_apiladas <- function(
   # Operador auxiliar interno
   `%||%` <- function(x, y) if (!is.null(x)) x else y
 
-  escala_valor <- match.arg(escala_valor)
-  exportar     <- match.arg(exportar)
+  escala_valor       <- match.arg(escala_valor)
+  exportar           <- match.arg(exportar)
+  barra_extra_preset <- match.arg(barra_extra_preset)
+  pos_titulo         <- match.arg(pos_titulo)
+  pos_nota_pie       <- match.arg(pos_nota_pie)
+
+  hjust_from_pos <- function(x) {
+    switch(
+      x,
+      "izquierda" = 0,
+      "centro"    = 0.5,
+      "derecha"   = 1,
+      0.5
+    )
+  }
+
+  hjust_titulo  <- hjust_from_pos(pos_titulo)
+  hjust_caption <- hjust_from_pos(pos_nota_pie)
+
+  # Colores por defecto para presets (se respetan overrides del usuario)
+  pulso_azul  <- "#004B8D"
+  pulso_verde <- "#00843D"
+
+  # Normalizar textos_negrita
+  textos_negrita <- textos_negrita %||% character(0)
 
   # ---------------------------------------------------------------------------
   # 0. Validaciones
@@ -194,9 +209,6 @@ graficar_barras_apiladas <- function(
       call. = FALSE
     )
   }
-
-  # Normalizar textos_negrita
-  textos_negrita <- textos_negrita %||% character(0)
 
   df <- data
 
@@ -300,19 +312,122 @@ graficar_barras_apiladas <- function(
     ggplot2::coord_cartesian(clip = "off")
 
   # ---------------------------------------------------------------------------
-  # 5. Barra extra al costado derecho (N, Top 2 Box, etc.)
+  # 5.1. Preparar tabla base para barra extra (N o Top/Bottom Box)
+  # ---------------------------------------------------------------------------
+  df_wide_extra <- df |>
+    dplyr::select(dplyr::all_of(c(var_categoria, var_n, cols_porcentaje))) |>
+    dplyr::mutate(
+      # Por defecto, valor_extra = N (var_n)
+      valor_extra = .data[[var_n]]
+    )
+
+  # Copias internas que pueden ser sobreescritas por el preset
+  prefijo_extra_int <- prefijo_barra_extra
+  titulo_extra_int  <- titulo_barra_extra
+
+  # Color interno de barra extra (puede ser ajustado por preset)
+  color_barra_extra_int <- color_barra_extra
+
+  # Fontface de barra extra (por defecto puede venir de textos_negrita,
+  # pero los presets forzarán negrita)
+  fontface_barra_extra <- if ("barra_extra" %in% textos_negrita) "bold" else "plain"
+
+  if (barra_extra_preset != "ninguno") {
+
+    if (barra_extra_preset == "totales") {
+
+      # Título y prefijo por defecto solo si el usuario no los definió
+      if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
+        titulo_extra_int <- "Total"
+      }
+      if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
+        prefijo_extra_int <- "N="
+      }
+
+      # Colores y negrita por defecto para TOTAL
+      if (missing(color_barra_extra)) {
+        color_barra_extra_int <- pulso_azul
+      }
+      fontface_barra_extra <- "bold"
+
+      # valor_extra ya es N (en df_wide_extra)
+
+    } else {
+
+      # Preparamos matriz de proporciones 0–1
+      base_mat <- df_wide_extra[, cols_porcentaje, drop = FALSE]
+      if (escala_valor == "proporcion_100") {
+        base_mat <- base_mat / 100
+      }
+
+      # Ordenar de mayor a menor por fila
+      ordenado <- t(apply(as.matrix(base_mat), 1, sort, decreasing = TRUE))
+
+      if (barra_extra_preset == "top2box") {
+        df_wide_extra$valor_extra <- ordenado[, 1] + ordenado[, 2]
+        if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
+          titulo_extra_int <- "Top 2 Box"
+        }
+        if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
+          prefijo_extra_int <- ""
+        }
+
+      } else if (barra_extra_preset == "top3box") {
+        df_wide_extra$valor_extra <- ordenado[, 1] + ordenado[, 2] + ordenado[, 3]
+        if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
+          titulo_extra_int <- "Top 3 Box"
+        }
+        if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
+          prefijo_extra_int <- ""
+        }
+
+      } else if (barra_extra_preset == "bottom2box") {
+        ncol_mat <- ncol(ordenado)
+        df_wide_extra$valor_extra <- ordenado[, ncol_mat] +
+          ordenado[, ncol_mat - 1]
+        if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
+          titulo_extra_int <- "Bottom 2 Box"
+        }
+        if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
+          prefijo_extra_int <- ""
+        }
+      }
+
+      # Si la escala original era 0–100, llevamos valor_extra a 0–100 (porcentaje)
+      if (escala_valor == "proporcion_100") {
+        df_wide_extra$valor_extra <- df_wide_extra$valor_extra * 100
+      } else {
+        df_wide_extra$valor_extra <- df_wide_extra$valor_extra * 100
+      }
+
+      # Colores y negrita por defecto para box (Top/Bottom)
+      if (missing(color_barra_extra)) {
+        color_barra_extra_int <- pulso_verde
+      }
+      fontface_barra_extra <- "bold"
+    }
+  }
+
+  # ---------------------------------------------------------------------------
+  # 5.2. Barra extra al costado derecho (N, Top Box, etc.)
   # ---------------------------------------------------------------------------
   if (mostrar_barra_extra) {
+
     df_extra <- df_sum |>
       dplyr::left_join(
-        df |>
-          dplyr::select(dplyr::all_of(c(var_categoria, var_n))) |>
-          dplyr::distinct(),
+        df_wide_extra |>
+          dplyr::select(dplyr::all_of(c(var_categoria, "valor_extra"))),
         by = var_categoria
       ) |>
       dplyr::mutate(
-        xpos      = suma * (1 + extra_derecha_rel * 0.5),
-        lab_extra = paste0(prefijo_barra_extra, .data[[var_n]])
+        xpos = suma * (1 + extra_derecha_rel * 0.5),
+        # Formateo diferente según tipo de preset:
+        lab_valor = dplyr::case_when(
+          barra_extra_preset %in% c("top2box", "top3box", "bottom2box") ~
+            sprintf("%.1f%%", valor_extra),
+          TRUE ~ format(valor_extra, big.mark = ",", scientific = FALSE, trim = TRUE)
+        ),
+        lab_extra = paste0(prefijo_extra_int, lab_valor)
       )
 
     # Texto principal de barra_extra
@@ -327,12 +442,12 @@ graficar_barras_apiladas <- function(
         inherit.aes = FALSE,
         hjust       = 0,
         size        = size_barra_extra,
-        color       = color_barra_extra,
-        fontface    = if ("barra_extra" %in% textos_negrita) "bold" else "plain"
+        color       = color_barra_extra_int,
+        fontface    = fontface_barra_extra
       )
 
     # Encabezado encima de la columna de barra_extra (opcional)
-    if (!is.null(titulo_barra_extra) && nzchar(titulo_barra_extra)) {
+    if (!is.null(titulo_extra_int) && nzchar(titulo_extra_int)) {
 
       # Determinar categoría superior según inversión
       lvls <- levels(df_long[[var_categoria]])
@@ -348,24 +463,35 @@ graficar_barras_apiladas <- function(
               x = "xpos",
               y = var_categoria
             ),
-            label       = titulo_barra_extra,
+            label       = titulo_extra_int,
             inherit.aes = FALSE,
-            hjust       = 0,      # alineado con la izquierda del "N=..."
+            hjust       = 0,      # alineado con la izquierda del valor
             vjust       = -1.2,   # un poco por encima de la primera barra
             size        = size_barra_extra,
-            color       = color_barra_extra,
-            fontface    = if ("barra_extra" %in% textos_negrita) "bold" else "plain"
+            color       = color_barra_extra_int,
+            fontface    = fontface_barra_extra
           )
       }
     }
   }
 
   # ---------------------------------------------------------------------------
-  # 6. Colores y tema
+  # 6. Colores, caption y tema
   # ---------------------------------------------------------------------------
   if (!is.null(colores_grupos)) {
     p <- p +
       ggplot2::scale_fill_manual(values = colores_grupos)
+  }
+
+  # Construir caption combinado
+  caption_text <- NULL
+  if (!is.null(nota_pie) && nzchar(nota_pie) &&
+      !is.null(nota_pie_derecha) && nzchar(nota_pie_derecha)) {
+    caption_text <- paste0(nota_pie, "   ", nota_pie_derecha)
+  } else if (!is.null(nota_pie) && nzchar(nota_pie)) {
+    caption_text <- nota_pie
+  } else if (!is.null(nota_pie_derecha) && nzchar(nota_pie_derecha)) {
+    caption_text <- nota_pie_derecha
   }
 
   p <- p +
@@ -386,7 +512,7 @@ graficar_barras_apiladas <- function(
       ),
       axis.line.y        = ggplot2::element_line(color = color_ejes, linewidth = 0.3),
       legend.title       = ggplot2::element_blank(),
-      legend.position    = "bottom",
+      legend.position    = if (mostrar_leyenda) "bottom" else "none",
       legend.text        = ggplot2::element_text(
         color = color_leyenda,
         size  = size_leyenda,
@@ -394,32 +520,34 @@ graficar_barras_apiladas <- function(
       ),
       plot.margin        = ggplot2::margin(t = 15, r = 80, b = 5, l = 5),
       plot.title         = ggplot2::element_text(
-        hjust = 0.5,
+        hjust = hjust_titulo,
         color = color_titulo,
         size  = size_titulo,
         face  = if ("titulo" %in% textos_negrita) "bold" else "plain"
       ),
       plot.subtitle      = ggplot2::element_text(
-        hjust = 0.5,
+        hjust = hjust_titulo,
         color = color_subtitulo,
         size  = size_subtitulo
       ),
       plot.caption       = ggplot2::element_text(
-        hjust = 0,
+        hjust = hjust_caption,
         color = color_nota_pie,
         size  = size_nota_pie
-      )
+      ),
+      plot.background    = ggplot2::element_rect(fill = color_fondo, color = NA),
+      panel.background   = ggplot2::element_rect(fill = color_fondo, color = NA)
     )
 
   # Invertir solo el orden de la leyenda si se solicita
-  if (invertir_leyenda) {
+  if (invertir_leyenda && mostrar_leyenda) {
     p <- p + ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE))
   }
 
   p <- p + ggplot2::labs(
     title    = titulo,
     subtitle = subtitulo,
-    caption  = nota_pie
+    caption  = caption_text
   )
 
   # ---------------------------------------------------------------------------
@@ -439,7 +567,8 @@ graficar_barras_apiladas <- function(
       plot     = p,
       width    = ancho,
       height   = alto,
-      dpi      = dpi
+      dpi      = dpi,
+      bg       = if (is.na(color_fondo)) "transparent" else color_fondo
     )
     return(invisible(p))
   }
@@ -457,7 +586,10 @@ graficar_barras_apiladas <- function(
     doc <- officer::add_slide(doc, layout = "Blank", master = "Office Theme")
     doc <- officer::ph_with(
       doc,
-      rvg::dml(ggobj = p),
+      rvg::dml(
+        ggobj = p,
+        bg    = if (is.na(color_fondo)) "transparent" else color_fondo
+      ),
       location = officer::ph_location_fullsize()
     )
     print(doc, target = path_salida)

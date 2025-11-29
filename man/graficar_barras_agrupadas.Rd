@@ -34,6 +34,7 @@ graficar_barras_agrupadas(
   color_leyenda = "#000000",
   size_leyenda = 8,
   color_texto_barras = "white",
+  color_texto_barras_fuera = "#000000",
   size_texto_barras = 3,
   color_barra_extra = "#000000",
   size_barra_extra = 3,
@@ -137,7 +138,11 @@ concatenará a la derecha de \code{nota_pie} (por ejemplo,
 
 \item{size_leyenda}{Tamaño del texto de la leyenda.}
 
-\item{color_texto_barras}{Color del texto de los porcentajes.}
+\item{color_texto_barras}{Color del texto de los porcentajes cuando la
+etiqueta se dibuja dentro de la barra.}
+
+\item{color_texto_barras_fuera}{Color del texto de los porcentajes cuando
+la etiqueta se dibuja fuera de la barra.}
 
 \item{size_texto_barras}{Tamaño del texto de los porcentajes.}
 

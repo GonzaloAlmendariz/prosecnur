@@ -567,28 +567,60 @@ reporte_ppt <- function(
           tab_apil <- .build_tab_barras_apiladas(tab_freq, var_label)
           if (is.null(tab_apil)) next
 
+          # --------------------------------------------------------------
+          # NUEVO: obtener colores y preset_barra_extra por list_name
+          #   - Soporta dos formatos:
+          #     * viejo: vector nombrado de colores
+          #     * nuevo: list(colores = c(...), preset_barra_extra = "...")
+          # --------------------------------------------------------------
           colores_grupos <- NULL
+          preset_extra   <- NULL
+
           if (!is.na(list_name_v) &&
               !is.null(colores_apiladas_por_listname[[list_name_v]])) {
-            colores_grupos <- colores_apiladas_por_listname[[list_name_v]]
+
+            obj_col <- colores_apiladas_por_listname[[list_name_v]]
+
+            if (is.list(obj_col)) {
+              # Forma nueva:
+              # colores_apiladas_por_listname[[ln]] <- list(
+              #   colores            = c("Nunca" = "#...", ...),
+              #   preset_barra_extra = "top2box" / "totales" / etc.
+              # )
+              if (!is.null(obj_col$colores)) {
+                colores_grupos <- obj_col$colores
+              }
+              if (!is.null(obj_col$preset_barra_extra)) {
+                preset_extra <- obj_col$preset_barra_extra
+              }
+            } else {
+              # Forma antigua: solo vector de colores
+              colores_grupos <- obj_col
+            }
           }
 
+          # --------------------------------------------------------------
+          # Construir argumentos para graficar_barras_apiladas()
+          #   - Si hay preset_extra -> siempre hay barra_extra
+          #   - Si no hay preset_extra -> usa lógica global de barra_extra
+          # --------------------------------------------------------------
           args_apiladas <- c(
             list(
-              data             = tab_apil$data,
-              var_categoria    = "categoria",
-              var_n            = "n_base",
-              cols_porcentaje  = tab_apil$cols_porcentaje,
-              etiquetas_grupos = tab_apil$etiquetas_grupos,
-              escala_valor     = "proporcion_1",
-              colores_grupos   = colores_grupos,
-              mostrar_valores  = TRUE,
-              titulo           = titulo_plot,
-              subtitulo        = NULL,
-              nota_pie         = nota_pie_plot,
-              mostrar_barra_extra = barra_extra == "total_n",
+              data                = tab_apil$data,
+              var_categoria       = "categoria",
+              var_n               = "n_base",
+              cols_porcentaje     = tab_apil$cols_porcentaje,
+              etiquetas_grupos    = tab_apil$etiquetas_grupos,
+              escala_valor        = "proporcion_1",
+              colores_grupos      = colores_grupos,
+              mostrar_valores     = TRUE,
+              titulo              = titulo_plot,
+              subtitulo           = NULL,
+              nota_pie            = nota_pie_plot,
+              mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
+              barra_extra_preset  = preset_extra,
               prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
-              titulo_barra_extra  = NULL,
+              titulo_barra_extra  = if (!is.null(preset_extra)) NULL else if (barra_extra == "total_n") "Total" else NULL,
               exportar            = "rplot"
             ),
             estilos_barras_apiladas
