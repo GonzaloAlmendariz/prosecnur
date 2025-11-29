@@ -716,7 +716,6 @@ reporte_ppt <- function(
   }
 
   log_decisiones <- dplyr::bind_rows(log_list)
-
   # ---------------------------------------------------------------------------
   # 6. PPT
   # ---------------------------------------------------------------------------
@@ -774,11 +773,18 @@ reporte_ppt <- function(
     tiene_layout_contraportada <- FALSE
 
     if (!is.null(layout_info)) {
-      if ("Graficos" %in% layout_info$layout) {
+
+      # Prioridad: Graficos2 > Graficos > Blank
+      if ("Graficos2" %in% layout_info$layout) {
+        tiene_layout_graficos <- TRUE
+        layout_graficos       <- "Graficos2"
+        usar_pic_placeholder  <- TRUE
+      } else if ("Graficos" %in% layout_info$layout) {
         tiene_layout_graficos <- TRUE
         layout_graficos       <- "Graficos"
         usar_pic_placeholder  <- TRUE
       }
+
       if ("Title Slide" %in% layout_info$layout) {
         tiene_layout_title_slide <- TRUE
       }
@@ -789,9 +795,12 @@ reporte_ppt <- function(
 
     if (mensajes_progreso) {
       if (tiene_layout_graficos) {
-        message("Las diapositivas de gráficos usarán el layout 'Graficos'.")
+        message(
+          "Las diapositivas de gráficos usarán el layout '",
+          layout_graficos, "'."
+        )
       } else {
-        message("No se encontró un layout 'Graficos'; se usará 'Blank' a pantalla completa.")
+        message("No se encontró un layout 'Graficos' ni 'Graficos2'; se usará 'Blank' a pantalla completa.")
       }
     }
 
@@ -929,7 +938,11 @@ reporte_ppt <- function(
 
           if (!is.null(loc_fuente)) {
             doc <- tryCatch(
-              officer::ph_with(doc, fuente, location = loc_fuente),
+              officer::ph_with(
+                doc,
+                fuente,
+                location = loc_fuente
+              ),
               error = function(e) {
                 if (mensajes_progreso) {
                   message("No se pudo escribir la fuente en el bloque izquierdo: ", e$message)
@@ -952,7 +965,11 @@ reporte_ppt <- function(
 
           if (!is.null(loc_resumen)) {
             doc <- tryCatch(
-              officer::ph_with(doc, resumenN, location = loc_resumen),
+              officer::ph_with(
+                doc,
+                resumenN,
+                location = loc_resumen
+              ),
               error = function(e) {
                 if (mensajes_progreso) {
                   message("No se pudo escribir el resumen de N en el bloque derecho: ", e$message)
