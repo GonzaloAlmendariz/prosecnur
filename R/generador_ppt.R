@@ -70,8 +70,9 @@
 #'   se intentará inferir desde una columna \code{section} o \code{seccion} del
 #'   \code{survey}.
 #' @param path_ppt Ruta del archivo PPTX a generar cuando \code{solo_lista = FALSE}.
-#' @param fuente Texto de fuente que se mostrará como nota al pie de cada gráfico
-#'   (en \code{plot.caption}).
+#' @param fuente Texto de fuente que se mostrará en el bloque de texto inferior
+#'   izquierdo de cada diapositiva de gráficos (por ejemplo,
+#'   `"Fuente: Pulso PUCP 2025"`). No se usa como caption interno del gráfico.
 #' @param sm_vars_force Vector opcional de nombres de variables que deben tratarse
 #'   como \code{select_multiple} aunque el instrumento no las marque como tales.
 #' @param mostrar_todo Lógico; se pasa a \code{freq_table_spss()} como
@@ -81,9 +82,9 @@
 #' @param solo_lista Lógico; si \code{TRUE}, no se genera PPT y solo se devuelve
 #'   una lista con \code{plots} y \code{log_decisiones}. Si \code{FALSE}, además
 #'   se construye \code{path_ppt}.
-#' @param incluir_titulo_var Lógico; si \code{TRUE}, cada gráfico usa como título
-#'   el label de la variable (obtenido a partir del \code{survey} o de los
-#'   atributos de la base). Si \code{FALSE}, los gráficos se generan sin título.
+#' @param incluir_titulo_var Lógico; si \code{TRUE}, el label de la variable se
+#'   usa como título de la diapositiva de gráfico (placeholder de título del
+#'   layout de PowerPoint). Los gráficos en sí se generan sin título.
 #' @param mensajes_progreso Lógico; si \code{TRUE}, muestra mensajes por sección
 #'   y por variable indicando qué tipo de gráfico se está usando y por qué.
 #'
@@ -127,7 +128,7 @@
 #'   \code{"barras_apiladas"}.
 #'
 #' @param barra_extra Controla si se agrega o no una barra final con el N total
-#'   en las barras apiladas. Puede ser:
+#'   (o algún agregado) en las barras apiladas/agrupadas. Puede ser:
 #'   \itemize{
 #'     \item \code{"ninguna"}: no se agrega barra extra.
 #'     \item \code{"total_n"}: se agrega barra extra con el N total (\code{"N = ..."}).
@@ -143,17 +144,26 @@
 #' @param template_pptx Ruta a una plantilla PPTX (por ejemplo, en formato 16:9).
 #'   Si es \code{NULL}, se intentará usar una plantilla interna del paquete
 #'   llamada \code{"plantillas/plantilla_16_9.pptx"}; si tampoco existe, se
-#'   usará la plantilla por defecto de PowerPoint a través de
-#'   \code{officer::read_pptx()}.
-#' @param layout_title Nombre del layout de portada (por defecto `"Title Slide"`).
-#' @param layout_section Nombre del layout para las diapositivas de sección
-#'   (por defecto `"Section Header"`).
-#' @param layout_graficos Nombre del layout para las diapositivas de gráficos
-#'   (por defecto `"Graficos"`).
-#' @param layout_contraportada Nombre del layout para la diapositiva de
-#'   contraportada (por defecto `"Contraportada"`).
-#' @param master_ppt Nombre del master de la plantilla (por defecto
-#'   `"Office Theme"`).
+#'   usará la plantilla por defecto de PowerPoint a través de \code{officer::read_pptx()}.
+#'
+#' @param titulo_portada Título que se colocará en la diapositiva de portada
+#'   (layout `"Title Slide"`) cuando exista dicho layout en la plantilla.
+#' @param subtitulo_portada Subtítulo para la diapositiva de portada.
+#' @param fecha_portada Texto de fecha que se colocará en el placeholder de
+#'   fecha (`type = "dt"`) de la portada y, si existe, de la contraportada.
+#' @param mostrar_resumen_n Lógico; si \code{TRUE}, en cada diapositiva de
+#'   gráficos se escribe en el bloque de texto inferior derecho un resumen del
+#'   tipo `"N = X | Ratio de respuestas: Y%"`.
+#'
+#' En plantillas que tengan un layout llamado \code{"Graficos"} con un
+#' marcador de imagen (\code{type = "pic"}) y dos placeholders de texto
+#' \code{type = "body"} (índices 2 y 3), los gráficos se insertan en dicho
+#' marcador, el texto de \code{fuente} va al bloque izquierdo y el resumen de N
+#' va al bloque derecho. En caso contrario, se usa una diapositiva en blanco a
+#' pantalla completa y no se insertan esos textos.
+#'
+#' Si la plantilla incluye un layout \code{"Contraportada"}, se agrega una
+#' diapositiva final usando ese layout.
 #'
 #' @return Una lista con dos elementos:
 #' \describe{
@@ -197,7 +207,7 @@ reporte_ppt <- function(
     default_so = c("barras_agrupadas", "barras_apiladas"),
     default_sm = c("barras_agrupadas", "barras_apiladas"),
 
-    # Barra extra en barras apiladas
+    # Barra extra en barras apiladas/agrupadas
     barra_extra = c("ninguna", "total_n"),
 
     # Estilos por tipo de gráfico
@@ -208,17 +218,13 @@ reporte_ppt <- function(
     # Plantilla PPT
     template_pptx = NULL,
 
-    titulo_portada           = NULL,
-    subtitulo_portada        = NULL,
-    fecha_portada            = NULL,
-    titulo_contraportada     = NULL,
-    subtitulo_contraportada  = NULL,
-    fecha_contraportada      = NULL,
-    layout_titulo            = "Title Slide",
-    layout_section           = "Section Header",
-    layout_grafico           = "Graficos",
-    layout_contraportada     = "Contraportada",
-    master_ppt               = "Office Theme"
+    # Texto de portada
+    titulo_portada    = NULL,
+    subtitulo_portada = NULL,
+    fecha_portada     = NULL,
+
+    # Resumen de N en bloque derecho
+    mostrar_resumen_n = TRUE
 ) {
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
@@ -405,8 +411,6 @@ reporte_ppt <- function(
 
     pct_si <- n_pos / denom * 100
 
-    # Si incluir_titulo_var = TRUE, el título general va en la diapositiva
-    # y no se muestra como texto de indicador en cada pie.
     indicador_val <- if (incluir_titulo_var) "" else (var_label %||% var)
 
     tibble::tibble(
@@ -419,9 +423,12 @@ reporte_ppt <- function(
   # ---------------------------------------------------------------------------
   # 4. Recorrido por secciones y variables
   # ---------------------------------------------------------------------------
-  plots_list     <- list()
-  log_list       <- list()
-  secciones_plot <- character(0)
+  plots_list      <- list()
+  titulos_list    <- list()
+  resumenN_list   <- list()
+  log_list        <- list()
+
+  total_casos <- nrow(data)
 
   for (sec in names(SECCIONES)) {
     vars_sec <- SECCIONES[[sec]]
@@ -488,9 +495,27 @@ reporte_ppt <- function(
         next
       }
 
-      var_label   <- .titulo_var_safe(v)
-      titulo_plot <- if (incluir_titulo_var) var_label else NULL
-      nota_pie    <- if (is.null(fuente)) NULL else fuente
+      # --- resumen N y ratio de respuestas para esta variable ---
+      n_var <- sum(tab_freq$n, na.rm = TRUE)
+      if (is.finite(n_var) && n_var >= 0 && total_casos > 0) {
+        ratio <- n_var / total_casos * 100
+        resumen_n_txt <- sprintf("N = %s | Ratio de respuestas: %.1f%%",
+                                 format(n_var, big.mark = ",", scientific = FALSE),
+                                 ratio)
+      } else if (is.finite(n_var)) {
+        resumen_n_txt <- sprintf("N = %s",
+                                 format(n_var, big.mark = ",", scientific = FALSE))
+      } else {
+        resumen_n_txt <- NULL
+      }
+
+      var_label    <- .titulo_var_safe(v)
+      titulo_plot  <- NULL  # el gráfico va sin título
+      titulo_slide <- if (incluir_titulo_var) var_label else NULL
+
+      # No usamos caption interno del plot; la fuente se escribirá en el
+      # placeholder de texto de la diapositiva.
+      nota_pie_plot <- NULL
 
       if (mensajes_progreso) {
         message("   - ", v, " → ", tipo_grafico,
@@ -502,9 +527,6 @@ reporte_ppt <- function(
 
       if (tipo_grafico %in% c("barras_agrupadas", "barras_apiladas", "dico")) {
 
-        # ---------------------------------------------------------------------
-        # Barras agrupadas
-        # ---------------------------------------------------------------------
         if (tipo_grafico == "barras_agrupadas") {
 
           tab_agr <- .build_tab_barras_agrupadas(tab_freq, var_label)
@@ -528,11 +550,10 @@ reporte_ppt <- function(
               mostrar_valores  = TRUE,
               titulo           = titulo_plot,
               subtitulo        = NULL,
-              nota_pie         = nota_pie,
-              # Importante: SIN barra extra en agrupadas
-              mostrar_barra_extra = FALSE,
-              prefijo_barra_extra = "N = ",
-              titulo_barra_extra  = NULL,
+              nota_pie         = nota_pie_plot,
+              mostrar_barra_extra = barra_extra == "total_n",
+              prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
+              titulo_barra_extra  = if (barra_extra == "total_n") "Total" else NULL,
               exportar            = "rplot"
             ),
             estilos_barras_agrupadas
@@ -541,9 +562,6 @@ reporte_ppt <- function(
           p <- do.call(graficar_barras_agrupadas, args_barras)
         }
 
-        # ---------------------------------------------------------------------
-        # Barras apiladas
-        # ---------------------------------------------------------------------
         if (tipo_grafico == "barras_apiladas") {
 
           tab_apil <- .build_tab_barras_apiladas(tab_freq, var_label)
@@ -567,11 +585,10 @@ reporte_ppt <- function(
               mostrar_valores  = TRUE,
               titulo           = titulo_plot,
               subtitulo        = NULL,
-              nota_pie         = nota_pie,
-              # Aquí sí puede haber barra extra según barra_extra
+              nota_pie         = nota_pie_plot,
               mostrar_barra_extra = barra_extra == "total_n",
-              prefijo_barra_extra = "N = ",
-              titulo_barra_extra  = NULL,  # sin texto "Total"
+              prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
+              titulo_barra_extra  = NULL,
               exportar            = "rplot"
             ),
             estilos_barras_apiladas
@@ -579,7 +596,6 @@ reporte_ppt <- function(
 
           p <- do.call(graficar_barras_apiladas, args_apiladas)
 
-          # Para las apiladas autogeneradas: ocultar eje Y (ya está en el título)
           p <- p +
             ggplot2::theme(
               axis.text.y  = ggplot2::element_blank(),
@@ -587,9 +603,6 @@ reporte_ppt <- function(
             )
         }
 
-        # ---------------------------------------------------------------------
-        # Dicotómicas (pies)
-        # ---------------------------------------------------------------------
         if (tipo_grafico == "dico") {
 
           labels_dico <- NULL
@@ -630,10 +643,10 @@ reporte_ppt <- function(
                 mostrar_valores  = TRUE,
                 titulo           = titulo_plot,
                 subtitulo        = NULL,
-                nota_pie         = nota_pie,
-                mostrar_barra_extra = FALSE,
-                prefijo_barra_extra = "N = ",
-                titulo_barra_extra  = NULL,
+                nota_pie         = nota_pie_plot,
+                mostrar_barra_extra = barra_extra == "total_n",
+                prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
+                titulo_barra_extra  = if (barra_extra == "total_n") "Total" else NULL,
                 exportar            = "rplot"
               ),
               estilos_barras_agrupadas
@@ -657,7 +670,7 @@ reporte_ppt <- function(
                 etiqueta_no       = labels_dico[2],
                 titulo            = titulo_plot,
                 subtitulo         = NULL,
-                nota_pie          = nota_pie,
+                nota_pie          = nota_pie_plot,
                 incluir_n_en_titulo = FALSE,
                 exportar          = "rplot"
               ),
@@ -696,8 +709,9 @@ reporte_ppt <- function(
         tipo_grafico = tipo_grafico_final
       )
 
-      plots_list[[length(plots_list) + 1]] <- p
-      secciones_plot <- c(secciones_plot, sec)
+      plots_list[[length(plots_list) + 1]]       <- p
+      titulos_list[[length(titulos_list) + 1]]   <- titulo_slide
+      resumenN_list[[length(resumenN_list) + 1]] <- resumen_n_txt
     }
   }
 
@@ -715,7 +729,7 @@ reporte_ppt <- function(
       )
     }
 
-    # 6.1. Determinar la plantilla a usar
+    # 6.1. Leer plantilla
     if (is.null(template_pptx)) {
       template_interno <- system.file("plantillas/plantilla_16_9.pptx",
                                       package = "prosecnur")
@@ -747,144 +761,247 @@ reporte_ppt <- function(
       doc <- officer::read_pptx(path = template_pptx)
     }
 
-    # -----------------------------------------------------------------------
-    # 6.2. DIAPOSITIVA DE PORTADA (Title Slide)
-    # -----------------------------------------------------------------------
-    doc <- officer::add_slide(
-      doc,
-      layout = layout_titulo,
-      master = master_ppt
+    # 6.2. Info de layouts
+    layout_info <- tryCatch(
+      officer::layout_summary(doc),
+      error = function(e) NULL
     )
 
-    # Título (Title Slide suele tener "ctrTitle")
-    if (!is.null(titulo_portada)) {
-      doc <- officer::ph_with(
-        doc,
-        value    = titulo_portada,
-        location = officer::ph_location_type(type = "ctrTitle")
-      )
-    }
+    tiene_layout_graficos      <- FALSE
+    layout_graficos            <- "Blank"
+    usar_pic_placeholder       <- FALSE
+    tiene_layout_title_slide   <- FALSE
+    tiene_layout_contraportada <- FALSE
 
-    # Subtítulo
-    if (!is.null(subtitulo_portada)) {
-      doc <- officer::ph_with(
-        doc,
-        value    = subtitulo_portada,
-        location = officer::ph_location_type(type = "subTitle")
-      )
-    }
-
-    # Fecha (si el layout tiene placeholder de tipo dt)
-    if (!is.null(fecha_portada)) {
-      doc <- officer::ph_with(
-        doc,
-        value    = fecha_portada,
-        location = officer::ph_location_type(type = "dt")
-      )
-    }
-
-    # -----------------------------------------------------------------------
-    # 6.3. DIAPOSITIVAS POR SECCIÓN + GRÁFICOS (layout "Graficos")
-    # -----------------------------------------------------------------------
-    idx_plot <- 1L
-
-    for (sec in names(SECCIONES)) {
-
-      # 6.3.1. Encabezado de sección (Section Header)
-      doc <- officer::add_slide(
-        doc,
-        layout = layout_section,
-        master = master_ppt
-      )
-
-      # Aquí SÍ existe type = "title" (lo viste en layout_properties)
-      doc <- officer::ph_with(
-        doc,
-        value    = sec,
-        location = officer::ph_location_type(type = "title")
-      )
-
-      # 6.3.2. Gráficos de la sección (una diapositiva por gráfico)
-      n_vars_sec <- length(SECCIONES[[sec]])
-      for (i in seq_len(n_vars_sec)) {
-        if (idx_plot > length(plots_list)) break
-
-        p <- plots_list[[idx_plot]]
-
-        doc <- officer::add_slide(
-          doc,
-          layout = layout_grafico,
-          master = master_ppt
-        )
-
-        # Aquí el layout "Graficos" ya tiene el espacio para el gráfico
-        # y el logo en la esquina. Usamos fullsize para que ocupe todo
-        # el área del contenido (no tocamos el logo).
-        doc <- officer::ph_with(
-          doc,
-          rvg::dml(ggobj = p),
-          location = officer::ph_location_fullsize()
-        )
-
-        idx_plot <- idx_plot + 1L
+    if (!is.null(layout_info)) {
+      if ("Graficos" %in% layout_info$layout) {
+        tiene_layout_graficos <- TRUE
+        layout_graficos       <- "Graficos"
+        usar_pic_placeholder  <- TRUE
+      }
+      if ("Title Slide" %in% layout_info$layout) {
+        tiene_layout_title_slide <- TRUE
+      }
+      if ("Contraportada" %in% layout_info$layout) {
+        tiene_layout_contraportada <- TRUE
       }
     }
 
-    # -----------------------------------------------------------------------
-    # 6.4. CONTRAPORTADA
-    # -----------------------------------------------------------------------
-    doc <- officer::add_slide(
-      doc,
-      layout = layout_contraportada,
-      master = master_ppt
-    )
-
-    # En Contraportada NO hay "title" ni "subTitle", solo:
-    # - body
-    # - dt (date)
-    # - ftr (footer)
-    #
-    # Juntamos título y subtítulo en un solo cuerpo de texto.
-    if (!is.null(titulo_contraportada) || !is.null(subtitulo_contraportada)) {
-
-      texto_body <- paste(
-        c(titulo_contraportada, subtitulo_contraportada),
-        collapse = "\n"
-      )
-
-      doc <- officer::ph_with(
-        doc,
-        value    = texto_body,
-        location = officer::ph_location_type(type = "body")
-      )
+    if (mensajes_progreso) {
+      if (tiene_layout_graficos) {
+        message("Las diapositivas de gráficos usarán el layout 'Graficos'.")
+      } else {
+        message("No se encontró un layout 'Graficos'; se usará 'Blank' a pantalla completa.")
+      }
     }
 
-    # Fecha en el placeholder de tipo "dt" (si quieres usarlo)
-    if (!is.null(fecha_contraportada)) {
-      doc <- officer::ph_with(
+    # 6.3. Portada (Title Slide), si corresponde
+    if (tiene_layout_title_slide &&
+        ( !is.null(titulo_portada)    && nzchar(titulo_portada)    ||
+          !is.null(subtitulo_portada) && nzchar(subtitulo_portada) ||
+          !is.null(fecha_portada)     && nzchar(fecha_portada) )) {
+
+      if (mensajes_progreso) {
+        message("Agregando diapositiva de portada (Title Slide).")
+      }
+
+      doc <- officer::add_slide(
         doc,
-        value    = fecha_contraportada,
-        location = officer::ph_location_type(type = "dt")
+        layout = "Title Slide",
+        master = "Office Theme"
       )
+
+      # Título: ctrTitle o title
+      if (!is.null(titulo_portada) && nzchar(titulo_portada)) {
+        loc_title <- tryCatch(
+          officer::ph_location_type(type = "ctrTitle"),
+          error = function(e) officer::ph_location_type(type = "title")
+        )
+        doc <- tryCatch(
+          officer::ph_with(doc, titulo_portada, location = loc_title),
+          error = function(e) {
+            if (mensajes_progreso) {
+              message("No se pudo escribir el título en la portada: ", e$message)
+            }
+            doc
+          }
+        )
+      }
+
+      # Subtítulo: subTitle
+      if (!is.null(subtitulo_portada) && nzchar(subtitulo_portada)) {
+        doc <- tryCatch(
+          officer::ph_with(
+            doc,
+            subtitulo_portada,
+            location = officer::ph_location_type(type = "subTitle")
+          ),
+          error = function(e) {
+            if (mensajes_progreso) {
+              message("No se pudo escribir el subtítulo en la portada: ", e$message)
+            }
+            doc
+          }
+        )
+      }
+
+      # Fecha: dt
+      if (!is.null(fecha_portada) && nzchar(fecha_portada)) {
+        doc <- tryCatch(
+          officer::ph_with(
+            doc,
+            fecha_portada,
+            location = officer::ph_location_type(type = "dt")
+          ),
+          error = function(e) {
+            if (mensajes_progreso) {
+              message("No se pudo escribir la fecha en la portada: ", e$message)
+            }
+            doc
+          }
+        )
+      }
+    } else if (!is.null(fecha_portada) || !is.null(titulo_portada) || !is.null(subtitulo_portada)) {
+      if (mensajes_progreso && !tiene_layout_title_slide) {
+        message("Se solicitaron textos de portada, pero la plantilla no tiene layout 'Title Slide'.")
+      }
     }
 
-    # Si quieres, puedes poner la fuente en el footer (ftr)
-    if (!is.null(fuente)) {
-      doc <- officer::ph_with(
-        doc,
-        value    = fuente,
-        location = officer::ph_location_type(type = "ftr")
-      )
+    # 6.4. Diapositivas de gráficos
+    if (length(plots_list)) {
+      for (i in seq_along(plots_list)) {
+
+        p        <- plots_list[[i]]
+        st       <- titulos_list[[i]]   %||% NULL
+        resumenN <- resumenN_list[[i]]  %||% NULL
+
+        doc <- officer::add_slide(
+          doc,
+          layout = layout_graficos,
+          master = "Office Theme"
+        )
+
+        # Escribir título de la diapositiva si hay y existe placeholder
+        if (!is.null(st) && nzchar(st)) {
+          loc_gtitle <- tryCatch(
+            officer::ph_location_type(type = "title"),
+            error = function(e) {
+              tryCatch(
+                officer::ph_location_type(type = "ctrTitle"),
+                error = function(e2) NULL
+              )
+            }
+          )
+          if (!is.null(loc_gtitle)) {
+            doc <- tryCatch(
+              officer::ph_with(doc, st, location = loc_gtitle),
+              error = function(e) {
+                if (mensajes_progreso) {
+                  message("No se pudo escribir el título en la diapositiva de gráficos: ", e$message)
+                }
+                doc
+              }
+            )
+          }
+        }
+
+        # Insertar gráfico en placeholder de imagen o a pantalla completa
+        if (usar_pic_placeholder) {
+          loc_pic <- officer::ph_location_type(type = "pic")
+        } else {
+          loc_pic <- officer::ph_location_fullsize()
+        }
+
+        doc <- officer::ph_with(
+          doc,
+          rvg::dml(ggobj = p, bg = "transparent"),
+          location = loc_pic
+        )
+
+        # Escribir fuente en bloque de texto izquierdo (body id = 2) si corresponde
+        if (tiene_layout_graficos &&
+            !is.null(fuente) && nzchar(fuente)) {
+
+          loc_fuente <- tryCatch(
+            officer::ph_location_type(type = "body", id = 2),
+            error = function(e) NULL
+          )
+
+          if (!is.null(loc_fuente)) {
+            doc <- tryCatch(
+              officer::ph_with(doc, fuente, location = loc_fuente),
+              error = function(e) {
+                if (mensajes_progreso) {
+                  message("No se pudo escribir la fuente en el bloque izquierdo: ", e$message)
+                }
+                doc
+              }
+            )
+          }
+        }
+
+        # Escribir resumen N en bloque de texto derecho (body id = 3) si corresponde
+        if (tiene_layout_graficos &&
+            mostrar_resumen_n &&
+            !is.null(resumenN) && nzchar(resumenN)) {
+
+          loc_resumen <- tryCatch(
+            officer::ph_location_type(type = "body", id = 3),
+            error = function(e) NULL
+          )
+
+          if (!is.null(loc_resumen)) {
+            doc <- tryCatch(
+              officer::ph_with(doc, resumenN, location = loc_resumen),
+              error = function(e) {
+                if (mensajes_progreso) {
+                  message("No se pudo escribir el resumen de N en el bloque derecho: ", e$message)
+                }
+                doc
+              }
+            )
+          }
+        }
+      }
     }
 
-    # -----------------------------------------------------------------------
-    # Guardar archivo
-    # -----------------------------------------------------------------------
+    # 6.5. Contraportada (si existe)
+    if (tiene_layout_contraportada) {
+      if (mensajes_progreso) {
+        message("Agregando diapositiva de contraportada.")
+      }
+
+      doc <- officer::add_slide(
+        doc,
+        layout = "Contraportada",
+        master = "Office Theme"
+      )
+
+      # Si hay fecha definida, intentar ponerla en el placeholder de fecha (dt)
+      if (!is.null(fecha_portada) && nzchar(fecha_portada)) {
+        doc <- tryCatch(
+          officer::ph_with(
+            doc,
+            fecha_portada,
+            location = officer::ph_location_type(type = "dt")
+          ),
+          error = function(e) {
+            if (mensajes_progreso) {
+              message("No se pudo escribir la fecha en la contraportada: ", e$message)
+            }
+            doc
+          }
+        )
+      }
+    }
+
+    # 6.6. Guardar
     print(doc, target = path_ppt)
     if (mensajes_progreso) {
       message("PPT generado en: ", normalizePath(path_ppt, winslash = "/"))
     }
   }
+
   invisible(list(
     plots          = plots_list,
     log_decisiones = log_decisiones

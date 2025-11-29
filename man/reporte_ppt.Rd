@@ -34,14 +34,7 @@ reporte_ppt(
   titulo_portada = NULL,
   subtitulo_portada = NULL,
   fecha_portada = NULL,
-  titulo_contraportada = NULL,
-  subtitulo_contraportada = NULL,
-  fecha_contraportada = NULL,
-  layout_titulo = "Title Slide",
-  layout_section = "Section Header",
-  layout_grafico = "Graficos",
-  layout_contraportada = "Contraportada",
-  master_ppt = "Office Theme"
+  mostrar_resumen_n = TRUE
 )
 }
 \arguments{
@@ -61,8 +54,9 @@ se intentará inferir desde una columna \code{section} o \code{seccion} del
 
 \item{path_ppt}{Ruta del archivo PPTX a generar cuando \code{solo_lista = FALSE}.}
 
-\item{fuente}{Texto de fuente que se mostrará como nota al pie de cada gráfico
-(en \code{plot.caption}).}
+\item{fuente}{Texto de fuente que se mostrará en el bloque de texto inferior
+izquierdo de cada diapositiva de gráficos (por ejemplo,
+\code{"Fuente: Pulso PUCP 2025"}). No se usa como caption interno del gráfico.}
 
 \item{sm_vars_force}{Vector opcional de nombres de variables que deben tratarse
 como \code{select_multiple} aunque el instrumento no las marque como tales.}
@@ -76,9 +70,9 @@ el generador de PPT excluye categorías con \code{n == 0} al graficar.}
 una lista con \code{plots} y \code{log_decisiones}. Si \code{FALSE}, además
 se construye \code{path_ppt}.}
 
-\item{incluir_titulo_var}{Lógico; si \code{TRUE}, cada gráfico usa como título
-el label de la variable (obtenido a partir del \code{survey} o de los
-atributos de la base). Si \code{FALSE}, los gráficos se generan sin título.}
+\item{incluir_titulo_var}{Lógico; si \code{TRUE}, el label de la variable se
+usa como título de la diapositiva de gráfico (placeholder de título del
+layout de PowerPoint). Los gráficos en sí se generan sin título.}
 
 \item{mensajes_progreso}{Lógico; si \code{TRUE}, muestra mensajes por sección
 y por variable indicando qué tipo de gráfico se está usando y por qué.}
@@ -129,7 +123,7 @@ cuando no se encuentren en ninguna lista de overrides. Igual que
 \code{"barras_apiladas"}.}
 
 \item{barra_extra}{Controla si se agrega o no una barra final con el N total
-en las barras apiladas. Puede ser:
+(o algún agregado) en las barras apiladas/agrupadas. Puede ser:
 \itemize{
 \item \code{"ninguna"}: no se agrega barra extra.
 \item \code{"total_n"}: se agrega barra extra con el N total (\code{"N = ..."}).
@@ -147,22 +141,29 @@ directamente a \code{graficar_barras_apiladas()}.}
 \item{template_pptx}{Ruta a una plantilla PPTX (por ejemplo, en formato 16:9).
 Si es \code{NULL}, se intentará usar una plantilla interna del paquete
 llamada \code{"plantillas/plantilla_16_9.pptx"}; si tampoco existe, se
-usará la plantilla por defecto de PowerPoint a través de
-\code{officer::read_pptx()}.}
+usará la plantilla por defecto de PowerPoint a través de \code{officer::read_pptx()}.}
 
-\item{layout_section}{Nombre del layout para las diapositivas de sección
-(por defecto \code{"Section Header"}).}
+\item{titulo_portada}{Título que se colocará en la diapositiva de portada
+(layout \code{"Title Slide"}) cuando exista dicho layout en la plantilla.}
 
-\item{layout_contraportada}{Nombre del layout para la diapositiva de
-contraportada (por defecto \code{"Contraportada"}).}
+\item{subtitulo_portada}{Subtítulo para la diapositiva de portada.}
 
-\item{master_ppt}{Nombre del master de la plantilla (por defecto
-\code{"Office Theme"}).}
+\item{fecha_portada}{Texto de fecha que se colocará en el placeholder de
+fecha (\code{type = "dt"}) de la portada y, si existe, de la contraportada.}
 
-\item{layout_title}{Nombre del layout de portada (por defecto \code{"Title Slide"}).}
+\item{mostrar_resumen_n}{Lógico; si \code{TRUE}, en cada diapositiva de
+gráficos se escribe en el bloque de texto inferior derecho un resumen del
+tipo \code{"N = X | Ratio de respuestas: Y\%"}.
 
-\item{layout_graficos}{Nombre del layout para las diapositivas de gráficos
-(por defecto \code{"Graficos"}).}
+En plantillas que tengan un layout llamado \code{"Graficos"} con un
+marcador de imagen (\code{type = "pic"}) y dos placeholders de texto
+\code{type = "body"} (índices 2 y 3), los gráficos se insertan en dicho
+marcador, el texto de \code{fuente} va al bloque izquierdo y el resumen de N
+va al bloque derecho. En caso contrario, se usa una diapositiva en blanco a
+pantalla completa y no se insertan esos textos.
+
+Si la plantilla incluye un layout \code{"Contraportada"}, se agrega una
+diapositiva final usando ese layout.}
 }
 \value{
 Una lista con dos elementos:
