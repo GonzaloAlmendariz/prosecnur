@@ -246,6 +246,16 @@ graficar_barras_agrupadas <- function(
   }
   df_long[[var_categoria]] <- factor(cat_vec, levels = cat_lvls)
 
+  # Nº de series por categoría (para ajustar automáticamente el tamaño del texto)
+  n_series <- length(unique(df_long$.serie))
+  # factor sencillo: más series → texto un poco más pequeño
+  size_texto_barras_eff <- dplyr::case_when(
+    n_series <= 2 ~ size_texto_barras * 1.00,
+    n_series == 3 ~ size_texto_barras * 0.90,
+    n_series == 4 ~ size_texto_barras * 0.80,
+    TRUE          ~ size_texto_barras * 0.75
+  )
+
   # Máximo valor para definir escala y espacio extra
   max_valor <- max(df_long$.valor_plot, na.rm = TRUE)
   y_max     <- max_valor * (1 + extra_derecha_rel)
@@ -253,6 +263,7 @@ graficar_barras_agrupadas <- function(
   # ---------------------------------------------------------------------------
   # 2. Gráfico base (antes de coord_flip)
   # ---------------------------------------------------------------------------
+  width_dodge <- 0.7
   p <- ggplot2::ggplot(
     df_long,
     ggplot2::aes_string(
@@ -262,7 +273,7 @@ graficar_barras_agrupadas <- function(
     )
   ) +
     ggplot2::geom_col(
-      position = ggplot2::position_dodge(width = 0.7),
+      position = ggplot2::position_dodge(width = width_dodge),
       width    = 0.6
     )
 
@@ -288,8 +299,8 @@ graficar_barras_agrupadas <- function(
     )
 
     # Split: dentro vs fuera
-    df_in <- df_lab[df_lab$.valor_plot >= umbral_posicion & df_lab$lab != "", , drop = FALSE]
-    df_out <- df_lab[df_lab$.valor_plot < umbral_posicion & df_lab$lab != "", , drop = FALSE]
+    df_in  <- df_lab[df_lab$.valor_plot >= umbral_posicion & df_lab$lab != "", , drop = FALSE]
+    df_out <- df_lab[df_lab$.valor_plot <  umbral_posicion & df_lab$lab != "", , drop = FALSE]
 
     if (nrow(df_in)) {
       p <- p +
@@ -302,11 +313,11 @@ graficar_barras_agrupadas <- function(
             group = ".serie"
           ),
           inherit.aes = FALSE,
-          position    = ggplot2::position_dodge(width = 0.7),
+          position    = ggplot2::position_dodge(width = width_dodge),
           hjust       = 0.5,
           vjust       = 0.5,
           color       = color_texto_barras,
-          size        = size_texto_barras,
+          size        = size_texto_barras_eff,
           fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
           show.legend = FALSE
         )
@@ -323,11 +334,11 @@ graficar_barras_agrupadas <- function(
             group = ".serie"
           ),
           inherit.aes = FALSE,
-          position    = ggplot2::position_dodge(width = 0.7),
+          position    = ggplot2::position_dodge(width = width_dodge),
           hjust       = 0,   # fuera, a la derecha del extremo de la barra
           vjust       = 0.5,
           color       = color_texto_barras_fuera,
-          size        = size_texto_barras,
+          size        = size_texto_barras_eff,
           fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
           show.legend = FALSE
         )
@@ -351,12 +362,10 @@ graficar_barras_agrupadas <- function(
       dplyr::select(dplyr::all_of(c(var_categoria, var_n))) |>
       dplyr::distinct() |>
       dplyr::mutate(
-        # llevamos N casi hasta el borde derecho del eje
         ypos      = max_valor * (1 + extra_derecha_rel * 0.95),
         lab_extra = paste0(prefijo_barra_extra, .data[[var_n]])
       )
 
-    # Texto N=...
     p <- p +
       ggplot2::geom_text(
         data        = df_extra,
@@ -373,9 +382,7 @@ graficar_barras_agrupadas <- function(
         fontface    = if ("barra_extra" %in% textos_negrita) "bold" else "plain"
       )
 
-    # Encabezado encima de la columna de barra extra (titulo_barra_extra)
     if (!is.null(titulo_barra_extra) && nzchar(titulo_barra_extra)) {
-
       lvls <- levels(df_long[[var_categoria]])
       cat_superior <- if (invertir_barras) tail(lvls, 1) else head(lvls, 1)
 
@@ -466,12 +473,10 @@ graficar_barras_agrupadas <- function(
       panel.background   = ggplot2::element_rect(fill = color_fondo, color = NA)
     )
 
-  # Leyenda invertida si se pide
   if (invertir_leyenda && mostrar_leyenda) {
     p <- p + ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE))
   }
 
-  # Etiquetas de título y caption
   p <- p + ggplot2::labs(
     title    = titulo,
     subtitle = subtitulo,
