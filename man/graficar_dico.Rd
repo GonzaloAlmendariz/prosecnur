@@ -17,6 +17,7 @@ graficar_dico(
   mostrar_valores = TRUE,
   decimales = 1,
   umbral_etiqueta = 0.03,
+  radio_texto = 1,
   incluir_n_en_titulo = FALSE,
   prefijo_n_titulo = "N = ",
   ncol_facetas = NULL,
@@ -35,6 +36,11 @@ graficar_dico(
   size_texto_segmentos = 3,
   color_titulos_pie = "#000000",
   size_titulos_pie = 9,
+  color_cat_si = "#004B8D",
+  color_cat_no = "#D9D9D9",
+  color_texto_cat_si = NULL,
+  color_texto_cat_no = NULL,
+  color_fondo = NA,
   mostrar_leyenda = TRUE,
   posicion_leyenda = "bottom",
   invertir_leyenda = FALSE,
@@ -64,10 +70,11 @@ valores están en 0–1, o \code{"proporcion_100"} si están en 0–100.}
 (por defecto \code{"Sí"}).}
 
 \item{etiqueta_no}{Etiqueta a mostrar para la categoría negativa
-(por defecto \code{"No"}). Se calcula como complemento de Sí.}
+(por defecto \code{"No"}).}
 
 \item{colores_respuesta}{Vector de colores HEX con nombre para las
-categorías, usando como nombres \code{etiqueta_si} y \code{etiqueta_no}.}
+categorías, usando como nombres \code{etiqueta_si} y \code{etiqueta_no}.
+Si es \code{NULL}, se usan \code{color_cat_si} y \code{color_cat_no}.}
 
 \item{invertir_respuestas}{Lógico; si \code{TRUE}, invierte el orden de las
 categorías (por ejemplo, muestra primero "No" y luego "Sí") tanto en el
@@ -79,77 +86,53 @@ de cada sector de la torta.}
 \item{decimales}{Número de decimales para los porcentajes.}
 
 \item{umbral_etiqueta}{Mínima proporción (0–1) para mostrar la etiqueta
-de porcentaje (por ejemplo, 0.03 equivale a 3\\%).}
+de porcentaje (por ejemplo, 0.03 equivale a 3\%).}
+
+\item{radio_texto}{Posición radial del texto de porcentaje (en el eje x del
+pie). Valores cercanos a 1 colocan el texto en el centro del anillo;
+menores a 1 lo acercan al centro y mayores a 1 lo empujan hacia el borde.}
 
 \item{incluir_n_en_titulo}{Lógico; si \code{TRUE}, concatena
-una línea adicional con \code{"N = ..."} al nombre del indicador en la
-faceta (usando un salto de línea \code{"\\n"}).}
+una línea adicional con \code{"N = ..."} al nombre del indicador.}
 
-\item{prefijo_n_titulo}{Texto añadido antes del valor de N cuando se usa
-\code{incluir_n_en_titulo} (por defecto \code{"N = "}).}
+\item{prefijo_n_titulo}{Texto añadido antes del valor de N.}
 
 \item{ncol_facetas}{Número de columnas en el facetado. Si es \code{NULL},
 se intenta un valor razonable según el número de indicadores.}
 
-\item{titulo}{Título general del gráfico.}
+\item{titulo, subtitulo, nota_pie}{Título, subtítulo y nota de pie.}
 
-\item{subtitulo}{Subtítulo opcional.}
+\item{color_titulo, size_titulo}{Color y tamaño del título.}
 
-\item{nota_pie}{Nota o fuente para el pie de página (alineado a la derecha).}
+\item{color_subtitulo, size_subtitulo}{Color y tamaño del subtítulo.}
 
-\item{color_titulo}{Color del título.}
+\item{color_nota_pie, size_nota_pie}{Color y tamaño del pie.}
 
-\item{size_titulo}{Tamaño del título.}
+\item{color_leyenda, size_leyenda}{Color y tamaño de texto de la leyenda.}
 
-\item{color_subtitulo}{Color del subtítulo.}
+\item{color_texto_segmentos, size_texto_segmentos}{Color y tamaño del texto
+de porcentajes cuando no se usan colores diferenciados por categoría.}
 
-\item{size_subtitulo}{Tamaño del subtítulo.}
+\item{color_titulos_pie, size_titulos_pie}{Color y tamaño de los títulos
+de cada pie (facetas).}
 
-\item{color_nota_pie}{Color del texto del pie de página.}
+\item{color_cat_si, color_cat_no}{Colores de relleno de Sí y No.}
 
-\item{size_nota_pie}{Tamaño del texto del pie de página.}
+\item{color_texto_cat_si, color_texto_cat_no}{Colores de texto de Sí y No.}
 
-\item{color_leyenda}{Color del texto de la leyenda.}
+\item{color_fondo}{Color de fondo del gráfico (usar NA para transparente).}
 
-\item{size_leyenda}{Tamaño del texto de la leyenda.}
+\item{mostrar_leyenda, posicion_leyenda, invertir_leyenda}{Control de leyenda.}
 
-\item{color_texto_segmentos}{Color del texto de los porcentajes dentro de
-los sectores.}
+\item{textos_negrita}{Vector con: "titulo", "porcentajes", "leyenda",
+"titulos_pie" para poner en negrita.}
 
-\item{size_texto_segmentos}{Tamaño del texto de los porcentajes.}
+\item{exportar}{Método de salida: "rplot", "png" o "ppt".}
 
-\item{color_titulos_pie}{Color de los títulos de cada pie (strip de facetas).}
-
-\item{size_titulos_pie}{Tamaño de los títulos de cada pie.}
-
-\item{mostrar_leyenda}{Lógico; si \code{FALSE}, oculta la leyenda.}
-
-\item{posicion_leyenda}{Posición de la leyenda (por ejemplo,
-\code{"bottom"}, \code{"right"}, \code{"none"}).}
-
-\item{invertir_leyenda}{Lógico; si \code{TRUE}, invierte el orden de los
-ítems en la leyenda (sin alterar el orden de las categorías en el gráfico).}
-
-\item{textos_negrita}{Vector de caracteres que indica qué elementos deben
-mostrarse en negrita. Puede incluir cualquiera de:
-\code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"titulos_pie"}.}
-
-\item{exportar}{Método de salida: \code{"rplot"} (devuelve un objeto
-\code{ggplot}), \code{"png"} (exporta un archivo PNG) o \code{"ppt"}
-(exporta una diapositiva PPTX con el gráfico incrustado).}
-
-\item{path_salida}{Ruta del archivo a crear cuando \code{exportar} no es
-\code{"rplot"}.}
-
-\item{ancho}{Ancho del gráfico (cuando se exporta a archivo).}
-
-\item{alto}{Alto del gráfico (cuando se exporta a archivo).}
-
-\item{dpi}{Resolución en puntos por pulgada (solo para PNG).}
+\item{path_salida, ancho, alto, dpi}{Parámetros de exportación.}
 }
 \value{
-Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
-invisible, el gráfico exportado si se utiliza \code{"png"} o \code{"ppt"}.
+Un objeto ggplot si exportar = "rplot".
 }
 \description{
 Genera gráficos de torta (pie charts) para uno o varios indicadores

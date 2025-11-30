@@ -23,9 +23,11 @@
 #' @param etiqueta_si Etiqueta a mostrar para la categoría afirmativa
 #'   (por defecto \code{"Sí"}).
 #' @param etiqueta_no Etiqueta a mostrar para la categoría negativa
-#'   (por defecto \code{"No"}). Se calcula como complemento de Sí.
+#'   (por defecto \code{"No"}).
+#'
 #' @param colores_respuesta Vector de colores HEX con nombre para las
 #'   categorías, usando como nombres \code{etiqueta_si} y \code{etiqueta_no}.
+#'   Si es \code{NULL}, se usan \code{color_cat_si} y \code{color_cat_no}.
 #'
 #' @param invertir_respuestas Lógico; si \code{TRUE}, invierte el orden de las
 #'   categorías (por ejemplo, muestra primero "No" y luego "Sí") tanto en el
@@ -35,56 +37,45 @@
 #'   de cada sector de la torta.
 #' @param decimales Número de decimales para los porcentajes.
 #' @param umbral_etiqueta Mínima proporción (0–1) para mostrar la etiqueta
-#'   de porcentaje (por ejemplo, 0.03 equivale a 3\%).
+#'   de porcentaje (por ejemplo, 0.03 equivale a 3%).
+#'
+#' @param radio_texto Posición radial del texto de porcentaje (en el eje x del
+#'   pie). Valores cercanos a 1 colocan el texto en el centro del anillo;
+#'   menores a 1 lo acercan al centro y mayores a 1 lo empujan hacia el borde.
 #'
 #' @param incluir_n_en_titulo Lógico; si \code{TRUE}, concatena
-#'   una línea adicional con \code{"N = ..."} al nombre del indicador en la
-#'   faceta (usando un salto de línea \code{"\\n"}).
-#' @param prefijo_n_titulo Texto añadido antes del valor de N cuando se usa
-#'   \code{incluir_n_en_titulo} (por defecto \code{"N = "}).
+#'   una línea adicional con \code{"N = ..."} al nombre del indicador.
+#' @param prefijo_n_titulo Texto añadido antes del valor de N.
 #'
 #' @param ncol_facetas Número de columnas en el facetado. Si es \code{NULL},
 #'   se intenta un valor razonable según el número de indicadores.
 #'
-#' @param titulo Título general del gráfico.
-#' @param subtitulo Subtítulo opcional.
-#' @param nota_pie Nota o fuente para el pie de página (alineado a la derecha).
+#' @param titulo,subtitulo,nota_pie Título, subtítulo y nota de pie.
 #'
-#' @param color_titulo Color del título.
-#' @param size_titulo Tamaño del título.
-#' @param color_subtitulo Color del subtítulo.
-#' @param size_subtitulo Tamaño del subtítulo.
-#' @param color_nota_pie Color del texto del pie de página.
-#' @param size_nota_pie Tamaño del texto del pie de página.
-#' @param color_leyenda Color del texto de la leyenda.
-#' @param size_leyenda Tamaño del texto de la leyenda.
-#' @param color_texto_segmentos Color del texto de los porcentajes dentro de
-#'   los sectores.
-#' @param size_texto_segmentos Tamaño del texto de los porcentajes.
-#' @param color_titulos_pie Color de los títulos de cada pie (strip de facetas).
-#' @param size_titulos_pie Tamaño de los títulos de cada pie.
+#' @param color_titulo,size_titulo Color y tamaño del título.
+#' @param color_subtitulo,size_subtitulo Color y tamaño del subtítulo.
+#' @param color_nota_pie,size_nota_pie Color y tamaño del pie.
+#' @param color_leyenda,size_leyenda Color y tamaño de texto de la leyenda.
 #'
-#' @param mostrar_leyenda Lógico; si \code{FALSE}, oculta la leyenda.
-#' @param posicion_leyenda Posición de la leyenda (por ejemplo,
-#'   \code{"bottom"}, \code{"right"}, \code{"none"}).
-#' @param invertir_leyenda Lógico; si \code{TRUE}, invierte el orden de los
-#'   ítems en la leyenda (sin alterar el orden de las categorías en el gráfico).
+#' @param color_texto_segmentos,size_texto_segmentos Color y tamaño del texto
+#'   de porcentajes cuando no se usan colores diferenciados por categoría.
 #'
-#' @param textos_negrita Vector de caracteres que indica qué elementos deben
-#'   mostrarse en negrita. Puede incluir cualquiera de:
-#'   \code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"titulos_pie"}.
+#' @param color_titulos_pie,size_titulos_pie Color y tamaño de los títulos
+#'   de cada pie (facetas).
 #'
-#' @param exportar Método de salida: \code{"rplot"} (devuelve un objeto
-#'   \code{ggplot}), \code{"png"} (exporta un archivo PNG) o \code{"ppt"}
-#'   (exporta una diapositiva PPTX con el gráfico incrustado).
-#' @param path_salida Ruta del archivo a crear cuando \code{exportar} no es
-#'   \code{"rplot"}.
-#' @param ancho Ancho del gráfico (cuando se exporta a archivo).
-#' @param alto Alto del gráfico (cuando se exporta a archivo).
-#' @param dpi Resolución en puntos por pulgada (solo para PNG).
+#' @param color_cat_si,color_cat_no Colores de relleno de Sí y No.
+#' @param color_texto_cat_si,color_texto_cat_no Colores de texto de Sí y No.
+#' @param color_fondo Color de fondo del gráfico (usar NA para transparente).
 #'
-#' @return Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
-#'   invisible, el gráfico exportado si se utiliza \code{"png"} o \code{"ppt"}.
+#' @param mostrar_leyenda,posicion_leyenda,invertir_leyenda Control de leyenda.
+#'
+#' @param textos_negrita Vector con: "titulo", "porcentajes", "leyenda",
+#'   "titulos_pie" para poner en negrita.
+#'
+#' @param exportar Método de salida: "rplot", "png" o "ppt".
+#' @param path_salida,ancho,alto,dpi Parámetros de exportación.
+#'
+#' @return Un objeto ggplot si exportar = "rplot".
 #' @export
 graficar_dico <- function(
     data,
@@ -99,6 +90,7 @@ graficar_dico <- function(
     mostrar_valores        = TRUE,
     decimales              = 1,
     umbral_etiqueta        = 0.03,
+    radio_texto            = 1,
     incluir_n_en_titulo    = FALSE,
     prefijo_n_titulo       = "N = ",
     ncol_facetas           = NULL,
@@ -117,6 +109,11 @@ graficar_dico <- function(
     size_texto_segmentos   = 3,
     color_titulos_pie      = "#000000",
     size_titulos_pie       = 9,
+    color_cat_si           = "#004B8D",
+    color_cat_no           = "#D9D9D9",
+    color_texto_cat_si     = NULL,
+    color_texto_cat_no     = NULL,
+    color_fondo            = NA,
     mostrar_leyenda        = TRUE,
     posicion_leyenda       = "bottom",
     invertir_leyenda       = FALSE,
@@ -150,7 +147,7 @@ graficar_dico <- function(
   df <- data
 
   # ---------------------------------------------------------------------------
-  # 1. Construir tabla larga con Sí y No
+  # 1. Tabla larga con Sí / No
   # ---------------------------------------------------------------------------
   df_proc <- df |>
     dplyr::select(
@@ -167,7 +164,6 @@ graficar_dico <- function(
     df_proc$prop_si <- df_proc[[var_porcentaje_si]]
   }
 
-  # Asegurar 0–1 y calcular No como complemento
   df_proc$prop_si <- pmax(pmin(df_proc$prop_si, 1), 0)
   df_proc$prop_no <- 1 - df_proc$prop_si
 
@@ -187,10 +183,9 @@ graficar_dico <- function(
 
   df_long <- df_long[!is.na(df_long$categoria), , drop = FALSE]
 
-  # Etiquetas de facetas (indicadores)
+  # Facetas (indicadores)
   df_long$indicador_label <- df_long[[var_indicador]]
 
-  # Si se desea incluir N en el título de cada faceta (con salto de línea)
   if (incluir_n_en_titulo) {
     df_long <- df_long |>
       dplyr::group_by(.data[[var_indicador]]) |>
@@ -205,14 +200,13 @@ graficar_dico <- function(
       dplyr::ungroup()
   }
 
-  # Orden de facetas según aparición
   df_long$indicador_label <- factor(
     df_long$indicador_label,
     levels = unique(df_long$indicador_label)
   )
 
   # ---------------------------------------------------------------------------
-  # 2. Orden de categorías (Sí / No) con opción de invertir
+  # 2. Orden de categorías
   # ---------------------------------------------------------------------------
   niveles_cat <- c(etiqueta_si, etiqueta_no)
   if (invertir_respuestas) {
@@ -221,7 +215,7 @@ graficar_dico <- function(
   df_long$categoria <- factor(df_long$categoria, levels = niveles_cat)
 
   # ---------------------------------------------------------------------------
-  # 3. Preparar datos para el pie y etiquetas
+  # 3. Datos para pie y etiquetas
   # ---------------------------------------------------------------------------
   df_plot <- df_long |>
     dplyr::group_by(indicador_label) |>
@@ -230,12 +224,22 @@ graficar_dico <- function(
     ) |>
     dplyr::ungroup()
 
-  # Etiquetas de porcentaje
   df_plot$lab <- scales::percent(df_plot$prop, accuracy = 10^(-decimales))
   df_plot$lab[df_plot$prop < umbral_etiqueta] <- ""
 
+  usar_color_por_cat <- !is.null(color_texto_cat_si) &&
+    !is.null(color_texto_cat_no)
+
+  if (usar_color_por_cat) {
+    df_plot$color_texto <- dplyr::case_when(
+      df_plot$categoria == etiqueta_si ~ color_texto_cat_si,
+      df_plot$categoria == etiqueta_no ~ color_texto_cat_no,
+      TRUE                             ~ color_texto_segmentos
+    )
+  }
+
   # ---------------------------------------------------------------------------
-  # 4. Gráfico base: pies en facetas
+  # 4. Pie en facetas
   # ---------------------------------------------------------------------------
   p <- ggplot2::ggplot(
     df_plot,
@@ -248,7 +252,6 @@ graficar_dico <- function(
     ggplot2::geom_col(width = 1, color = "white") +
     ggplot2::coord_polar(theta = "y")
 
-  # Facetado
   if (is.null(ncol_facetas)) {
     n_ind <- length(unique(df_plot$indicador_label))
     ncol_facetas <- min(n_ind, 3L)
@@ -260,23 +263,44 @@ graficar_dico <- function(
       ncol = ncol_facetas
     )
 
-  # Etiquetas de porcentaje DENTRO del área (usando position_stack)
+  # Texto centrado en cada sector (OJO: group = categoria)
   if (mostrar_valores) {
-    p <- p +
-      ggplot2::geom_text(
-        data    = df_plot,
-        ggplot2::aes(
-          x     = 1,
-          y     = prop,
-          label = lab
-        ),
-        position    = ggplot2::position_stack(vjust = 0.5),
-        inherit.aes = TRUE,
-        color       = color_texto_segmentos,
-        size        = size_texto_segmentos,
-        fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-        show.legend = FALSE
-      )
+    if (usar_color_por_cat) {
+      p <- p +
+        ggplot2::geom_text(
+          data = df_plot,
+          ggplot2::aes(
+            x     = radio_texto,
+            y     = prop,
+            label = lab,
+            group = categoria,
+            color = color_texto
+          ),
+          position    = ggplot2::position_stack(vjust = 0.5),
+          inherit.aes = FALSE,
+          size        = size_texto_segmentos,
+          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+          show.legend = FALSE
+        ) +
+        ggplot2::scale_color_identity()
+    } else {
+      p <- p +
+        ggplot2::geom_text(
+          data    = df_plot,
+          ggplot2::aes(
+            x     = radio_texto,
+            y     = prop,
+            label = lab,
+            group = categoria
+          ),
+          position    = ggplot2::position_stack(vjust = 0.5),
+          inherit.aes = FALSE,
+          color       = color_texto_segmentos,
+          size        = size_texto_segmentos,
+          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+          show.legend = FALSE
+        )
+    }
   }
 
   # ---------------------------------------------------------------------------
@@ -284,54 +308,70 @@ graficar_dico <- function(
   # ---------------------------------------------------------------------------
   if (is.null(colores_respuesta)) {
     colores_respuesta <- c(
-      setNames("#004B8D", etiqueta_si),
-      setNames("#D9D9D9", etiqueta_no)
+      setNames(color_cat_si, etiqueta_si),
+      setNames(color_cat_no, etiqueta_no)
     )
   }
 
   p <- p +
-    ggplot2::scale_fill_manual(values = colores_respuesta) +
+    ggplot2::scale_fill_manual(values = colores_respuesta)
+
+  hay_titulo    <- !is.null(titulo)    && nzchar(titulo)
+  hay_subtitulo <- !is.null(subtitulo) && nzchar(subtitulo)
+  hay_nota_pie  <- !is.null(nota_pie)  && nzchar(nota_pie)
+
+  margin_top    <- if (hay_titulo || hay_subtitulo) 30 else 10
+  margin_bottom <- if (hay_nota_pie) 20 else 10
+
+  p <- p +
     ggplot2::theme_minimal(base_size = 9) +
     ggplot2::theme(
-      panel.grid        = ggplot2::element_blank(),
-      axis.title        = ggplot2::element_blank(),
-      axis.text         = ggplot2::element_blank(),
-      axis.ticks        = ggplot2::element_blank(),
-      strip.text        = ggplot2::element_text(
+      panel.background   = ggplot2::element_rect(
+        fill   = color_fondo,
+        colour = NA
+      ),
+      plot.background    = ggplot2::element_rect(
+        fill   = color_fondo,
+        colour = NA
+      ),
+      panel.grid         = ggplot2::element_blank(),
+      axis.title         = ggplot2::element_blank(),
+      axis.text          = ggplot2::element_blank(),
+      axis.ticks         = ggplot2::element_blank(),
+      strip.text         = ggplot2::element_text(
         color = color_titulos_pie,
         size  = size_titulos_pie,
         face  = if ("titulos_pie" %in% textos_negrita) "bold" else "plain"
       ),
-      legend.position   = if (mostrar_leyenda) posicion_leyenda else "none",
-      legend.title      = ggplot2::element_blank(),
-      legend.text       = ggplot2::element_text(
+      legend.position    = if (mostrar_leyenda) posicion_leyenda else "none",
+      legend.title       = ggplot2::element_blank(),
+      legend.text        = ggplot2::element_text(
         color = color_leyenda,
         size  = size_leyenda,
         face  = if ("leyenda" %in% textos_negrita) "bold" else "plain"
       ),
       plot.title.position = "plot",
-      plot.title        = ggplot2::element_text(
+      plot.title          = ggplot2::element_text(
         hjust  = 0.5,
         color  = color_titulo,
         size   = size_titulo,
         face   = if ("titulo" %in% textos_negrita) "bold" else "plain",
         margin = ggplot2::margin(b = 12)
       ),
-      plot.subtitle     = ggplot2::element_text(
+      plot.subtitle       = ggplot2::element_text(
         hjust  = 0.5,
         color  = color_subtitulo,
         size   = size_subtitulo,
         margin = ggplot2::margin(b = 8)
       ),
-      # Caption SIEMPRE a la derecha
-      plot.caption      = ggplot2::element_text(
+      plot.caption        = ggplot2::element_text(
         hjust  = 1,
         color  = color_nota_pie,
         size   = size_nota_pie,
         margin = ggplot2::margin(t = 10)
       ),
-      plot.margin       = ggplot2::margin(
-        t = 30, r = 15, b = 20, l = 15
+      plot.margin         = ggplot2::margin(
+        t = margin_top, r = 15, b = margin_bottom, l = 15
       )
     )
 
@@ -341,7 +381,6 @@ graficar_dico <- function(
     caption  = nota_pie
   )
 
-  # Invertir leyenda si se solicita (solo leyenda)
   if (invertir_leyenda && mostrar_leyenda) {
     p <- p + ggplot2::guides(
       fill = ggplot2::guide_legend(reverse = TRUE)
@@ -356,7 +395,8 @@ graficar_dico <- function(
   }
 
   if (is.null(path_salida) || !nzchar(path_salida)) {
-    stop("Debe especificar `path_salida` cuando `exportar` no es 'rplot'.", call. = FALSE)
+    stop("Debe especificar `path_salida` cuando `exportar` no es 'rplot'.",
+         call. = FALSE)
   }
 
   if (exportar == "png") {
