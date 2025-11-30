@@ -44,6 +44,7 @@ graficar_barras_apiladas(
   mostrar_leyenda = TRUE,
   invertir_leyenda = FALSE,
   invertir_barras = FALSE,
+  invertir_segmentos = FALSE,
   textos_negrita = NULL,
   exportar = c("rplot", "png", "ppt"),
   path_salida = NULL,
@@ -164,6 +165,9 @@ barra extra, relativo a la longitud de la barra más larga.}
 
 \item{invertir_barras}{Lógico; si \code{TRUE}, invierte el orden en que las
 categorías aparecen en el eje Y (orden vertical de las barras).}
+
+\item{invertir_segmentos}{Lógico; si \code{TRUE}, invierte el orden en que se
+apilan los segmentos dentro de cada barra (orden horizontal de los colores).}
 
 \item{textos_negrita}{Vector de caracteres que indica qué elementos deben
 mostrarse en negrita. Puede incluir cualquiera de:

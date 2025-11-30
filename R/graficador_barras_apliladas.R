@@ -91,6 +91,8 @@
 #'   ítems de la leyenda sin alterar el orden de las barras ni de los segmentos.
 #' @param invertir_barras Lógico; si \code{TRUE}, invierte el orden en que las
 #'   categorías aparecen en el eje Y (orden vertical de las barras).
+#' @param invertir_segmentos Lógico; si \code{TRUE}, invierte el orden en que se
+#'   apilan los segmentos dentro de cada barra (orden horizontal de los colores).
 #' @param textos_negrita Vector de caracteres que indica qué elementos deben
 #'   mostrarse en negrita. Puede incluir cualquiera de:
 #'   \code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"barra_extra"}.
@@ -149,6 +151,7 @@ graficar_barras_apiladas <- function(
     mostrar_leyenda     = TRUE,
     invertir_leyenda    = FALSE,
     invertir_barras     = FALSE,
+    invertir_segmentos  = FALSE,
     textos_negrita      = NULL,
     exportar            = c("rplot", "png", "ppt"),
     path_salida         = NULL,
@@ -157,7 +160,6 @@ graficar_barras_apiladas <- function(
     dpi                 = 300
 ) {
 
-  # Operador auxiliar interno
   `%||%` <- function(x, y) if (!is.null(x)) x else y
 
   escala_valor       <- match.arg(escala_valor)
@@ -166,24 +168,23 @@ graficar_barras_apiladas <- function(
   pos_titulo         <- match.arg(pos_titulo)
   pos_nota_pie       <- match.arg(pos_nota_pie)
 
-  hjust_from_pos <- function(x) {
-    switch(
-      x,
-      "izquierda" = 0,
-      "centro"    = 0.5,
-      "derecha"   = 1,
-      0.5
-    )
+  # -----------------------------------------------------------------
+  # Normalizar `decimales` a un escalar numérico seguro
+  # -----------------------------------------------------------------
+  decimales <- suppressWarnings(as.numeric(decimales))
+
+  if (length(decimales) < 1L || !is.finite(decimales[1])) {
+    decimales <- 1
+  } else {
+    decimales <- decimales[1]
   }
 
   hjust_titulo  <- hjust_from_pos(pos_titulo)
   hjust_caption <- hjust_from_pos(pos_nota_pie)
 
-  # Colores por defecto para presets (se respetan overrides del usuario)
   pulso_azul  <- "#004B8D"
   pulso_verde <- "#00843D"
 
-  # Normalizar textos_negrita
   textos_negrita <- textos_negrita %||% character(0)
 
   # ---------------------------------------------------------------------------
@@ -239,10 +240,18 @@ graficar_barras_apiladas <- function(
     df_long$.valor_plot <- df_long$.valor
   }
 
-  # Orden de grupos = orden en etiquetas_grupos
-  df_long$.grupo <- factor(df_long$.grupo, levels = unname(etiquetas_grupos))
+  # ---------------------------------------------------------------------------
+  # 1.1 Orden de grupos (segmentos), con opción de invertir
+  # ---------------------------------------------------------------------------
+  niveles_grupos <- unname(etiquetas_grupos)
+  if (invertir_segmentos) {
+    niveles_grupos <- rev(niveles_grupos)
+  }
+  df_long$.grupo <- factor(df_long$.grupo, levels = niveles_grupos)
 
-  # Orden de categorías = orden de aparición (y opción de invertir)
+  # ---------------------------------------------------------------------------
+  # 1.2 Orden de categorías (barras Y), con opción de invertir
+  # ---------------------------------------------------------------------------
   cat_vec  <- df_long[[var_categoria]]
   cat_lvls <- unique(cat_vec)
   if (invertir_barras) {
@@ -256,8 +265,7 @@ graficar_barras_apiladas <- function(
     dplyr::summarise(suma = sum(.valor_plot, na.rm = TRUE), .groups = "drop")
 
   max_suma <- max(df_sum$suma, na.rm = TRUE)
-  # margen derecho ajustable: p.ej. 10% más que la barra más larga
-  x_max <- max_suma * (1 + extra_derecha_rel)
+  x_max    <- max_suma * (1 + extra_derecha_rel)
 
   # ---------------------------------------------------------------------------
   # 2. Gráfico base (una barra apilada por categoría)
@@ -273,80 +281,50 @@ graficar_barras_apiladas <- function(
     ggplot2::geom_col(width = 0.7)
 
   # ---------------------------------------------------------------------------
-  # 3. Etiquetas dentro de las barras
-  #    - Comportamiento "clásico" con position_stack para todos los casos
-  #    - EXCEPTO cuando una barra tiene un único segmento visible y suma ≈ 100%,
-  #      donde centramos manualmente en la mitad de la barra.
+  # 3. Etiquetas dentro de las barras (cálculo manual con cumsum)
   # ---------------------------------------------------------------------------
   if (mostrar_valores) {
 
-    df_lab <- df_long
+    # Orden de apilado real (tal como lo usa ggplot2: del ÚLTIMO nivel al primero)
+    niveles_fill <- levels(df_long$.grupo)
+    niveles_stack <- rev(niveles_fill)
 
-    df_lab$lab <- scales::percent(df_lab$.valor_plot, accuracy = 10^(-decimales))
-    # Ocultar segmentos muy pequeños, 0 o NA
-    df_lab$lab[df_lab$.valor_plot < umbral_etiqueta | is.na(df_lab$.valor_plot)] <- ""
-
-    # Resumen por categoría para detectar barras "100% de una sola categoría"
-    sum_info <- df_long |>
+    df_lab <- df_long |>
       dplyr::group_by(!!rlang::sym(var_categoria)) |>
-      dplyr::summarise(
-        suma  = sum(.valor_plot, na.rm = TRUE),
-        n_vis = sum(!is.na(.valor_plot) & .valor_plot >= umbral_etiqueta),
-        .groups = "drop"
-      )
-
-    df_lab <- df_lab |>
-      dplyr::left_join(sum_info, by = var_categoria) |>
+      dplyr::arrange(
+        factor(.grupo, levels = niveles_stack),
+        .by_group = TRUE
+      ) |>
       dplyr::mutate(
-        .single_100 = (n_vis == 1 & abs(suma - 1) < 1e-6)
+        x_center = cumsum(.valor_plot) - .valor_plot / 2
+      ) |>
+      dplyr::ungroup()
+
+    df_lab$lab <- scales::percent(
+      df_lab$.valor_plot,
+      accuracy = 10^(-decimales)
+    )
+
+    df_lab$lab[
+      df_lab$.valor_plot < umbral_etiqueta | is.na(df_lab$.valor_plot)
+    ] <- ""
+
+    df_lab <- df_lab[df_lab$lab != "", , drop = FALSE]
+
+    p <- p +
+      ggplot2::geom_text(
+        data        = df_lab,
+        mapping     = ggplot2::aes_string(
+          x     = "x_center",
+          y     = var_categoria,
+          label = "lab"
+        ),
+        inherit.aes = FALSE,
+        color       = color_texto_barras,
+        size        = size_texto_barras,
+        fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+        show.legend = FALSE
       )
-
-    df_single <- df_lab[df_lab$.single_100 & df_lab$lab != "", , drop = FALSE]
-    df_multi  <- df_lab[!df_lab$.single_100 & df_lab$lab != "", , drop = FALSE]
-
-    # Caso general: como antes, usando position_stack(vjust = 0.5)
-    if (nrow(df_multi)) {
-      p <- p +
-        ggplot2::geom_text(
-          data        = df_multi,
-          mapping     = ggplot2::aes_string(
-            x     = ".valor_plot",
-            y     = var_categoria,
-            label = "lab",
-            fill  = ".grupo"
-          ),
-          inherit.aes = FALSE,
-          position    = ggplot2::position_stack(vjust = 0.5),
-          color       = color_texto_barras,
-          size        = size_texto_barras,
-          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-          show.legend = FALSE
-        )
-    }
-
-    # Caso especial: barras con un solo segmento visible y suma ≈ 100%
-    if (nrow(df_single)) {
-      df_single <- df_single |>
-        dplyr::mutate(
-          x_center = suma / 2  # centro de la barra completa
-        )
-
-      p <- p +
-        ggplot2::geom_text(
-          data        = df_single,
-          mapping     = ggplot2::aes_string(
-            x     = "x_center",
-            y     = var_categoria,
-            label = "lab",
-            fill  = ".grupo"
-          ),
-          inherit.aes = FALSE,
-          color       = color_texto_barras,
-          size        = size_texto_barras,
-          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-          show.legend = FALSE
-        )
-    }
   }
 
   # ---------------------------------------------------------------------------
@@ -355,7 +333,6 @@ graficar_barras_apiladas <- function(
   p <- p +
     ggplot2::scale_x_continuous(
       limits = c(0, x_max),
-      # margen pequeño a la izquierda para que la barra no "pegue" al eje
       expand = ggplot2::expansion(mult = c(0.05, 0))
     ) +
     ggplot2::coord_cartesian(clip = "off")
@@ -366,26 +343,18 @@ graficar_barras_apiladas <- function(
   df_wide_extra <- df |>
     dplyr::select(dplyr::all_of(c(var_categoria, var_n, cols_porcentaje))) |>
     dplyr::mutate(
-      # Por defecto, valor_extra = N (var_n)
       valor_extra = .data[[var_n]]
     )
 
-  # Copias internas que pueden ser sobreescritas por el preset
-  prefijo_extra_int <- prefijo_barra_extra
-  titulo_extra_int  <- titulo_barra_extra
-
-  # Color interno de barra extra (puede ser ajustado por preset)
-  color_barra_extra_int <- color_barra_extra
-
-  # Fontface de barra extra (por defecto puede venir de textos_negrita,
-  # pero los presets forzarán negrita)
-  fontface_barra_extra <- if ("barra_extra" %in% textos_negrita) "bold" else "plain"
+  prefijo_extra_int      <- prefijo_barra_extra
+  titulo_extra_int       <- titulo_barra_extra
+  color_barra_extra_int  <- color_barra_extra
+  fontface_barra_extra   <- if ("barra_extra" %in% textos_negrita) "bold" else "plain"
 
   if (barra_extra_preset != "ninguno") {
 
     if (barra_extra_preset == "totales") {
 
-      # Título y prefijo por defecto solo si el usuario no los definió
       if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
         titulo_extra_int <- "Total"
       }
@@ -393,23 +362,18 @@ graficar_barras_apiladas <- function(
         prefijo_extra_int <- "N="
       }
 
-      # Colores y negrita por defecto para TOTAL
       if (missing(color_barra_extra)) {
         color_barra_extra_int <- pulso_azul
       }
       fontface_barra_extra <- "bold"
 
-      # valor_extra ya es N (en df_wide_extra)
-
     } else {
 
-      # Preparamos matriz de proporciones 0–1
       base_mat <- df_wide_extra[, cols_porcentaje, drop = FALSE]
       if (escala_valor == "proporcion_100") {
         base_mat <- base_mat / 100
       }
 
-      # Ordenar de mayor a menor por fila
       ordenado <- t(apply(as.matrix(base_mat), 1, sort, decreasing = TRUE))
 
       if (barra_extra_preset == "top2box") {
@@ -442,14 +406,8 @@ graficar_barras_apiladas <- function(
         }
       }
 
-      # Si la escala original era 0–100, llevamos valor_extra a 0–100 (porcentaje)
-      if (escala_valor == "proporcion_100") {
-        df_wide_extra$valor_extra <- df_wide_extra$valor_extra * 100
-      } else {
-        df_wide_extra$valor_extra <- df_wide_extra$valor_extra * 100
-      }
+      df_wide_extra$valor_extra <- df_wide_extra$valor_extra * 100
 
-      # Colores y negrita por defecto para box (Top/Bottom)
       if (missing(color_barra_extra)) {
         color_barra_extra_int <- pulso_verde
       }
@@ -470,7 +428,6 @@ graficar_barras_apiladas <- function(
       ) |>
       dplyr::mutate(
         xpos = suma * (1 + extra_derecha_rel * 0.5),
-        # Formateo diferente según tipo de preset:
         lab_valor = dplyr::case_when(
           barra_extra_preset %in% c("top2box", "top3box", "bottom2box") ~
             sprintf("%.1f%%", valor_extra),
@@ -479,7 +436,6 @@ graficar_barras_apiladas <- function(
         lab_extra = paste0(prefijo_extra_int, lab_valor)
       )
 
-    # Texto principal de barra_extra
     p <- p +
       ggplot2::geom_text(
         data        = df_extra,
@@ -495,10 +451,8 @@ graficar_barras_apiladas <- function(
         fontface    = fontface_barra_extra
       )
 
-    # Encabezado encima de la columna de barra_extra (opcional)
     if (!is.null(titulo_extra_int) && nzchar(titulo_extra_int)) {
 
-      # Determinar categoría superior según inversión
       lvls <- levels(df_long[[var_categoria]])
       cat_superior <- if (invertir_barras) tail(lvls, 1) else head(lvls, 1)
 
@@ -514,8 +468,8 @@ graficar_barras_apiladas <- function(
             ),
             label       = titulo_extra_int,
             inherit.aes = FALSE,
-            hjust       = 0,      # alineado con la izquierda del valor
-            vjust       = -1.2,   # un poco por encima de la primera barra
+            hjust       = 0,
+            vjust       = -1.2,
             size        = size_barra_extra,
             color       = color_barra_extra_int,
             fontface    = fontface_barra_extra
@@ -532,7 +486,6 @@ graficar_barras_apiladas <- function(
       ggplot2::scale_fill_manual(values = colores_grupos)
   }
 
-  # Construir caption combinado
   caption_text <- NULL
   if (!is.null(nota_pie) && nzchar(nota_pie) &&
       !is.null(nota_pie_derecha) && nzchar(nota_pie_derecha)) {
@@ -588,7 +541,6 @@ graficar_barras_apiladas <- function(
       panel.background   = ggplot2::element_rect(fill = color_fondo, color = NA)
     )
 
-  # Invertir solo el orden de la leyenda si se solicita
   if (invertir_leyenda && mostrar_leyenda) {
     p <- p + ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE))
   }
@@ -643,7 +595,7 @@ graficar_barras_apiladas <- function(
     )
     print(doc, target = path_salida)
 
-    return(invisible(p))
+    invisible(p)
   }
 
   p

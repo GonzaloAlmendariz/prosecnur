@@ -111,7 +111,8 @@ se usan cuando la variable no tiene entrada propia en \code{dico_labels_por_var}
 \item{colores_apiladas_por_listname}{Lista nombrada por \code{list_name} donde
 cada elemento es un vector de colores HEX con nombre para los segmentos de
 las barras apiladas. Los nombres de estos colores deben coincidir con los
-labels de las categorías (\code{Opciones}) que se graficarán.}
+labels de las categorías (\code{Opciones}) que se graficarán, o una lista
+con elementos \code{colores} y \code{preset_barra_extra}.}
 
 \item{default_so}{Tipo de gráfico por defecto para variables \code{select_one}
 cuando no se encuentren en ninguna lista de overrides. Puede ser
@@ -133,7 +134,9 @@ cuando no se encuentren en ninguna lista de overrides. Igual que
 directamente a \code{graficar_barras_agrupadas()}.}
 
 \item{estilos_barras_apiladas}{Lista de parámetros de estilo que se pasan
-directamente a \code{graficar_barras_apiladas()}.}
+directamente a \code{graficar_barras_apiladas()}. Aquí puedes incluir,
+si quieres, argumentos como \code{invertir_barras}, \code{invertir_leyenda}
+o \code{invertir_segmentos}, que llegarán solo al graficador.}
 
 \item{estilos_dico}{Lista de parámetros de estilo que se pasan directamente a
 \code{graficar_dico()}.}
@@ -153,17 +156,7 @@ fecha (\code{type = "dt"}) de la portada y, si existe, de la contraportada.}
 
 \item{mostrar_resumen_n}{Lógico; si \code{TRUE}, en cada diapositiva de
 gráficos se escribe en el bloque de texto inferior derecho un resumen del
-tipo \code{"N = X | Ratio de respuestas: Y\%"}.
-
-En plantillas que tengan un layout llamado \code{"Graficos"} con un
-marcador de imagen (\code{type = "pic"}) y dos placeholders de texto
-\code{type = "body"} (índices 2 y 3), los gráficos se insertan en dicho
-marcador, el texto de \code{fuente} va al bloque izquierdo y el resumen de N
-va al bloque derecho. En caso contrario, se usa una diapositiva en blanco a
-pantalla completa y no se insertan esos textos.
-
-Si la plantilla incluye un layout \code{"Contraportada"}, se agrega una
-diapositiva final usando ese layout.}
+tipo \code{"N = X | Ratio de respuestas: Y\%"}.}
 }
 \value{
 Una lista con dos elementos:

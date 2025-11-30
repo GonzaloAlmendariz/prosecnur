@@ -325,10 +325,10 @@ reporte_ppt_cruces <- function(
 
   .titulo_var_safe <- function(var_name) {
     label_variable(
-      var    = var_name,
-      dic_vars = dic_vars,
+      var            = var_name,
+      dic_vars       = dic_vars,
       labels_override = labels_override,
-      data   = data
+      data           = data
     )
   }
 
@@ -345,10 +345,10 @@ reporte_ppt_cruces <- function(
   .cruce_counts <- function(var_name, estrato_name) {
 
     tp <- tipo_pregunta(
-      var   = var_name,
-      survey = survey,
+      var           = var_name,
+      survey        = survey,
       sm_vars_force = sm_vars_force,
-      data   = data
+      data          = data
     )
 
     cats_var <- get_categorias(
@@ -423,8 +423,8 @@ reporte_ppt_cruces <- function(
     keep_est <- which(N_estrato > 0)
     if (!length(keep_est)) return(NULL)
 
-    n_mat      <- n_mat[, keep_est, drop = FALSE]
-    N_estrato  <- N_estrato[keep_est]
+    n_mat       <- n_mat[, keep_est, drop = FALSE]
+    N_estrato   <- N_estrato[keep_est]
     estr_labels <- estr_labels[keep_est]
     estr_codes  <- estr_codes[keep_est]
 
@@ -634,10 +634,10 @@ reporte_ppt_cruces <- function(
     for (v in vars_sec) {
 
       tipo_v <- tipo_pregunta(
-        var   = v,
-        survey = survey,
+        var           = v,
+        survey        = survey,
         sm_vars_force = sm_vars_force,
-        data   = data
+        data          = data
       )
       if (tipo_v == "so_or_open") tipo_v <- "so"
 
@@ -796,6 +796,37 @@ reporte_ppt_cruces <- function(
             args_extra <- list()
             if (!is.null(colores_grupos)) args_extra$colores_grupos <- colores_grupos
 
+            # --------------------------------------------------
+            # NUEVO: inversión por list_name desde estilos_barras_apiladas
+            # --------------------------------------------------
+            ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
+            ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
+
+            ln_inv_ley <- estilos_barras_apiladas$listnames_invertir_leyenda
+            ln_inv_ley <- if (is.null(ln_inv_ley)) character(0) else ln_inv_ley
+
+            vars_inv_seg <- estilos_barras_apiladas$vars_invertir_segmentos
+            vars_inv_seg <- if (is.null(vars_inv_seg)) character(0) else vars_inv_seg
+
+            vars_inv_ley <- estilos_barras_apiladas$vars_invertir_leyenda
+            vars_inv_ley <- if (is.null(vars_inv_ley)) character(0) else vars_inv_ley
+
+            invertir_segmentos_var <- (
+              v %in% vars_inv_seg ||
+                (!is.na(list_name_v) && list_name_v %in% ln_inv_seg)
+            )
+
+            invertir_leyenda_var <- (
+              v %in% vars_inv_ley ||
+                (!is.na(list_name_v) && list_name_v %in% ln_inv_ley)
+            )
+
+            estilos_apiladas_clean <- estilos_barras_apiladas
+            estilos_apiladas_clean$listnames_invertir_segmentos <- NULL
+            estilos_apiladas_clean$listnames_invertir_leyenda   <- NULL
+            estilos_apiladas_clean$vars_invertir_segmentos      <- NULL
+            estilos_apiladas_clean$vars_invertir_leyenda        <- NULL
+
             args_apiladas <- c(
               list(
                 data                = tab_apil$data,
@@ -808,6 +839,7 @@ reporte_ppt_cruces <- function(
                 titulo              = titulo_plot,
                 subtitulo           = NULL,
                 nota_pie            = nota_pie_plot,
+
                 mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
                 barra_extra_preset  = preset_extra,
                 prefijo_barra_extra = if (!is.null(preset_extra)) {
@@ -817,15 +849,23 @@ reporte_ppt_cruces <- function(
                 } else {
                   ""
                 },
-                titulo_barra_extra  = if (!is.null(preset_extra)) NULL else if (barra_extra == "total_n") "Total" else NULL,
-                exportar            = "rplot"
+                titulo_barra_extra  = if (!is.null(preset_extra)) {
+                  NULL
+                } else if (barra_extra == "total_n") {
+                  "Total"
+                } else {
+                  NULL
+                },
+
+                exportar           = "rplot",
+                invertir_segmentos = invertir_segmentos_var,
+                invertir_leyenda   = invertir_leyenda_var
               ),
               args_extra,
-              estilos_barras_apiladas
+              estilos_apiladas_clean
             )
 
             p <- do.call(graficar_barras_apiladas, args_apiladas)
-
           }
         }
 

@@ -168,6 +168,23 @@ graficar_barras_agrupadas <- function(
   pos_titulo   <- match.arg(pos_titulo)
   pos_nota_pie <- match.arg(pos_nota_pie)
 
+  escala_valor       <- match.arg(escala_valor)
+  exportar           <- match.arg(exportar)
+  pos_titulo         <- match.arg(pos_titulo)
+  pos_nota_pie       <- match.arg(pos_nota_pie)
+
+
+  # -----------------------------------------------------------------
+  # Normalizar `decimales` a un escalar numérico seguro
+  # -----------------------------------------------------------------
+  decimales <- suppressWarnings(as.numeric(decimales))
+
+  if (length(decimales) < 1L || !is.finite(decimales[1])) {
+    decimales <- 1
+  } else {
+    decimales <- decimales[1]
+  }
+
   hjust_from_pos <- function(x) {
     switch(
       x,

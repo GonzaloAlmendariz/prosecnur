@@ -117,7 +117,8 @@
 #' @param colores_apiladas_por_listname Lista nombrada por \code{list_name} donde
 #'   cada elemento es un vector de colores HEX con nombre para los segmentos de
 #'   las barras apiladas. Los nombres de estos colores deben coincidir con los
-#'   labels de las categorías (\code{Opciones}) que se graficarán.
+#'   labels de las categorías (\code{Opciones}) que se graficarán, o una lista
+#'   con elementos \code{colores} y \code{preset_barra_extra}.
 #'
 #' @param default_so Tipo de gráfico por defecto para variables \code{select_one}
 #'   cuando no se encuentren en ninguna lista de overrides. Puede ser
@@ -137,7 +138,9 @@
 #' @param estilos_barras_agrupadas Lista de parámetros de estilo que se pasan
 #'   directamente a \code{graficar_barras_agrupadas()}.
 #' @param estilos_barras_apiladas Lista de parámetros de estilo que se pasan
-#'   directamente a \code{graficar_barras_apiladas()}.
+#'   directamente a \code{graficar_barras_apiladas()}. Aquí puedes incluir,
+#'   si quieres, argumentos como \code{invertir_barras}, \code{invertir_leyenda}
+#'   o \code{invertir_segmentos}, que llegarán solo al graficador.
 #' @param estilos_dico Lista de parámetros de estilo que se pasan directamente a
 #'   \code{graficar_dico()}.
 #'
@@ -154,16 +157,6 @@
 #' @param mostrar_resumen_n Lógico; si \code{TRUE}, en cada diapositiva de
 #'   gráficos se escribe en el bloque de texto inferior derecho un resumen del
 #'   tipo `"N = X | Ratio de respuestas: Y%"`.
-#'
-#' En plantillas que tengan un layout llamado \code{"Graficos"} con un
-#' marcador de imagen (\code{type = "pic"}) y dos placeholders de texto
-#' \code{type = "body"} (índices 2 y 3), los gráficos se insertan en dicho
-#' marcador, el texto de \code{fuente} va al bloque izquierdo y el resumen de N
-#' va al bloque derecho. En caso contrario, se usa una diapositiva en blanco a
-#' pantalla completa y no se insertan esos textos.
-#'
-#' Si la plantilla incluye un layout \code{"Contraportada"}, se agrega una
-#' diapositiva final usando ese layout.
 #'
 #' @return Una lista con dos elementos:
 #' \describe{
@@ -586,6 +579,39 @@ reporte_ppt <- function(
             }
           }
 
+          # ------------------------------------------------------
+          # NUEVO: decidir inversión por variable / list_name
+          # usando SOLO la info de estilos_barras_apiladas
+          # ------------------------------------------------------
+          ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
+          ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
+
+          ln_inv_ley <- estilos_barras_apiladas$listnames_invertir_leyenda
+          ln_inv_ley <- if (is.null(ln_inv_ley)) character(0) else ln_inv_ley
+
+          vars_inv_seg <- estilos_barras_apiladas$vars_invertir_segmentos
+          vars_inv_seg <- if (is.null(vars_inv_seg)) character(0) else vars_inv_seg
+
+          vars_inv_ley <- estilos_barras_apiladas$vars_invertir_leyenda
+          vars_inv_ley <- if (is.null(vars_inv_ley)) character(0) else vars_inv_ley
+
+          invertir_segmentos_var <- (
+            v %in% vars_inv_seg ||
+              (!is.na(list_name_v) && list_name_v %in% ln_inv_seg)
+          )
+
+          invertir_leyenda_var <- (
+            v %in% vars_inv_ley ||
+              (!is.na(list_name_v) && list_name_v %in% ln_inv_ley)
+          )
+
+          # Limpiar claves "meta" que el graficador NO conoce
+          estilos_apiladas_clean <- estilos_barras_apiladas
+          estilos_apiladas_clean$listnames_invertir_segmentos <- NULL
+          estilos_apiladas_clean$listnames_invertir_leyenda   <- NULL
+          estilos_apiladas_clean$vars_invertir_segmentos      <- NULL
+          estilos_apiladas_clean$vars_invertir_leyenda        <- NULL
+
           args_apiladas <- c(
             list(
               data                = tab_apil$data,
@@ -599,13 +625,19 @@ reporte_ppt <- function(
               titulo              = titulo_plot,
               subtitulo           = NULL,
               nota_pie            = nota_pie_plot,
+
               mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
               barra_extra_preset  = preset_extra,
               prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
               titulo_barra_extra  = if (!is.null(preset_extra)) NULL else if (barra_extra == "total_n") "Total" else NULL,
+
+              # flags que SÍ van al graficador
+              invertir_segmentos  = invertir_segmentos_var,
+              invertir_leyenda    = invertir_leyenda_var,
+
               exportar            = "rplot"
             ),
-            estilos_barras_apiladas
+            estilos_apiladas_clean
           )
 
           p <- do.call(graficar_barras_apiladas, args_apiladas)
