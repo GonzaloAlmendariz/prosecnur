@@ -153,6 +153,7 @@ graficar_barras_agrupadas <- function(
     mostrar_leyenda           = TRUE,
     invertir_leyenda          = FALSE,
     invertir_barras           = FALSE,
+    invertir_series           = FALSE,
     textos_negrita            = NULL,
     exportar                  = c("rplot", "png", "ppt"),
     path_salida               = NULL,
@@ -260,8 +261,12 @@ graficar_barras_agrupadas <- function(
     stop("No hay valores positivos para graficar.", call. = FALSE)
   }
 
-  # Orden de series según etiquetas_series
-  df_long$.serie <- factor(df_long$.serie, levels = unname(etiquetas_series))
+  # Orden de series según etiquetas_series, con opción de invertir barras dentro del grupo
+  niveles_series <- unname(etiquetas_series)
+  if (invertir_series) {
+    niveles_series <- rev(niveles_series)
+  }
+  df_long$.serie <- factor(df_long$.serie, levels = niveles_series)
 
   # Orden de categorías según aparición (con opción de invertir)
   cat_vec  <- df_long[[var_categoria]]
@@ -275,9 +280,9 @@ graficar_barras_agrupadas <- function(
   n_series <- length(unique(df_long$.serie))
   size_texto_barras_eff <- dplyr::case_when(
     n_series <= 2 ~ size_texto_barras * 1.00,
-    n_series == 3 ~ size_texto_barras * 0.90,
-    n_series == 4 ~ size_texto_barras * 0.80,
-    TRUE          ~ size_texto_barras * 0.75
+    n_series == 3 ~ size_texto_barras * 0.85,
+    n_series == 4 ~ size_texto_barras * 0.70,
+    TRUE          ~ size_texto_barras * 0.55
   )
 
   # Máximo valor para definir escala y espacio extra

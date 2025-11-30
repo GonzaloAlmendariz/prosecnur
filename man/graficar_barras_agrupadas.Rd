@@ -45,6 +45,7 @@ graficar_barras_agrupadas(
   mostrar_leyenda = TRUE,
   invertir_leyenda = FALSE,
   invertir_barras = FALSE,
+  invertir_series = FALSE,
   textos_negrita = NULL,
   exportar = c("rplot", "png", "ppt"),
   path_salida = NULL,
