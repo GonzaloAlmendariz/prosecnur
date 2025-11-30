@@ -423,10 +423,11 @@ reporte_ppt <- function(
   # ---------------------------------------------------------------------------
   # 4. Recorrido por secciones y variables
   # ---------------------------------------------------------------------------
-  plots_list      <- list()
-  titulos_list    <- list()
-  resumenN_list   <- list()
-  log_list        <- list()
+  plots_list       <- list()
+  titulos_list     <- list()
+  resumenN_list    <- list()
+  log_list         <- list()
+  seccion_por_plot <- character(0)
 
   total_casos <- nrow(data)
 
@@ -513,8 +514,6 @@ reporte_ppt <- function(
       titulo_plot  <- NULL  # el gráfico va sin título
       titulo_slide <- if (incluir_titulo_var) var_label else NULL
 
-      # No usamos caption interno del plot; la fuente se escribirá en el
-      # placeholder de texto de la diapositiva.
       nota_pie_plot <- NULL
 
       if (mensajes_progreso) {
@@ -567,12 +566,6 @@ reporte_ppt <- function(
           tab_apil <- .build_tab_barras_apiladas(tab_freq, var_label)
           if (is.null(tab_apil)) next
 
-          # --------------------------------------------------------------
-          # NUEVO: obtener colores y preset_barra_extra por list_name
-          #   - Soporta dos formatos:
-          #     * viejo: vector nombrado de colores
-          #     * nuevo: list(colores = c(...), preset_barra_extra = "...")
-          # --------------------------------------------------------------
           colores_grupos <- NULL
           preset_extra   <- NULL
 
@@ -582,11 +575,6 @@ reporte_ppt <- function(
             obj_col <- colores_apiladas_por_listname[[list_name_v]]
 
             if (is.list(obj_col)) {
-              # Forma nueva:
-              # colores_apiladas_por_listname[[ln]] <- list(
-              #   colores            = c("Nunca" = "#...", ...),
-              #   preset_barra_extra = "top2box" / "totales" / etc.
-              # )
               if (!is.null(obj_col$colores)) {
                 colores_grupos <- obj_col$colores
               }
@@ -594,16 +582,10 @@ reporte_ppt <- function(
                 preset_extra <- obj_col$preset_barra_extra
               }
             } else {
-              # Forma antigua: solo vector de colores
               colores_grupos <- obj_col
             }
           }
 
-          # --------------------------------------------------------------
-          # Construir argumentos para graficar_barras_apiladas()
-          #   - Si hay preset_extra -> siempre hay barra_extra
-          #   - Si no hay preset_extra -> usa lógica global de barra_extra
-          # --------------------------------------------------------------
           args_apiladas <- c(
             list(
               data                = tab_apil$data,
@@ -741,13 +723,16 @@ reporte_ppt <- function(
         tipo_grafico = tipo_grafico_final
       )
 
-      plots_list[[length(plots_list) + 1]]       <- p
-      titulos_list[[length(titulos_list) + 1]]   <- titulo_slide
-      resumenN_list[[length(resumenN_list) + 1]] <- resumen_n_txt
+      idx <- length(plots_list) + 1L
+      plots_list[[idx]]       <- p
+      titulos_list[[idx]]     <- titulo_slide
+      resumenN_list[[idx]]    <- resumen_n_txt
+      seccion_por_plot[idx]   <- sec
     }
   }
 
   log_decisiones <- dplyr::bind_rows(log_list)
+
   # ---------------------------------------------------------------------------
   # 6. PPT
   # ---------------------------------------------------------------------------
@@ -798,11 +783,12 @@ reporte_ppt <- function(
       error = function(e) NULL
     )
 
-    tiene_layout_graficos      <- FALSE
-    layout_graficos            <- "Blank"
-    usar_pic_placeholder       <- FALSE
-    tiene_layout_title_slide   <- FALSE
-    tiene_layout_contraportada <- FALSE
+    tiene_layout_graficos        <- FALSE
+    layout_graficos              <- "Blank"
+    usar_pic_placeholder         <- FALSE
+    tiene_layout_title_slide     <- FALSE
+    tiene_layout_contraportada   <- FALSE
+    tiene_layout_section_header  <- FALSE
 
     if (!is.null(layout_info)) {
 
@@ -822,6 +808,9 @@ reporte_ppt <- function(
       }
       if ("Contraportada" %in% layout_info$layout) {
         tiene_layout_contraportada <- TRUE
+      }
+      if ("Section Header" %in% layout_info$layout) {
+        tiene_layout_section_header <- TRUE
       }
     }
 
@@ -908,7 +897,7 @@ reporte_ppt <- function(
       }
     }
 
-    # 6.4. Diapositivas de gráficos
+    # 6.4. Diapositivas de gráficos (con Section Header si existe)
     if (length(plots_list)) {
       for (i in seq_along(plots_list)) {
 
@@ -916,6 +905,41 @@ reporte_ppt <- function(
         st       <- titulos_list[[i]]   %||% NULL
         resumenN <- resumenN_list[[i]]  %||% NULL
 
+        # Diapositiva de sección si cambia la sección (y hay layout Section Header)
+        if (tiene_layout_section_header &&
+            length(seccion_por_plot) >= i) {
+
+          sec_i <- seccion_por_plot[i]
+
+          if (!is.null(sec_i) && nzchar(sec_i) &&
+              (i == 1L || !identical(sec_i, seccion_por_plot[i - 1L]))) {
+
+            doc <- officer::add_slide(
+              doc,
+              layout = "Section Header",
+              master = "Office Theme"
+            )
+
+            loc_sec_title <- tryCatch(
+              officer::ph_location_type(type = "title"),
+              error = function(e) {
+                tryCatch(
+                  officer::ph_location_type(type = "ctrTitle"),
+                  error = function(e2) NULL
+                )
+              }
+            )
+
+            if (!is.null(loc_sec_title)) {
+              doc <- tryCatch(
+                officer::ph_with(doc, sec_i, location = loc_sec_title),
+                error = function(e) doc
+              )
+            }
+          }
+        }
+
+        # Diapositiva de gráfico
         doc <- officer::add_slide(
           doc,
           layout = layout_graficos,

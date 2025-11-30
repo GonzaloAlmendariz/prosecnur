@@ -273,31 +273,80 @@ graficar_barras_apiladas <- function(
     ggplot2::geom_col(width = 0.7)
 
   # ---------------------------------------------------------------------------
-  # 3. Etiquetas dentro de las barras (centradas en cada bloque)
+  # 3. Etiquetas dentro de las barras
+  #    - Comportamiento "clásico" con position_stack para todos los casos
+  #    - EXCEPTO cuando una barra tiene un único segmento visible y suma ≈ 100%,
+  #      donde centramos manualmente en la mitad de la barra.
   # ---------------------------------------------------------------------------
   if (mostrar_valores) {
+
     df_lab <- df_long
 
     df_lab$lab <- scales::percent(df_lab$.valor_plot, accuracy = 10^(-decimales))
-    # Ocultar segmentos muy pequeños o 0
-    df_lab$lab[df_lab$.valor_plot < umbral_etiqueta] <- ""
+    # Ocultar segmentos muy pequeños, 0 o NA
+    df_lab$lab[df_lab$.valor_plot < umbral_etiqueta | is.na(df_lab$.valor_plot)] <- ""
 
-    p <- p +
-      ggplot2::geom_text(
-        data        = df_lab,
-        mapping     = ggplot2::aes_string(
-          x     = ".valor_plot",
-          y     = var_categoria,
-          label = "lab",
-          fill  = ".grupo"
-        ),
-        inherit.aes = FALSE,
-        position    = ggplot2::position_stack(vjust = 0.5),
-        color       = color_texto_barras,
-        size        = size_texto_barras,
-        fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-        show.legend = FALSE
+    # Resumen por categoría para detectar barras "100% de una sola categoría"
+    sum_info <- df_long |>
+      dplyr::group_by(!!rlang::sym(var_categoria)) |>
+      dplyr::summarise(
+        suma  = sum(.valor_plot, na.rm = TRUE),
+        n_vis = sum(!is.na(.valor_plot) & .valor_plot >= umbral_etiqueta),
+        .groups = "drop"
       )
+
+    df_lab <- df_lab |>
+      dplyr::left_join(sum_info, by = var_categoria) |>
+      dplyr::mutate(
+        .single_100 = (n_vis == 1 & abs(suma - 1) < 1e-6)
+      )
+
+    df_single <- df_lab[df_lab$.single_100 & df_lab$lab != "", , drop = FALSE]
+    df_multi  <- df_lab[!df_lab$.single_100 & df_lab$lab != "", , drop = FALSE]
+
+    # Caso general: como antes, usando position_stack(vjust = 0.5)
+    if (nrow(df_multi)) {
+      p <- p +
+        ggplot2::geom_text(
+          data        = df_multi,
+          mapping     = ggplot2::aes_string(
+            x     = ".valor_plot",
+            y     = var_categoria,
+            label = "lab",
+            fill  = ".grupo"
+          ),
+          inherit.aes = FALSE,
+          position    = ggplot2::position_stack(vjust = 0.5),
+          color       = color_texto_barras,
+          size        = size_texto_barras,
+          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+          show.legend = FALSE
+        )
+    }
+
+    # Caso especial: barras con un solo segmento visible y suma ≈ 100%
+    if (nrow(df_single)) {
+      df_single <- df_single |>
+        dplyr::mutate(
+          x_center = suma / 2  # centro de la barra completa
+        )
+
+      p <- p +
+        ggplot2::geom_text(
+          data        = df_single,
+          mapping     = ggplot2::aes_string(
+            x     = "x_center",
+            y     = var_categoria,
+            label = "lab",
+            fill  = ".grupo"
+          ),
+          inherit.aes = FALSE,
+          color       = color_texto_barras,
+          size        = size_texto_barras,
+          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+          show.legend = FALSE
+        )
+    }
   }
 
   # ---------------------------------------------------------------------------

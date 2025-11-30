@@ -423,8 +423,8 @@ reporte_ppt_cruces <- function(
     keep_est <- which(N_estrato > 0)
     if (!length(keep_est)) return(NULL)
 
-    n_mat     <- n_mat[, keep_est, drop = FALSE]
-    N_estrato <- N_estrato[keep_est]
+    n_mat      <- n_mat[, keep_est, drop = FALSE]
+    N_estrato  <- N_estrato[keep_est]
     estr_labels <- estr_labels[keep_est]
     estr_codes  <- estr_codes[keep_est]
 
@@ -432,7 +432,7 @@ reporte_ppt_cruces <- function(
     keep_cat <- which(suma_cat > 0)
     if (!length(keep_cat)) return(NULL)
 
-    n_mat     <- n_mat[keep_cat, , drop = FALSE]
+    n_mat      <- n_mat[keep_cat, , drop = FALSE]
     categorias <- categorias[keep_cat]
     codes_row  <- codes_row[keep_cat]
 
@@ -515,32 +515,51 @@ reporte_ppt_cruces <- function(
     n_est <- length(crc$estr_labels)
     if (n_cat == 0L || n_est == 0L) return(NULL)
 
+    # matriz de porcentajes categoría (filas) x estrato (columnas)
     pct_mat <- matrix(NA_real_, nrow = n_cat, ncol = n_est)
     for (j in seq_len(n_est)) {
       Nj <- crc$N_estrato[j]
       if (Nj > 0) pct_mat[, j] <- crc$n_mat[, j] / Nj
     }
 
-    # NUEVO: eliminar filas cuya suma de porcentajes es 0 (todas 0 / NA)
+    # 1) Eliminar filas cuya suma es 0 (todas 0/NA)
     keep_rows <- rowSums(pct_mat, na.rm = TRUE) > 0
+
+    # 1-bis) Eliminar filas cuyo label de categoría es NA (evita fila "NA")
+    keep_rows <- keep_rows & !is.na(crc$categorias)
+
     if (!any(keep_rows)) return(NULL)
 
-    pct_mat        <- pct_mat[keep_rows, , drop = FALSE]
+    pct_mat         <- pct_mat[keep_rows, , drop = FALSE]
     categorias_keep <- crc$categorias[keep_rows]
-    n_cat          <- length(categorias_keep)
+    n_cat           <- length(categorias_keep)
 
+    # 2) Eliminar columnas (estratos) cuya suma es 0 (todas 0/NA)
+    keep_cols <- colSums(pct_mat, na.rm = TRUE) > 0
+    if (!any(keep_cols)) return(NULL)
+
+    pct_mat          <- pct_mat[, keep_cols, drop = FALSE]
+    estr_labels_keep <- crc$estr_labels[keep_cols]
+    N_estrato_keep   <- crc$N_estrato[keep_cols]
+    n_est            <- length(estr_labels_keep)
+
+    # 3) Construir data.frame para graficar
     df <- tibble::tibble(
       categoria = categorias_keep,
-      n_base    = sum(crc$N_estrato, na.rm = TRUE)
+      n_base    = sum(N_estrato_keep, na.rm = TRUE)
     )
 
     cols_pct <- paste0("pct_", seq_len(n_est))
     for (j in seq_len(n_est)) {
-      df[[cols_pct[j]]] <- as.numeric(pct_mat[, j])
+      v <- as.numeric(pct_mat[, j])
+      # 4) 0% → NA para que no se dibuje barra ni se deje hueco dentro del grupo
+      v[!is.na(v) & abs(v) < 1e-12] <- NA_real_
+      df[[cols_pct[j]]] <- v
     }
 
+    # series = estratos
     etiquetas_series <- stats::setNames(
-      as.character(crc$estr_labels),
+      as.character(estr_labels_keep),
       cols_pct
     )
 
@@ -551,8 +570,8 @@ reporte_ppt_cruces <- function(
       info_dim         = list(
         n_cat      = n_cat,
         n_estratos = n_est,
-        N_estrato  = crc$N_estrato,
-        N_total    = sum(crc$N_estrato, na.rm = TRUE)
+        N_estrato  = N_estrato_keep,
+        N_total    = sum(N_estrato_keep, na.rm = TRUE)
       )
     )
   }
@@ -595,10 +614,11 @@ reporte_ppt_cruces <- function(
   # ---------------------------------------------------------------------------
   # 4. Loop por secciones y variables
   # ---------------------------------------------------------------------------
-  plots_list    <- list()
-  titulos_list  <- list()
-  resumenN_list <- list()
-  log_list      <- list()
+  plots_list       <- list()
+  titulos_list     <- list()
+  resumenN_list    <- list()
+  log_list         <- list()
+  seccion_por_plot <- character(0)
 
   total_casos <- nrow(data)
   idx_plot    <- 0L
@@ -681,9 +701,9 @@ reporte_ppt_cruces <- function(
         resumen_n_txt <- NULL
       }
 
-      var_label    <- .titulo_var_safe(v)
-      titulo_plot  <- NULL
-      titulo_slide <- if (incluir_titulo_var) var_label else NULL
+      var_label     <- .titulo_var_safe(v)
+      titulo_plot   <- NULL
+      titulo_slide  <- if (incluir_titulo_var) var_label else NULL
       nota_pie_plot <- NULL
 
       if (mensajes_progreso) {
@@ -790,7 +810,13 @@ reporte_ppt_cruces <- function(
                 nota_pie            = nota_pie_plot,
                 mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
                 barra_extra_preset  = preset_extra,
-                prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "",
+                prefijo_barra_extra = if (!is.null(preset_extra)) {
+                  ""
+                } else if (barra_extra == "total_n") {
+                  "N = "
+                } else {
+                  ""
+                },
                 titulo_barra_extra  = if (!is.null(preset_extra)) NULL else if (barra_extra == "total_n") "Total" else NULL,
                 exportar            = "rplot"
               ),
@@ -944,9 +970,10 @@ reporte_ppt_cruces <- function(
         )
 
         idx_plot <- idx_plot + 1L
-        plots_list[[idx_plot]]      <- p
-        titulos_list[[idx_plot]]    <- titulo_slide
-        resumenN_list[[idx_plot]]   <- resumen_n_txt
+        plots_list[[idx_plot]]       <- p
+        titulos_list[[idx_plot]]     <- titulo_slide
+        resumenN_list[[idx_plot]]    <- resumen_n_txt
+        seccion_por_plot[idx_plot]   <- sec
       } else {
         log_list[[length(log_list) + 1]] <- tibble::tibble(
           seccion      = sec,
@@ -1011,11 +1038,12 @@ reporte_ppt_cruces <- function(
       error = function(e) NULL
     )
 
-    tiene_layout_graficos      <- FALSE
-    layout_graficos            <- "Blank"
-    usar_pic_placeholder       <- FALSE
-    tiene_layout_title_slide   <- FALSE
-    tiene_layout_contraportada <- FALSE
+    tiene_layout_graficos        <- FALSE
+    layout_graficos              <- "Blank"
+    usar_pic_placeholder         <- FALSE
+    tiene_layout_title_slide     <- FALSE
+    tiene_layout_contraportada   <- FALSE
+    tiene_layout_section_header  <- FALSE
 
     if (!is.null(layout_info)) {
 
@@ -1034,6 +1062,9 @@ reporte_ppt_cruces <- function(
       }
       if ("Contraportada" %in% layout_info$layout) {
         tiene_layout_contraportada <- TRUE
+      }
+      if ("Section Header" %in% layout_info$layout) {
+        tiene_layout_section_header <- TRUE
       }
     }
 
@@ -1122,6 +1153,42 @@ reporte_ppt_cruces <- function(
         p_i      <- plots_list[[i]]
         st       <- titulos_list[[i]]   %||% NULL
         resumenN <- resumenN_list[[i]]  %||% NULL
+
+        # ----------------------------------------------------------
+        # Diapositiva de sección (Section Header) si cambia la sección
+        # ----------------------------------------------------------
+        if (tiene_layout_section_header &&
+            length(seccion_por_plot) >= i) {
+
+          sec_i <- seccion_por_plot[i]
+
+          if (!is.null(sec_i) && nzchar(sec_i) &&
+              (i == 1L || !identical(sec_i, seccion_por_plot[i - 1L]))) {
+
+            doc <- officer::add_slide(
+              doc,
+              layout = "Section Header",
+              master = "Office Theme"
+            )
+
+            loc_sec_title <- tryCatch(
+              officer::ph_location_type(type = "title"),
+              error = function(e) {
+                tryCatch(
+                  officer::ph_location_type(type = "ctrTitle"),
+                  error = function(e2) NULL
+                )
+              }
+            )
+
+            if (!is.null(loc_sec_title)) {
+              doc <- tryCatch(
+                officer::ph_with(doc, sec_i, location = loc_sec_title),
+                error = function(e) doc
+              )
+            }
+          }
+        }
 
         doc <- officer::add_slide(
           doc,

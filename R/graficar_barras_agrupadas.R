@@ -235,6 +235,14 @@ graficar_barras_agrupadas <- function(
     df_long$.valor_plot <- df_long$.valor
   }
 
+  # *** NUEVO: eliminar combinaciones sin valor para evitar "huecos" en el dodge
+  df_long <- df_long |>
+    dplyr::filter(!is.na(.valor_plot) & .valor_plot > 0)
+
+  if (!nrow(df_long)) {
+    stop("No hay valores positivos para graficar.", call. = FALSE)
+  }
+
   # Orden de series según etiquetas_series
   df_long$.serie <- factor(df_long$.serie, levels = unname(etiquetas_series))
 
@@ -248,7 +256,6 @@ graficar_barras_agrupadas <- function(
 
   # Nº de series por categoría (para ajustar automáticamente el tamaño del texto)
   n_series <- length(unique(df_long$.serie))
-  # factor sencillo: más series → texto un poco más pequeño
   size_texto_barras_eff <- dplyr::case_when(
     n_series <= 2 ~ size_texto_barras * 1.00,
     n_series == 3 ~ size_texto_barras * 0.90,
@@ -361,6 +368,7 @@ graficar_barras_agrupadas <- function(
     df_extra <- df |>
       dplyr::select(dplyr::all_of(c(var_categoria, var_n))) |>
       dplyr::distinct() |>
+      dplyr::filter(.data[[var_categoria]] %in% levels(df_long[[var_categoria]])) |>
       dplyr::mutate(
         ypos      = max_valor * (1 + extra_derecha_rel * 0.95),
         lab_extra = paste0(prefijo_barra_extra, .data[[var_n]])
