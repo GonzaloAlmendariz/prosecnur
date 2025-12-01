@@ -10,7 +10,8 @@ freq_table_spss(
   survey = NULL,
   sm_vars_force = NULL,
   orders_list = NULL,
-  mostrar_todo = FALSE
+  mostrar_todo = FALSE,
+  codigos_solo_si_presentes = NULL
 )
 }
 \arguments{
@@ -32,7 +33,12 @@ por variable (por ejemplo, \code{instrumento$orders_list}).}
 
 \item{mostrar_todo}{Lógico; si \code{TRUE}, incluye en la tabla todas las
 categorías definidas en \code{orders_list[[var]]$labels}, incluso si su
-frecuencia es 0.}
+frecuencia es 0 (salvo las indicadas en \code{codigos_solo_si_presentes} que
+no tengan casos).}
+
+\item{codigos_solo_si_presentes}{Vector opcional de códigos (ej. \code{c(96,97,98,99)})
+que solo se completarán con filas adicionales si hay al menos un caso en
+la variable. Si no se usan, el comportamiento es el mismo que antes.}
 }
 \value{
 Un tibble con las columnas:
@@ -73,4 +79,9 @@ el instrumento.
 \item Una variable de peso llamada \code{peso} en \code{data}. Si no existe, se
 asume peso 1 para todos los casos.
 }
+
+El argumento \code{codigos_solo_si_presentes} permite declarar códigos especiales
+(normalmente definidos en \code{orders_list[[var]]$names}) que \strong{no} se completan
+con filas de \code{n = 0} cuando \code{mostrar_todo = TRUE} si no hay casos en la
+variable.
 }

@@ -17,7 +17,8 @@ reporte_cruces(
   weight_col = "peso",
   opciones_excluir = NULL,
   show_sig = TRUE,
-  alpha = 0.05
+  alpha = 0.05,
+  codigos_solo_si_presentes = NULL
 )
 }
 \arguments{
@@ -57,6 +58,10 @@ tablas (por ejemplo, categorías de no respuesta).}
 
 \item{alpha}{Nivel de significancia (para pruebas z con corrección de
 Bonferroni).}
+
+\item{codigos_solo_si_presentes}{Vector opcional de códigos (ej. 96,97,98,99)
+que solo se mostrarán en las tablas si tienen al menos un caso en la
+variable. Si es NULL, el comportamiento es el mismo de siempre.}
 }
 \value{
 Invisiblemente, la ruta normalizada al archivo de salida.

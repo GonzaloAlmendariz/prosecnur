@@ -72,14 +72,30 @@
 
 #' Completar categorías faltantes con n = 0 según orders_list
 #'
+#' Si `mostrar_todo = TRUE`, rellena con categorías definidas en el
+#' instrumento (orders_list[[var]]$labels) que no aparecen en la tabla.
+#'
+#' El argumento `codigos_solo_si_presentes` permite declarar códigos
+#' especiales (normalmente en `orders_list[[var]]$names`) que **no** se
+#' completan con n = 0 cuando no hay casos. Es decir, si no aparecen en la
+#' data, se omiten del completado, aunque estén definidos en el instrumento.
+#'
 #' @noRd
 .completar_categorias <- function(tab, var, orders_list, denom = NULL,
-                                  mostrar_todo = FALSE) {
+                                  mostrar_todo = FALSE,
+                                  codigos_solo_si_presentes = NULL) {
 
   if (!isTRUE(mostrar_todo)) return(tab)
   if (is.null(orders_list))  return(tab)
   if (!("Opciones" %in% names(tab))) return(tab)
   if (!(var %in% names(orders_list))) return(tab)
+
+  # normalizar códigos condicionales a character
+  codigos_cond_chr <- if (is.null(codigos_solo_si_presentes)) {
+    character(0)
+  } else {
+    as.character(codigos_solo_si_presentes)
+  }
 
   is_total <- tab$Opciones == "Total"
   body  <- if (any(is_total)) tab[!is_total, , drop = FALSE] else tab
@@ -87,7 +103,10 @@
 
   if (!nrow(body)) return(tab)
 
-  ord_lbl <- tryCatch(orders_list[[var]]$labels, error = function(e) NULL)
+  ord_entry <- orders_list[[var]]
+  ord_lbl   <- tryCatch(ord_entry$labels, error = function(e) NULL)
+  ord_nam   <- tryCatch(ord_entry$names,  error = function(e) NULL)
+
   if (is.null(ord_lbl)) return(tab)
 
   full_lbl <- as.character(ord_lbl)
@@ -97,12 +116,28 @@
   faltan <- setdiff(full_lbl, body$Opciones)
 
   if (length(faltan)) {
-    add <- tibble::tibble(
-      Opciones = faltan,
-      n        = 0,
-      pct      = if (!is.null(denom) && denom > 0) 0 else NA_real_
-    )
-    body <- dplyr::bind_rows(body, add)
+
+    # Si hay códigos condicionales y tenemos 'names', filtrar los faltantes
+    if (length(codigos_cond_chr) && !is.null(ord_nam)) {
+      ord_lbl_chr <- as.character(ord_lbl)
+      ord_nam_chr <- as.character(ord_nam)
+
+      idx_faltan    <- match(faltan, ord_lbl_chr)
+      codes_faltan  <- ord_nam_chr[idx_faltan]
+
+      # descartar de 'faltan' aquellos cuya *code* esté en codigos_cond_chr
+      keep <- !(codes_faltan %in% codigos_cond_chr)
+      faltan <- faltan[keep]
+    }
+
+    if (length(faltan)) {
+      add <- tibble::tibble(
+        Opciones = faltan,
+        n        = 0,
+        pct      = if (!is.null(denom) && denom > 0) 0 else NA_real_
+      )
+      body <- dplyr::bind_rows(body, add)
+    }
   }
 
   # reordenar según el orden del instrumento
@@ -269,6 +304,11 @@ split_sm_tokens <- function(x) {
 #'         asume peso 1 para todos los casos.
 #' }
 #'
+#' El argumento `codigos_solo_si_presentes` permite declarar códigos especiales
+#' (normalmente definidos en `orders_list[[var]]$names`) que **no** se completan
+#' con filas de `n = 0` cuando `mostrar_todo = TRUE` si no hay casos en la
+#' variable.
+#'
 #' @param data Data frame o tibble con la base de datos.
 #' @param var Nombre de la variable (como cadena) para la que se desea la tabla.
 #'   Puede ser el nombre de la madre (`"p106"`, `"p106_recod"`) aunque en la
@@ -282,7 +322,11 @@ split_sm_tokens <- function(x) {
 #'   por variable (por ejemplo, `instrumento$orders_list`).
 #' @param mostrar_todo Lógico; si `TRUE`, incluye en la tabla todas las
 #'   categorías definidas en `orders_list[[var]]$labels`, incluso si su
-#'   frecuencia es 0.
+#'   frecuencia es 0 (salvo las indicadas en `codigos_solo_si_presentes` que
+#'   no tengan casos).
+#' @param codigos_solo_si_presentes Vector opcional de códigos (ej. `c(96,97,98,99)`)
+#'   que solo se completarán con filas adicionales si hay al menos un caso en
+#'   la variable. Si no se usan, el comportamiento es el mismo que antes.
 #'
 #' @return Un tibble con las columnas:
 #' \describe{
@@ -293,7 +337,8 @@ split_sm_tokens <- function(x) {
 #'
 #' @export
 freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
-                            orders_list = NULL, mostrar_todo = FALSE) {
+                            orders_list = NULL, mostrar_todo = FALSE,
+                            codigos_solo_si_presentes = NULL) {
 
   if (!is.data.frame(data)) {
     stop("`data` debe ser un data.frame o tibble.", call. = FALSE)
@@ -373,7 +418,11 @@ freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
 
       tab <- .map_from_attr_labels(tab, var, data)
       tab <- .map_to_labels(tab, var, orders_list)
-      tab <- .completar_categorias(tab, var, orders_list, denom, mostrar_todo)
+      tab <- .completar_categorias(
+        tab, var, orders_list, denom,
+        mostrar_todo = mostrar_todo,
+        codigos_solo_si_presentes = codigos_solo_si_presentes
+      )
       tab <- .reordenar_por_instrumento(tab, var, orders_list)
       tab <- .move_ns_pref_last(tab)
 
@@ -422,7 +471,11 @@ freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
       )
 
     tab <- .map_to_labels(tab, var, orders_list)
-    tab <- .completar_categorias(tab, var, orders_list, denom, mostrar_todo)
+    tab <- .completar_categorias(
+      tab, var, orders_list, denom,
+      mostrar_todo = mostrar_todo,
+      codigos_solo_si_presentes = codigos_solo_si_presentes
+    )
     tab <- .reordenar_por_instrumento(tab, var, orders_list)
     tab <- .move_ns_pref_last(tab)
 
@@ -462,7 +515,11 @@ freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
 
   tab <- .map_from_attr_labels(tab, var, data)
   tab <- .map_to_labels(tab, var, orders_list)
-  tab <- .completar_categorias(tab, var, orders_list, denom, mostrar_todo)
+  tab <- .completar_categorias(
+    tab, var, orders_list, denom,
+    mostrar_todo = mostrar_todo,
+    codigos_solo_si_presentes = codigos_solo_si_presentes
+  )
   tab <- .reordenar_por_instrumento(tab, var, orders_list)
   tab <- .move_ns_pref_last(tab)
 
@@ -575,7 +632,8 @@ write_one_freq <- function(wb, sheet, data, var, dic_vars,
                            start_row = 1, start_col = 1,
                            fuente = "Pulso PUCP",
                            orders_list = NULL,
-                           mostrar_todo = FALSE) {
+                           mostrar_todo = FALSE,
+                           codigos_solo_si_presentes = NULL) {
   st <- mk_styles_spss()
   fila <- start_row
 
@@ -617,7 +675,8 @@ write_one_freq <- function(wb, sheet, data, var, dic_vars,
     survey        = survey,
     sm_vars_force = sm_vars_force,
     orders_list   = orders_list,
-    mostrar_todo  = mostrar_todo
+    mostrar_todo  = mostrar_todo,
+    codigos_solo_si_presentes = codigos_solo_si_presentes
   )
 
   if (!nrow(tab)) {
@@ -726,7 +785,10 @@ write_one_freq <- function(wb, sheet, data, var, dic_vars,
 #'   `select_one` y `select_multiple`).
 #' @param mostrar_todo Lógico; si `TRUE`, las tablas internas se construyen con
 #'   `mostrar_todo = TRUE` en [freq_table_spss()], es decir, se incluyen las
-#'   categorías con frecuencia 0 definidas en el instrumento.
+#'   categorías con frecuencia 0 definidas en el instrumento (salvo las
+#'   indicadas en `codigos_solo_si_presentes` que no tengan casos).
+#' @param codigos_solo_si_presentes Vector opcional de códigos que solo se
+#'   completarán si aparecen en la data (normalmente 96–99, etc.).
 #'
 #' @return Invisiblemente, la ruta normalizada del archivo Excel generado.
 #'
@@ -742,7 +804,8 @@ exportar_frecuencias_spss <- function(
     fuente = "Pulso PUCP",
     orders_list = NULL,
     survey = NULL,
-    mostrar_todo = FALSE
+    mostrar_todo = FALSE,
+    codigos_solo_si_presentes = NULL
 ){
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop("El paquete 'openxlsx' es necesario para `exportar_frecuencias_spss()`. ",
@@ -791,7 +854,8 @@ exportar_frecuencias_spss <- function(
         survey        = survey,
         sm_vars_force = sm_vars_force,
         orders_list   = orders_list,
-        mostrar_todo  = mostrar_todo
+        mostrar_todo  = mostrar_todo,
+        codigos_solo_si_presentes = codigos_solo_si_presentes
       )
 
       if (nrow(tab)) {
@@ -820,7 +884,8 @@ exportar_frecuencias_spss <- function(
         start_col = 1,
         fuente = fuente,
         orders_list  = orders_list,
-        mostrar_todo = mostrar_todo
+        mostrar_todo = mostrar_todo,
+        codigos_solo_si_presentes = codigos_solo_si_presentes
       )
     }
 
@@ -862,7 +927,10 @@ exportar_frecuencias_spss <- function(
 #' @param mostrar_todo Lógico; si `TRUE`, se pasa como tal a
 #'   [exportar_frecuencias_spss()] y, en consecuencia, a [freq_table_spss()],
 #'   mostrando todas las categorías definidas en el instrumento, incluso con
-#'   frecuencia 0.
+#'   frecuencia 0 (salvo las indicadas en `codigos_solo_si_presentes` que no
+#'   tengan casos).
+#' @param codigos_solo_si_presentes Vector opcional de códigos que solo se
+#'   completarán si aparecen en la data.
 #'
 #' @return Invisiblemente, la ruta normalizada del archivo Excel generado.
 #'
@@ -874,7 +942,8 @@ reporte_frecuencias <- function(data,
                                 orden       = c("desc", "asc", "original"),
                                 sm_vars_force = NULL,
                                 fuente      = "Pulso PUCP",
-                                mostrar_todo = FALSE) {
+                                mostrar_todo = FALSE,
+                                codigos_solo_si_presentes = NULL) {
 
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop("El paquete 'openxlsx' es necesario para `reporte_frecuencias()`. ",
@@ -966,7 +1035,8 @@ reporte_frecuencias <- function(data,
     fuente          = fuente,
     orders_list     = orders_list,
     survey          = survey,
-    mostrar_todo    = mostrar_todo
+    mostrar_todo    = mostrar_todo,
+    codigos_solo_si_presentes = codigos_solo_si_presentes
   )
 
   invisible(normalizePath(path_xlsx, winslash = "/"))

@@ -446,6 +446,28 @@ nN_para_sig_simple <- function(data,
 # Exportador principal: exportar_cruces_multi
 # =============================================================================
 
+#' Exportar tablas de cruces múltiples a Excel
+#'
+#' @param data Base de datos ya adaptada para reporte.
+#' @param dic_vars Tibble con variables y labels (name, label).
+#' @param SECCIONES Lista nombrada con vectores de nombres de variables a
+#'   cruzar por filas.
+#' @param CRUZAR_CON Vector de nombres de variables por columnas (estratos).
+#' @param labels_override Lista nombrada opcional para sobrescribir labels.
+#' @param path_xlsx Ruta al archivo .xlsx de salida.
+#' @param hoja Nombre de la hoja en el libro.
+#' @param fuente Texto de fuente para el pie de cada tabla.
+#' @param survey Hoja survey del instrumento.
+#' @param sm_vars_force Vector de variables a tratar como select_multiple.
+#' @param weight_col Nombre de la variable de pesos.
+#' @param orders_list Lista de órdenes/códigos/labels por variable o list_name.
+#' @param opciones_excluir Vector de labels de opciones a excluir (no respuesta).
+#' @param show_sig Lógico; si TRUE, se generan tablas de letras de significancia.
+#' @param alpha Nivel de significancia para las pruebas z (Bonferroni).
+#' @param codigos_solo_si_presentes Vector opcional de códigos (ej. 96:99) que
+#'   solo se mostrarán en las tablas si tienen al menos un caso en la variable.
+#'   Si es NULL, el comportamiento es idéntico al actual.
+#'
 exportar_cruces_multi <- function(data,
                                   dic_vars,
                                   SECCIONES,
@@ -460,7 +482,8 @@ exportar_cruces_multi <- function(data,
                                   orders_list      = NULL,
                                   opciones_excluir = NULL,
                                   show_sig         = TRUE,
-                                  alpha            = 0.05) {
+                                  alpha            = 0.05,
+                                  codigos_solo_si_presentes = NULL) {
 
   # Mantener en SECCIONES variables que existan como columna o tengan dummies
   SECCIONES <- lapply(SECCIONES, function(v) {
@@ -499,7 +522,7 @@ exportar_cruces_multi <- function(data,
     if (ncols >= 2) {
       openxlsx::addStyle(wb, hoja, st$header,
                          rows = row0:(row0 + 2),
-                         cols  = (col0 + 1):(col0 + ncols - 1),
+                         cols = (col0 + 1):(col0 + ncols - 1),
                          gridExpand = TRUE)
     }
 
@@ -558,6 +581,28 @@ exportar_cruces_multi <- function(data,
       codes_row <- cats_var$codes
 
       qlab <- label_variable(var, dic_vars, labels_override, data)
+
+      # --- NUEVO: filtrar códigos condicionales sin casos en toda la base ---
+      if (!is.null(codigos_solo_si_presentes) && length(codes_row)) {
+        cod_cond <- as.character(codigos_solo_si_presentes)
+
+        mask_total0 <- rep(TRUE, nrow(data))
+        n_total_all <- contar_por_opcion(
+          data       = data,
+          var        = var,
+          codes      = codes_row,
+          tp         = tp,
+          mask       = mask_total0,
+          weight_col = weight_col
+        )
+
+        to_drop <- codes_row %in% cod_cond & n_total_all == 0
+        if (any(to_drop)) {
+          codes_row <- codes_row[!to_drop]
+          opciones  <- opciones[!to_drop]
+        }
+      }
+      # ----------------------------------------------------------------------
 
       if (!length(opciones)) {
         openxlsx::writeData(wb, hoja, qlab, startRow = fila, startCol = 1)
@@ -1064,6 +1109,9 @@ exportar_cruces_multi <- function(data,
 #' @param show_sig Lógico; si TRUE, muestra tablas de letras de significancia.
 #' @param alpha Nivel de significancia (para pruebas z con corrección de
 #'   Bonferroni).
+#' @param codigos_solo_si_presentes Vector opcional de códigos (ej. 96,97,98,99)
+#'   que solo se mostrarán en las tablas si tienen al menos un caso en la
+#'   variable. Si es NULL, el comportamiento es el mismo de siempre.
 #'
 #' @return Invisiblemente, la ruta normalizada al archivo de salida.
 #' @export
@@ -1080,7 +1128,8 @@ reporte_cruces <- function(
     weight_col       = "peso",
     opciones_excluir = NULL,
     show_sig         = TRUE,
-    alpha            = 0.05
+    alpha            = 0.05,
+    codigos_solo_si_presentes = NULL
 ) {
 
   survey <- NULL
@@ -1100,20 +1149,21 @@ reporte_cruces <- function(
   }
 
   exportar_cruces_multi(
-    data            = data,
-    dic_vars        = dic_vars,
-    SECCIONES       = SECCIONES,
-    CRUZAR_CON      = cruces,
-    labels_override = labels_override,
-    path_xlsx       = path_xlsx,
-    hoja            = hoja,
-    fuente          = fuente,
-    survey          = survey,
-    sm_vars_force   = sm_vars_force,
-    weight_col      = weight_col,
-    orders_list     = orders_list,
-    opciones_excluir = opciones_excluir,
-    show_sig        = show_sig,
-    alpha           = alpha
+    data                     = data,
+    dic_vars                 = dic_vars,
+    SECCIONES                = SECCIONES,
+    CRUZAR_CON               = cruces,
+    labels_override          = labels_override,
+    path_xlsx                = path_xlsx,
+    hoja                     = hoja,
+    fuente                   = fuente,
+    survey                   = survey,
+    sm_vars_force            = sm_vars_force,
+    weight_col               = weight_col,
+    orders_list              = orders_list,
+    opciones_excluir         = opciones_excluir,
+    show_sig                 = show_sig,
+    alpha                    = alpha,
+    codigos_solo_si_presentes = codigos_solo_si_presentes
   )
 }

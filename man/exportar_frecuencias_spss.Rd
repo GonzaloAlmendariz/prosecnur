@@ -15,7 +15,8 @@ exportar_frecuencias_spss(
   fuente = "Pulso PUCP",
   orders_list = NULL,
   survey = NULL,
-  mostrar_todo = FALSE
+  mostrar_todo = FALSE,
+  codigos_solo_si_presentes = NULL
 )
 }
 \arguments{
@@ -47,7 +48,11 @@ por variable.}
 
 \item{mostrar_todo}{Lógico; si \code{TRUE}, las tablas internas se construyen con
 \code{mostrar_todo = TRUE} en \code{\link[=freq_table_spss]{freq_table_spss()}}, es decir, se incluyen las
-categorías con frecuencia 0 definidas en el instrumento.}
+categorías con frecuencia 0 definidas en el instrumento (salvo las
+indicadas en \code{codigos_solo_si_presentes} que no tengan casos).}
+
+\item{codigos_solo_si_presentes}{Vector opcional de códigos que solo se
+completarán si aparecen en la data (normalmente 96–99, etc.).}
 }
 \value{
 Invisiblemente, la ruta normalizada del archivo Excel generado.

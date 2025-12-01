@@ -254,23 +254,35 @@ reporte_spss <- function(data,
 
 
 
-#' Generar sintaxis SPSS para niveles de medida (ordinal / scale)
+#' Generar sintaxis SPSS para niveles de medida
 #'
-#' A partir de una base de reporte (típicamente devuelta por [reporte_data()]),
-#' identifica las variables que tienen el atributo `measure` y genera un
-#' archivo `.sps` con instrucciones `VARIABLE LEVEL` para SPSS.
+#' A partir de una base de reporte (típicamente devuelta por
+#' [reporte_data()]), la función identifica las variables que tienen el
+#' atributo `measure` y genera un archivo `.sps` con instrucciones
+#' `VARIABLE LEVEL` para SPSS.
 #'
 #' En particular:
-#' - `measure = "ordinal"` -> `VARIABLE LEVEL ... (ORDINAL).`
-#' - `measure = "scale"`   -> `VARIABLE LEVEL ... (SCALE).`
 #'
-#' @param data Un `data.frame` o `tibble`, preferentemente el objeto devuelto
-#'   por [reporte_data()] (clase `"prosecnur_reporte_tbl"`).
+#' - `measure = "ordinal"`  -> `VARIABLE LEVEL ... (ORDINAL).`
+#' - `measure = "scale"`    -> `VARIABLE LEVEL ... (SCALE).`
+#' - `measure = "nominal"`  -> `VARIABLE LEVEL ... (NOMINAL).`
+#'
+#' Las variables nominales que se incluyen suelen ser las dummies
+#' generadas a partir de `select_multiple` (por ejemplo `var.1`, `var.2`,
+#' `var.x`), marcadas como nominales en [reporte_data()].
+#'
+#' Para evitar líneas demasiado largas, las variables se agrupan en
+#' bloques de hasta 3 nombres por sentencia `VARIABLE LEVEL`.
+#'
+#' @param data Un `data.frame` o `tibble`, preferentemente el objeto
+#'   devuelto por [reporte_data()] (clase `"prosecnur_reporte_tbl"`).
 #' @param path_sps Ruta del archivo `.sps` a generar.
-#' @param verbose Lógico; si `TRUE` imprime un mensaje con la ruta generada.
+#' @param verbose Lógico; si `TRUE` imprime un mensaje con la ruta
+#'   generada.
 #'
-#' @return Invisiblemente, una lista con los vectores de variables ordinales y
-#'   de escala, junto con la ruta del archivo `.sps`.
+#' @return Invisiblemente, una lista con los vectores de variables
+#'   ordinales, de escala y nominales (dummies), junto con la ruta del
+#'   archivo `.sps`.
 #' @export
 generar_spss_niveles <- function(data,
                                  path_sps = "niveles_medida.sps",
@@ -293,6 +305,12 @@ generar_spss_niveles <- function(data,
     logical(1)
   )]
 
+  vars_nominal_raw <- names(data)[vapply(
+    data,
+    function(x) identical(attr(x, "measure", exact = TRUE), "nominal"),
+    logical(1)
+  )]
+
   # Excluir fechas y horas del grupo SCALE
   vars_scale <- vars_scale_raw[!vapply(
     data[vars_scale_raw],
@@ -300,25 +318,43 @@ generar_spss_niveles <- function(data,
     logical(1)
   )]
 
+  # Focalizar nominales en las dummies tipo var.1 / var.x
+  vars_nominal_dummies <- vars_nominal_raw[
+    grepl("\\.[0-9]+$", vars_nominal_raw) |
+      grepl("\\.x$",    vars_nominal_raw, ignore.case = TRUE)
+  ]
+
   lineas <- character(0L)
 
-  # Helper para partir en bloques de hasta 20 vars
+  # Helper para partir en bloques de hasta 3 vars
   add_variable_level_blocks <- function(vars, level) {
     if (length(vars) == 0L) return(character(0L))
-    split_vars <- split(vars, ceiling(seq_along(vars) / 20))
-    vapply(split_vars, function(v) {
-      sprintf("VARIABLE LEVEL %s (%s).", paste(v, collapse = " "), toupper(level))
-    }, character(1L))
+    split_vars <- split(vars, ceiling(seq_along(vars) / 3))
+    vapply(
+      split_vars,
+      function(v) {
+        sprintf(
+          "VARIABLE LEVEL %s (%s).",
+          paste(v, collapse = " "),
+          toupper(level)
+        )
+      },
+      character(1L)
+    )
   }
 
   lineas <- c(
     lineas,
-    add_variable_level_blocks(vars_ordinal, "ordinal"),
-    add_variable_level_blocks(vars_scale,   "scale")
+    add_variable_level_blocks(vars_ordinal,         "ordinal"),
+    add_variable_level_blocks(vars_scale,           "scale"),
+    add_variable_level_blocks(vars_nominal_dummies, "nominal")
   )
 
   if (length(lineas) == 0L) {
-    warning("No se encontraron variables con atributo 'measure' = 'ordinal' o 'scale'.")
+    warning(
+      "No se encontraron variables con atributo 'measure' ",
+      "= 'ordinal', 'scale' o 'nominal' (dummies)."
+    )
   }
 
   lineas <- c(lineas, "EXECUTE.")
@@ -326,12 +362,16 @@ generar_spss_niveles <- function(data,
   writeLines(lineas, path_sps, useBytes = TRUE)
 
   if (verbose) {
-    message("Sintaxis SPSS guardada en: ", normalizePath(path_sps, winslash = "/"))
+    message(
+      "Sintaxis SPSS guardada en: ",
+      normalizePath(path_sps, winslash = "/")
+    )
   }
 
   invisible(list(
-    vars_ordinal = vars_ordinal,
-    vars_scale   = vars_scale,
-    path_sps     = path_sps
+    vars_ordinal         = vars_ordinal,
+    vars_scale           = vars_scale,
+    vars_nominal_dummies = vars_nominal_dummies,
+    path_sps             = path_sps
   ))
 }

@@ -283,15 +283,10 @@ reporte_data <- function(data,
           sm_mothers_to_drop <- union(sm_mothers_to_drop, m)
         }
 
-        # Etiquetas "No"/"Sí" y measure para las dummies de este grupo
+        # Etiquetas "No"/"Sí" y nivel de medida NOMINAL para las dummies
         for (d in group_dummies) {
-          attr(data[[d]], "labels") <- c(`0` = "No", `1` = "Sí")
-
-          if (!is.null(mother_measure)) {
-            attr(data[[d]], "measure") <- mother_measure
-          } else if (is.null(attr(data[[d]], "measure"))) {
-            attr(data[[d]], "measure") <- "nominal"
-          }
+          attr(data[[d]], "labels")  <- c(`0` = "No", `1` = "Sí")
+          attr(data[[d]], "measure") <- "nominal"
 
           if (!is.null(dict_code_to_lab) && m %in% c(v, paste0(v, "_recod"))) {
             code_raw <- sub(paste0("^", m, "/"), "", d)

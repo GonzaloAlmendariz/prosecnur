@@ -2,31 +2,42 @@
 % Please edit documentation in R/generalidad_export_spss.R
 \name{generar_spss_niveles}
 \alias{generar_spss_niveles}
-\title{Generar sintaxis SPSS para niveles de medida (ordinal / scale)}
+\title{Generar sintaxis SPSS para niveles de medida}
 \usage{
 generar_spss_niveles(data, path_sps = "niveles_medida.sps", verbose = TRUE)
 }
 \arguments{
-\item{data}{Un \code{data.frame} o \code{tibble}, preferentemente el objeto devuelto
-por \code{\link[=reporte_data]{reporte_data()}} (clase \code{"prosecnur_reporte_tbl"}).}
+\item{data}{Un \code{data.frame} o \code{tibble}, preferentemente el objeto
+devuelto por \code{\link[=reporte_data]{reporte_data()}} (clase \code{"prosecnur_reporte_tbl"}).}
 
 \item{path_sps}{Ruta del archivo \code{.sps} a generar.}
 
-\item{verbose}{Lógico; si \code{TRUE} imprime un mensaje con la ruta generada.}
+\item{verbose}{Lógico; si \code{TRUE} imprime un mensaje con la ruta
+generada.}
 }
 \value{
-Invisiblemente, una lista con los vectores de variables ordinales y
-de escala, junto con la ruta del archivo \code{.sps}.
+Invisiblemente, una lista con los vectores de variables
+ordinales, de escala y nominales (dummies), junto con la ruta del
+archivo \code{.sps}.
 }
 \description{
-A partir de una base de reporte (típicamente devuelta por \code{\link[=reporte_data]{reporte_data()}}),
-identifica las variables que tienen el atributo \code{measure} y genera un
-archivo \code{.sps} con instrucciones \verb{VARIABLE LEVEL} para SPSS.
+A partir de una base de reporte (típicamente devuelta por
+\code{\link[=reporte_data]{reporte_data()}}), la función identifica las variables que tienen el
+atributo \code{measure} y genera un archivo \code{.sps} con instrucciones
+\verb{VARIABLE LEVEL} para SPSS.
 }
 \details{
 En particular:
 \itemize{
-\item \code{measure = "ordinal"} -> \verb{VARIABLE LEVEL ... (ORDINAL).}
-\item \code{measure = "scale"}   -> \verb{VARIABLE LEVEL ... (SCALE).}
+\item \code{measure = "ordinal"}  -> \verb{VARIABLE LEVEL ... (ORDINAL).}
+\item \code{measure = "scale"}    -> \verb{VARIABLE LEVEL ... (SCALE).}
+\item \code{measure = "nominal"}  -> \verb{VARIABLE LEVEL ... (NOMINAL).}
 }
+
+Las variables nominales que se incluyen suelen ser las dummies
+generadas a partir de \code{select_multiple} (por ejemplo \code{var.1}, \code{var.2},
+\code{var.x}), marcadas como nominales en \code{\link[=reporte_data]{reporte_data()}}.
+
+Para evitar líneas demasiado largas, las variables se agrupan en
+bloques de hasta 3 nombres por sentencia \verb{VARIABLE LEVEL}.
 }
