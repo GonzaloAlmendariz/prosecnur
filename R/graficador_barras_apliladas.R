@@ -97,9 +97,13 @@
 #'   mostrarse en negrita. Puede incluir cualquiera de:
 #'   \code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"barra_extra"}.
 #'
-#' @param exportar Método de salida: \code{"rplot"} (devuelve un objeto
-#'   \code{ggplot}), \code{"png"} (exporta un archivo PNG) o \code{"ppt"}
-#'   (exporta una diapositiva PPTX con el gráfico incrustado).
+#' @param exportar Método de salida:
+#'   \itemize{
+#'     \item \code{"rplot"}: devuelve un objeto \code{ggplot}.
+#'     \item \code{"png"}: exporta un archivo PNG.
+#'     \item \code{"ppt"}: exporta un PPTX con el gráfico vectorial editable.
+#'     \item \code{"word"}: exporta un DOCX con el gráfico vectorial editable.
+#'   }
 #' @param path_salida Ruta del archivo a crear cuando \code{exportar} no es
 #'   \code{"rplot"}.
 #' @param ancho Ancho del gráfico (cuando se exporta a archivo).
@@ -107,7 +111,8 @@
 #' @param dpi Resolución en puntos por pulgada (solo para PNG).
 #'
 #' @return Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
-#'   invisible, el gráfico exportado si se utiliza \code{"png"} o \code{"ppt"}.
+#'   invisible, el gráfico exportado si se utiliza \code{"png"}, \code{"ppt"}
+#'   o \code{"word"}.
 #'
 #' @export
 graficar_barras_apiladas <- function(
@@ -153,7 +158,7 @@ graficar_barras_apiladas <- function(
     invertir_barras     = FALSE,
     invertir_segmentos  = FALSE,
     textos_negrita      = NULL,
-    exportar            = c("rplot", "png", "ppt"),
+    exportar            = c("rplot", "png", "ppt", "word"),
     path_salida         = NULL,
     ancho               = 10,
     alto                = 6,
@@ -265,7 +270,14 @@ graficar_barras_apiladas <- function(
     dplyr::summarise(suma = sum(.valor_plot, na.rm = TRUE), .groups = "drop")
 
   max_suma <- max(df_sum$suma, na.rm = TRUE)
-  x_max    <- max_suma * (1 + extra_derecha_rel)
+
+  # Si NO hay barra extra, el eje llega solo hasta la suma máxima.
+  # Si SÍ hay barra extra, se agrega espacio adicional a la derecha.
+  if (mostrar_barra_extra) {
+    x_max <- max_suma * (1 + extra_derecha_rel)
+  } else {
+    x_max <- max_suma
+  }
 
   # ---------------------------------------------------------------------------
   # 2. Gráfico base (una barra apilada por categoría)
@@ -286,7 +298,7 @@ graficar_barras_apiladas <- function(
   if (mostrar_valores) {
 
     # Orden de apilado real (tal como lo usa ggplot2: del ÚLTIMO nivel al primero)
-    niveles_fill <- levels(df_long$.grupo)
+    niveles_fill  <- levels(df_long$.grupo)
     niveles_stack <- rev(niveles_fill)
 
     df_lab <- df_long |>
@@ -333,7 +345,7 @@ graficar_barras_apiladas <- function(
   p <- p +
     ggplot2::scale_x_continuous(
       limits = c(0, x_max),
-      expand = ggplot2::expansion(mult = c(0.05, 0))
+      expand = ggplot2::expansion(mult = c(0.05, 0))  # 5% solo a la izquierda
     ) +
     ggplot2::coord_cartesian(clip = "off")
 
@@ -562,6 +574,31 @@ graficar_barras_apiladas <- function(
     stop("Debe especificar `path_salida` cuando `exportar` no es 'rplot'.", call. = FALSE)
   }
 
+  if (exportar == "word") {
+    if (!requireNamespace("officer", quietly = TRUE)) {
+      stop(
+        "Para exportar a Word se requiere el paquete 'officer'.",
+        call. = FALSE
+      )
+    }
+
+    # Ancho pensado para página Word estándar (A4 / Letter con márgenes)
+    width_word  <- if (!missing(ancho) && !is.null(ancho)) ancho else 6.5
+    height_word <- if (!missing(alto)  && !is.null(alto))  alto  else 4.5
+
+    doc <- officer::read_docx()
+    doc <- officer::body_add_gg(
+      doc,
+      value  = p,
+      width  = width_word,
+      height = height_word,
+      style  = "centered"  # usa el estilo de párrafo centrado de Word
+    )
+    print(doc, target = path_salida)
+
+    return(invisible(p))
+  }
+
   if (exportar == "png") {
     ggplot2::ggsave(
       filename = path_salida,
@@ -587,15 +624,12 @@ graficar_barras_apiladas <- function(
     doc <- officer::add_slide(doc, layout = "Blank", master = "Office Theme")
     doc <- officer::ph_with(
       doc,
-      rvg::dml(
-        ggobj = p,
-        bg    = if (is.na(color_fondo)) "transparent" else color_fondo
-      ),
+      rvg::dml(ggobj = p),
       location = officer::ph_location_fullsize()
     )
     print(doc, target = path_salida)
 
-    invisible(p)
+    return(invisible(p))
   }
 
   p

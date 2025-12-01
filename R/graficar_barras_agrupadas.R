@@ -104,7 +104,7 @@
 #'   \code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"barra_extra"}.
 #'
 #' @param exportar Método de salida: \code{"rplot"} (devuelve un objeto
-#'   \code{ggplot}), \code{"png"} (exporta un archivo PNG) o \code{"ppt"}
+#'   \code{ggplot}), \code{"png"} (exporta un archivo PNG), \code{"ppt"} o \code{"Word"}
 #'   (exporta una diapositiva PPTX con el gráfico incrustado).
 #' @param path_salida Ruta del archivo a crear cuando \code{exportar} no es
 #'   \code{"rplot"}.
@@ -159,7 +159,7 @@ graficar_barras_agrupadas <- function(
     invertir_barras           = FALSE,
     invertir_series           = FALSE,
     textos_negrita            = NULL,
-    exportar                  = c("rplot", "png", "ppt"),
+    exportar                  = c("rplot", "png", "ppt", "word"),
     path_salida               = NULL,
     ancho                     = 10,
     alto                      = 6,
@@ -580,6 +580,31 @@ graficar_barras_agrupadas <- function(
 
   if (is.null(path_salida) || !nzchar(path_salida)) {
     stop("Debe especificar `path_salida` cuando `exportar` no es 'rplot'.", call. = FALSE)
+  }
+
+  if (exportar == "word") {
+    if (!requireNamespace("officer", quietly = TRUE)) {
+      stop(
+        "Para exportar a Word se requiere el paquete 'officer'.",
+        call. = FALSE
+      )
+    }
+
+    # Ancho pensado para página Word estándar (A4 / Letter con márgenes)
+    width_word  <- if (!missing(ancho) && !is.null(ancho)) ancho else 6.5
+    height_word <- if (!missing(alto)  && !is.null(alto))  alto  else 4.5
+
+    doc <- officer::read_docx()
+    doc <- officer::body_add_gg(
+      doc,
+      value  = p,
+      width  = width_word,
+      height = height_word,
+      style  = "centered"  # usa estilo de párrafo centrado de Word
+    )
+    print(doc, target = path_salida)
+
+    return(invisible(p))
   }
 
   if (exportar == "png") {

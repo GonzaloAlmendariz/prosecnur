@@ -46,7 +46,7 @@ graficar_barras_apiladas(
   invertir_barras = FALSE,
   invertir_segmentos = FALSE,
   textos_negrita = NULL,
-  exportar = c("rplot", "png", "ppt"),
+  exportar = c("rplot", "png", "ppt", "word"),
   path_salida = NULL,
   ancho = 10,
   alto = 6,
@@ -173,9 +173,13 @@ apilan los segmentos dentro de cada barra (orden horizontal de los colores).}
 mostrarse en negrita. Puede incluir cualquiera de:
 \code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"barra_extra"}.}
 
-\item{exportar}{Método de salida: \code{"rplot"} (devuelve un objeto
-\code{ggplot}), \code{"png"} (exporta un archivo PNG) o \code{"ppt"}
-(exporta una diapositiva PPTX con el gráfico incrustado).}
+\item{exportar}{Método de salida:
+\itemize{
+\item \code{"rplot"}: devuelve un objeto \code{ggplot}.
+\item \code{"png"}: exporta un archivo PNG.
+\item \code{"ppt"}: exporta un PPTX con el gráfico vectorial editable.
+\item \code{"word"}: exporta un DOCX con el gráfico vectorial editable.
+}}
 
 \item{path_salida}{Ruta del archivo a crear cuando \code{exportar} no es
 \code{"rplot"}.}
@@ -188,7 +192,8 @@ mostrarse en negrita. Puede incluir cualquiera de:
 }
 \value{
 Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
-invisible, el gráfico exportado si se utiliza \code{"png"} o \code{"ppt"}.
+invisible, el gráfico exportado si se utiliza \code{"png"}, \code{"ppt"}
+o \code{"word"}.
 }
 \description{
 Genera un gráfico de barras horizontales apiladas donde cada categoría

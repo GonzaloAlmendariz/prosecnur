@@ -47,7 +47,7 @@ graficar_barras_agrupadas(
   invertir_barras = FALSE,
   invertir_series = FALSE,
   textos_negrita = NULL,
-  exportar = c("rplot", "png", "ppt"),
+  exportar = c("rplot", "png", "ppt", "word"),
   path_salida = NULL,
   ancho = 10,
   alto = 6,
@@ -180,7 +180,7 @@ mostrarse en negrita. Puede incluir cualquiera de:
 \code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"barra_extra"}.}
 
 \item{exportar}{Método de salida: \code{"rplot"} (devuelve un objeto
-\code{ggplot}), \code{"png"} (exporta un archivo PNG) o \code{"ppt"}
+\code{ggplot}), \code{"png"} (exporta un archivo PNG), \code{"ppt"} o \code{"Word"}
 (exporta una diapositiva PPTX con el gráfico incrustado).}
 
 \item{path_salida}{Ruta del archivo a crear cuando \code{exportar} no es

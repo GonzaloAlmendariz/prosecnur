@@ -45,7 +45,7 @@ graficar_dico(
   posicion_leyenda = "bottom",
   invertir_leyenda = FALSE,
   textos_negrita = NULL,
-  exportar = c("rplot", "png", "ppt"),
+  exportar = c("rplot", "png", "ppt", "word"),
   path_salida = NULL,
   ancho = 10,
   alto = 6,
