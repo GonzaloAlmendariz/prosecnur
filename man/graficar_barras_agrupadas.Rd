@@ -25,23 +25,23 @@ graficar_barras_agrupadas(
   nota_pie_derecha = NULL,
   pos_titulo = c("centro", "izquierda", "derecha"),
   pos_nota_pie = c("derecha", "izquierda", "centro"),
-  color_titulo = "#000000",
+  color_titulo = "#004B8D",
   size_titulo = 11,
-  color_subtitulo = "#000000",
+  color_subtitulo = "#004B8D",
   size_subtitulo = 9,
-  color_nota_pie = "#000000",
+  color_nota_pie = "#004B8D",
   size_nota_pie = 8,
-  color_leyenda = "#000000",
+  color_leyenda = "#004B8D",
   size_leyenda = 8,
   color_texto_barras = "white",
-  color_texto_barras_fuera = "#000000",
+  color_texto_barras_fuera = "#004B8D",
   size_texto_barras = 3,
-  color_barra_extra = "#000000",
+  color_barra_extra = "#004B8D",
   size_barra_extra = 3,
-  color_ejes = "#000000",
+  color_ejes = "#004B8D",
   size_ejes = 9,
   color_fondo = NA,
-  extra_derecha_rel = 0.1,
+  extra_derecha_rel = 0.25,
   mostrar_leyenda = TRUE,
   invertir_leyenda = FALSE,
   invertir_barras = FALSE,
@@ -158,8 +158,10 @@ la etiqueta se dibuja fuera de la barra.}
 \item{color_fondo}{Color de fondo del gráfico. Si es \code{NA} (por defecto),
 el fondo será transparente (útil para insertar en PPT/Word).}
 
-\item{extra_derecha_rel}{Porcentaje adicional de espacio a la derecha,
-relativo a la barra más larga, para ubicar la barra extra.}
+\item{extra_derecha_rel}{Porción adicional a la derecha, en unidades de
+proporción. Cuando \code{escala_valor} es proporcional y
+\code{mostrar_barra_extra = TRUE}, un valor de 0.25 implica que el
+espacio 0–1 (0–100\\%) ocupa ~80\\% del ancho y la barra extra ~20\\%.}
 
 \item{mostrar_leyenda}{Lógico; si \code{FALSE}, oculta la leyenda (útil
 cuando solo hay una serie).}
@@ -169,6 +171,9 @@ cuando solo hay una serie).}
 
 \item{invertir_barras}{Lógico; si \code{TRUE}, invierte el orden en que las
 categorías aparecen en el eje vertical (orden de las barras).}
+
+\item{invertir_series}{Lógico; si \code{TRUE}, invierte el orden de las
+series dentro de cada grupo (útil para mantener orden visual coherente).}
 
 \item{textos_negrita}{Vector de caracteres que indica qué elementos deben
 mostrarse en negrita. Puede incluir cualquiera de:

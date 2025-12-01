@@ -87,14 +87,18 @@
 #' @param color_fondo Color de fondo del gráfico. Si es \code{NA} (por defecto),
 #'   el fondo será transparente (útil para insertar en PPT/Word).
 #'
-#' @param extra_derecha_rel Porcentaje adicional de espacio a la derecha,
-#'   relativo a la barra más larga, para ubicar la barra extra.
+#' @param extra_derecha_rel Porción adicional a la derecha, en unidades de
+#'   proporción. Cuando \code{escala_valor} es proporcional y
+#'   \code{mostrar_barra_extra = TRUE}, un valor de 0.25 implica que el
+#'   espacio 0–1 (0–100\%) ocupa ~80\% del ancho y la barra extra ~20\%.
 #' @param mostrar_leyenda Lógico; si \code{FALSE}, oculta la leyenda (útil
 #'   cuando solo hay una serie).
 #' @param invertir_leyenda Lógico; si \code{TRUE}, invierte el orden de los
 #'   ítems de la leyenda.
 #' @param invertir_barras Lógico; si \code{TRUE}, invierte el orden en que las
 #'   categorías aparecen en el eje vertical (orden de las barras).
+#' @param invertir_series Lógico; si \code{TRUE}, invierte el orden de las
+#'   series dentro de cada grupo (útil para mantener orden visual coherente).
 #' @param textos_negrita Vector de caracteres que indica qué elementos deben
 #'   mostrarse en negrita. Puede incluir cualquiera de:
 #'   \code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"barra_extra"}.
@@ -133,23 +137,23 @@ graficar_barras_agrupadas <- function(
     pos_titulo                = c("centro", "izquierda", "derecha"),
     pos_nota_pie              = c("derecha", "izquierda", "centro"),
     # Estilo de texto y layout
-    color_titulo              = "#000000",
+    color_titulo              = "#004B8D",
     size_titulo               = 11,
-    color_subtitulo           = "#000000",
+    color_subtitulo           = "#004B8D",
     size_subtitulo            = 9,
-    color_nota_pie            = "#000000",
+    color_nota_pie            = "#004B8D",
     size_nota_pie             = 8,
-    color_leyenda             = "#000000",
+    color_leyenda             = "#004B8D",
     size_leyenda              = 8,
     color_texto_barras        = "white",
-    color_texto_barras_fuera  = "#000000",
+    color_texto_barras_fuera  = "#004B8D",
     size_texto_barras         = 3,
-    color_barra_extra         = "#000000",
+    color_barra_extra         = "#004B8D",
     size_barra_extra          = 3,
-    color_ejes                = "#000000",
+    color_ejes                = "#004B8D",
     size_ejes                 = 9,
     color_fondo               = NA,
-    extra_derecha_rel         = 0.10,
+    extra_derecha_rel         = 0.25,  # 0.25 → 0–100% ≈ 80% + 20% barra extra
     mostrar_leyenda           = TRUE,
     invertir_leyenda          = FALSE,
     invertir_barras           = FALSE,
@@ -168,12 +172,6 @@ graficar_barras_agrupadas <- function(
   exportar     <- match.arg(exportar)
   pos_titulo   <- match.arg(pos_titulo)
   pos_nota_pie <- match.arg(pos_nota_pie)
-
-  escala_valor       <- match.arg(escala_valor)
-  exportar           <- match.arg(exportar)
-  pos_titulo         <- match.arg(pos_titulo)
-  pos_nota_pie       <- match.arg(pos_nota_pie)
-
 
   # -----------------------------------------------------------------
   # Normalizar `decimales` a un escalar numérico seguro
@@ -253,7 +251,7 @@ graficar_barras_agrupadas <- function(
     df_long$.valor_plot <- df_long$.valor
   }
 
-  # *** NUEVO: eliminar combinaciones sin valor para evitar "huecos" en el dodge
+  # Eliminar combinaciones sin valor o 0 para evitar huecos en el dodge
   df_long <- df_long |>
     dplyr::filter(!is.na(.valor_plot) & .valor_plot > 0)
 
@@ -261,7 +259,7 @@ graficar_barras_agrupadas <- function(
     stop("No hay valores positivos para graficar.", call. = FALSE)
   }
 
-  # Orden de series según etiquetas_series, con opción de invertir barras dentro del grupo
+  # Orden de series según etiquetas_series, con opción de invertir series
   niveles_series <- unname(etiquetas_series)
   if (invertir_series) {
     niveles_series <- rev(niveles_series)
@@ -285,9 +283,8 @@ graficar_barras_agrupadas <- function(
     TRUE          ~ size_texto_barras * 0.55
   )
 
-  # Máximo valor para definir escala y espacio extra
+  # Máximo valor observado (en proporción 0–1)
   max_valor <- max(df_long$.valor_plot, na.rm = TRUE)
-  y_max     <- max_valor * (1 + extra_derecha_rel)
 
   # ---------------------------------------------------------------------------
   # 2. Gráfico base (antes de coord_flip)
@@ -316,7 +313,7 @@ graficar_barras_agrupadas <- function(
     # No mostrar etiquetas por debajo del umbral mínimo
     df_lab$lab[df_lab$.valor_plot < umbral_etiqueta] <- ""
 
-    # Offset pequeño para las que van fuera
+    # Offset pequeño para las que van fuera (en proporción 0–1)
     offset_lab <- max_valor * 0.015
 
     df_lab$valor_label <- ifelse(
@@ -375,13 +372,43 @@ graficar_barras_agrupadas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 4. Escala Y (valores) con espacio extra
+  # 4. Escala Y (valores) con espacio extra y eje profesional si porcentaje
   # ---------------------------------------------------------------------------
-  p <- p +
-    ggplot2::scale_y_continuous(
-      limits = c(0, y_max),
-      expand = ggplot2::expansion(mult = c(0, 0.05))
-    )
+
+  # y_lim: límite superior del eje Y (en proporción)
+  # y_extra: posición donde se dibuja la barra extra (N)
+  if (escala_valor %in% c("proporcion_1", "proporcion_100")) {
+
+    if (mostrar_barra_extra) {
+      # 0–1 = 0–100% para las barras (≈80% del ancho),
+      # 1–(1+extra_derecha_rel) reservado para barra extra.
+      y_lim   <- 1 + extra_derecha_rel
+      y_extra <- 1 + extra_derecha_rel * 0.5  # centrada en el "colchón" derecho
+    } else {
+      y_lim   <- 1
+      y_extra <- NA_real_
+    }
+
+    p <- p +
+      ggplot2::scale_y_continuous(
+        limits = c(0, y_lim),
+        # omitimos 0%, mostramos 20–100% en posición real 0.2–1
+        breaks = seq(0.2, 1, by = 0.2),
+        labels = scales::percent_format(accuracy = 1),
+        expand = ggplot2::expansion(mult = c(0, 0.02))
+      )
+
+  } else {
+    # Caso general (conteos u otra métrica: sin eje % explícito)
+    y_lim   <- max_valor * (1 + extra_derecha_rel)
+    y_extra <- max_valor * (1 + extra_derecha_rel * 0.95)
+
+    p <- p +
+      ggplot2::scale_y_continuous(
+        limits = c(0, y_lim),
+        expand = ggplot2::expansion(mult = c(0, 0.05))
+      )
+  }
 
   # ---------------------------------------------------------------------------
   # 5. Barra extra con N a la derecha
@@ -392,7 +419,7 @@ graficar_barras_agrupadas <- function(
       dplyr::distinct() |>
       dplyr::filter(.data[[var_categoria]] %in% levels(df_long[[var_categoria]])) |>
       dplyr::mutate(
-        ypos      = max_valor * (1 + extra_derecha_rel * 0.95),
+        ypos      = if (!is.na(y_extra)) y_extra else max_valor * (1 + extra_derecha_rel * 0.95),
         lab_extra = paste0(prefijo_barra_extra, .data[[var_n]])
       )
 
@@ -457,17 +484,17 @@ graficar_barras_agrupadas <- function(
     caption_text <- nota_pie_derecha
   }
 
-  p <- p +
-    ggplot2::coord_flip() +
-    ggplot2::theme_minimal(base_size = 9) +
+  # Tema base (sin eje X detallado aún)
+  base_theme <- ggplot2::theme_minimal(base_size = 9) +
     ggplot2::theme(
       panel.grid.major.y = ggplot2::element_blank(),
       panel.grid.minor   = ggplot2::element_blank(),
-      panel.grid.major.x = ggplot2::element_blank(),
+      panel.grid.major.x = ggplot2::element_blank(),  # sin grid vertical por defecto
+
       axis.title.x       = ggplot2::element_blank(),
-      axis.text.x        = ggplot2::element_blank(),
-      axis.ticks.x       = ggplot2::element_blank(),
       axis.title.y       = ggplot2::element_blank(),
+
+      # Eje de categorías (vertical tras coord_flip)
       axis.text.y        = ggplot2::element_text(
         color = color_ejes,
         size  = size_ejes,
@@ -475,6 +502,12 @@ graficar_barras_agrupadas <- function(
         vjust = 0.5
       ),
       axis.line.y        = ggplot2::element_line(color = color_ejes, linewidth = 0.3),
+
+      # Eje X (valores) por defecto sin texto ni ticks
+      axis.text.x        = ggplot2::element_blank(),
+      axis.ticks.x       = ggplot2::element_blank(),
+      axis.line.x        = ggplot2::element_blank(),
+
       legend.title       = ggplot2::element_blank(),
       legend.position    = if (mostrar_leyenda) "bottom" else "none",
       legend.text        = ggplot2::element_text(
@@ -482,6 +515,7 @@ graficar_barras_agrupadas <- function(
         size  = size_leyenda,
         face  = if ("leyenda" %in% textos_negrita) "bold" else "plain"
       ),
+
       plot.margin        = ggplot2::margin(t = 15, r = 80, b = 15, l = 5),
       plot.title         = ggplot2::element_text(
         hjust = hjust_titulo,
@@ -503,15 +537,39 @@ graficar_barras_agrupadas <- function(
       panel.background   = ggplot2::element_rect(fill = color_fondo, color = NA)
     )
 
+  # Eje de porcentajes minimalista SOLO si estamos en escala de proporción
+  if (escala_valor %in% c("proporcion_1", "proporcion_100")) {
+    eje_theme <- ggplot2::theme(
+      axis.text.x  = ggplot2::element_text(
+        color = "#7F7F7F",
+        size  = size_ejes
+      ),
+      axis.ticks.x = ggplot2::element_line(
+        color = "#7F7F7F",
+        linewidth = 0.3
+      ),
+      axis.line.x  = ggplot2::element_line(
+        color = "#7F7F7F",
+        linewidth = 0.4
+      )
+    )
+  } else {
+    eje_theme <- ggplot2::theme()  # nada extra
+  }
+
+  p <- p +
+    ggplot2::coord_flip() +
+    base_theme +
+    eje_theme +
+    ggplot2::labs(
+      title    = titulo,
+      subtitle = subtitulo,
+      caption  = caption_text
+    )
+
   if (invertir_leyenda && mostrar_leyenda) {
     p <- p + ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE))
   }
-
-  p <- p + ggplot2::labs(
-    title    = titulo,
-    subtitle = subtitulo,
-    caption  = caption_text
-  )
 
   # ---------------------------------------------------------------------------
   # 7. Exportación
