@@ -43,7 +43,9 @@ provenientes del instrumento.
 \code{labels} = \code{"No"} / \code{"Sí"}.
 \item Sin variables madre de \code{select_multiple} (ni originales ni
 recodificadas): solo se conservan las dummies.
-\item Con atributos \code{label}, \code{labels} y \code{measure} según el instrumento.
+\item Con atributos \code{label}, \code{labels} y \code{measure} según el instrumento,
+completando \code{measure} faltante con una heurística coherente con
+SPSS cuando no hay regla explícita.
 \item Con atributos a nivel de objeto:
 \describe{
 \item{instrumento_reporte}{Metadatos completos del instrumento.}

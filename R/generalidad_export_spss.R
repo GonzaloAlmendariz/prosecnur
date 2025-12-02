@@ -254,7 +254,7 @@ reporte_spss <- function(data,
 
 
 
-#' Generar sintaxis SPSS para niveles de medida
+#' Generar sintaxis SPSS para niveles de medida y formatos de decimales
 #'
 #' A partir de una base de reporte (típicamente devuelta por
 #' [reporte_data()]), la función identifica las variables que tienen el
@@ -267,32 +267,51 @@ reporte_spss <- function(data,
 #' - `measure = "scale"`    -> `VARIABLE LEVEL ... (SCALE).`
 #' - `measure = "nominal"`  -> `VARIABLE LEVEL ... (NOMINAL).`
 #'
-#' Las variables nominales que se incluyen suelen ser las dummies
-#' generadas a partir de `select_multiple` (por ejemplo `var.1`, `var.2`,
-#' `var.x`), marcadas como nominales en [reporte_data()].
+#' Las variables nominales incluyen tanto las dummies generadas a partir
+#' de `select_multiple` (por ejemplo `var.1`, `var.2`, `var.x`) como
+#' otras variables nominales simples (p107, p108, etc.), siempre que
+#' tengan el atributo `measure = "nominal"`.
+#'
+#' Además, opcionalmente se generan sentencias `FORMATS` para los
+#' decimales:
+#'
+#' - Por defecto, todas las variables numéricas quedan con formato
+#'   `F8.0` (sin decimales): `FORMATS ALL (F8.0).`
+#' - Las variables listadas en `decimales_2` se formatean con `F8.2`
+#'   (dos decimales): `FORMATS var1 var2 ... (F8.2).`
 #'
 #' Para evitar líneas demasiado largas, las variables se agrupan en
-#' bloques de hasta 3 nombres por sentencia `VARIABLE LEVEL`.
+#' bloques de hasta 3 nombres por sentencia `VARIABLE LEVEL`, y en
+#' bloques de hasta 10 nombres por sentencia `FORMATS ... (F8.2).`
 #'
 #' @param data Un `data.frame` o `tibble`, preferentemente el objeto
 #'   devuelto por [reporte_data()] (clase `"prosecnur_reporte_tbl"`).
 #' @param path_sps Ruta del archivo `.sps` a generar.
 #' @param verbose Lógico; si `TRUE` imprime un mensaje con la ruta
 #'   generada.
+#' @param decimales_2 Vector opcional con nombres de variables que deben
+#'   mostrarse con 2 decimales (`F8.2`) en SPSS. Si se proporciona
+#'   `data`, solo se conservarán aquellas que existan y sean numéricas
+#'   (o `haven_labelled`). Si es `NULL` o vacío, solo se aplica
+#'   `FORMATS ALL (F8.0).`
 #'
 #' @return Invisiblemente, una lista con los vectores de variables
-#'   ordinales, de escala y nominales (dummies), junto con la ruta del
+#'   ordinales, de escala, nominales dummies, nominales no dummies,
+#'   el vector final usado en `decimales_2`, junto con la ruta del
 #'   archivo `.sps`.
 #' @export
 generar_spss_niveles <- function(data,
-                                 path_sps = "niveles_medida.sps",
-                                 verbose = TRUE) {
+                                 path_sps    = "niveles_medida.sps",
+                                 verbose     = TRUE,
+                                 decimales_2 = NULL) {
 
   if (!is.data.frame(data)) {
     stop("`data` debe ser un data.frame o tibble.", call. = FALSE)
   }
 
-  # Detectar medida desde el atributo 'measure'
+  # ---------------------------------------------------------------------------
+  # 1) Detectar medida desde el atributo 'measure'
+  # ---------------------------------------------------------------------------
   vars_ordinal <- names(data)[vapply(
     data,
     function(x) identical(attr(x, "measure", exact = TRUE), "ordinal"),
@@ -318,15 +337,18 @@ generar_spss_niveles <- function(data,
     logical(1)
   )]
 
-  # Focalizar nominales en las dummies tipo var.1 / var.x
+  # Nominales dummies tipo var.1 / var.x
   vars_nominal_dummies <- vars_nominal_raw[
     grepl("\\.[0-9]+$", vars_nominal_raw) |
       grepl("\\.x$",    vars_nominal_raw, ignore.case = TRUE)
   ]
 
+  # Nominales que NO son dummies (p107, p108, p109_a, p110, etc.)
+  vars_nominal_otros <- setdiff(vars_nominal_raw, vars_nominal_dummies)
+
   lineas <- character(0L)
 
-  # Helper para partir en bloques de hasta 3 vars
+  # Helper para partir en bloques de hasta 3 vars (VARIABLE LEVEL)
   add_variable_level_blocks <- function(vars, level) {
     if (length(vars) == 0L) return(character(0L))
     split_vars <- split(vars, ceiling(seq_along(vars) / 3))
@@ -343,20 +365,62 @@ generar_spss_niveles <- function(data,
     )
   }
 
+  # ---------------------------------------------------------------------------
+  # 2) Líneas de VARIABLE LEVEL
+  # ---------------------------------------------------------------------------
   lineas <- c(
     lineas,
     add_variable_level_blocks(vars_ordinal,         "ordinal"),
     add_variable_level_blocks(vars_scale,           "scale"),
-    add_variable_level_blocks(vars_nominal_dummies, "nominal")
+    add_variable_level_blocks(vars_nominal_dummies, "nominal"),
+    add_variable_level_blocks(vars_nominal_otros,   "nominal")
   )
 
   if (length(lineas) == 0L) {
     warning(
       "No se encontraron variables con atributo 'measure' ",
-      "= 'ordinal', 'scale' o 'nominal' (dummies)."
+      "= 'ordinal', 'scale' o 'nominal'."
     )
   }
 
+  # ---------------------------------------------------------------------------
+  # 3) Formatos de decimales vía sintaxis SPSS (FORMATS)
+  # ---------------------------------------------------------------------------
+  # Normalizar vector de decimales_2
+  if (is.null(decimales_2) || length(decimales_2) == 0L) {
+    decimales_2_final <- character(0)
+  } else {
+    decimales_2_final <- unique(decimales_2)
+    # Filtrar a variables existentes y numéricas/haven_labelled
+    decimales_2_final <- intersect(decimales_2_final, names(data))
+    if (length(decimales_2_final) > 0L) {
+      es_numeric <- vapply(
+        data[decimales_2_final],
+        function(x) is.numeric(x) || inherits(x, "haven_labelled"),
+        logical(1)
+      )
+      decimales_2_final <- decimales_2_final[es_numeric]
+    }
+  }
+
+  # 3.1 Regla general: todo numérico con F8.0 (SPSS solo afecta numéricos)
+  lineas <- c(lineas, "FORMATS ALL (F8.0).")
+
+  # 3.2 Excepciones: variables con 2 decimales -> F8.2
+  if (length(decimales_2_final) > 0L) {
+    split_vars_fmt <- split(decimales_2_final,
+                            ceiling(seq_along(decimales_2_final) / 10))
+    lineas_fmt_2 <- vapply(
+      split_vars_fmt,
+      function(v) sprintf("FORMATS %s (F8.2).", paste(v, collapse = " ")),
+      character(1L)
+    )
+    lineas <- c(lineas, lineas_fmt_2)
+  }
+
+  # ---------------------------------------------------------------------------
+  # 4) Cierre con EXECUTE y escritura a disco
+  # ---------------------------------------------------------------------------
   lineas <- c(lineas, "EXECUTE.")
 
   writeLines(lineas, path_sps, useBytes = TRUE)
@@ -372,6 +436,8 @@ generar_spss_niveles <- function(data,
     vars_ordinal         = vars_ordinal,
     vars_scale           = vars_scale,
     vars_nominal_dummies = vars_nominal_dummies,
+    vars_nominal_otros   = vars_nominal_otros,
+    decimales_2          = decimales_2_final,
     path_sps             = path_sps
   ))
 }

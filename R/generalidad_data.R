@@ -1,3 +1,40 @@
+#' @noRd
+guess_spss_measure <- function(x) {
+  # 1) Si viene medida explícita en el atributo, se respeta SIEMPRE
+  m <- attr(x, "measure", exact = TRUE)
+  if (!is.null(m)) {
+    m <- tolower(as.character(m))
+    if (m %in% c("nominal", "ordinal", "scale")) {
+      return(toupper(m))  # "NOMINAL", "ORDINAL", "SCALE"
+    }
+  }
+
+  # 2) Heurísticas de respaldo si NO hay "measure" definido
+  if (inherits(x, "haven_labelled")) {
+    labs <- attr(x, "labels", exact = TRUE)
+    if (!is.null(labs)) {
+      cods <- suppressWarnings(as.numeric(names(labs)))
+      if (all(!is.na(cods))) {
+        return("ORDINAL")
+      } else {
+        return("NOMINAL")
+      }
+    }
+    return("NOMINAL")
+  }
+
+  if (is.factor(x)) {
+    return("NOMINAL")
+  }
+
+  if (is.numeric(x)) {
+    return("SCALE")
+  }
+
+  # Para character u otros sin atributo "measure", no se define nada
+  NA_character_
+}
+
 #' Adaptar la base para reporte y estructura tipo SPSS
 #'
 #' `reporte_data()` toma una base de datos ya adaptada (tras la evaluación de
@@ -57,7 +94,9 @@
 #'           `labels` = `"No"` / `"Sí"`.
 #'     \item Sin variables madre de `select_multiple` (ni originales ni
 #'           recodificadas): solo se conservan las dummies.
-#'     \item Con atributos `label`, `labels` y `measure` según el instrumento.
+#'     \item Con atributos `label`, `labels` y `measure` según el instrumento,
+#'           completando `measure` faltante con una heurística coherente con
+#'           SPSS cuando no hay regla explícita.
 #'     \item Con atributos a nivel de objeto:
 #'       \describe{
 #'         \item{instrumento_reporte}{Metadatos completos del instrumento.}
@@ -356,7 +395,7 @@ reporte_data <- function(data,
   }
 
   # -------------------------------------------------------------------------
-  # 6) Asignar nivel de medición sugerido (attr(, "measure"))
+  # 6) Asignar nivel de medición sugerido (attr(, "measure")) según reglas
   # -------------------------------------------------------------------------
   if (!is.null(measure_rules) &&
       all(c("name", "measure_sugerida") %in% names(measure_rules))) {
@@ -367,6 +406,19 @@ reporte_data <- function(data,
       m <- measure_rules$measure_sugerida[measure_rules$name == v][1]
       if (!is.na(m) && !is.null(m) && nzchar(m)) {
         attr(data[[v]], "measure") <- as.character(m)
+      }
+    }
+  }
+
+  # -------------------------------------------------------------------------
+  # 6b) Completar measure faltante con heurística SPSS-friendly
+  #      (no rompe nada: respeta lo que ya viene en attr("measure"))
+  # -------------------------------------------------------------------------
+  for (v in names(data)) {
+    if (is.null(attr(data[[v]], "measure"))) {
+      m_inf <- guess_spss_measure(data[[v]])
+      if (!is.na(m_inf)) {
+        attr(data[[v]], "measure") <- tolower(m_inf)
       }
     }
   }

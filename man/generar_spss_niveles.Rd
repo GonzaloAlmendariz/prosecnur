@@ -2,9 +2,14 @@
 % Please edit documentation in R/generalidad_export_spss.R
 \name{generar_spss_niveles}
 \alias{generar_spss_niveles}
-\title{Generar sintaxis SPSS para niveles de medida}
+\title{Generar sintaxis SPSS para niveles de medida y formatos de decimales}
 \usage{
-generar_spss_niveles(data, path_sps = "niveles_medida.sps", verbose = TRUE)
+generar_spss_niveles(
+  data,
+  path_sps = "niveles_medida.sps",
+  verbose = TRUE,
+  decimales_2 = NULL
+)
 }
 \arguments{
 \item{data}{Un \code{data.frame} o \code{tibble}, preferentemente el objeto
@@ -14,10 +19,17 @@ devuelto por \code{\link[=reporte_data]{reporte_data()}} (clase \code{"prosecnur
 
 \item{verbose}{Lógico; si \code{TRUE} imprime un mensaje con la ruta
 generada.}
+
+\item{decimales_2}{Vector opcional con nombres de variables que deben
+mostrarse con 2 decimales (\code{F8.2}) en SPSS. Si se proporciona
+\code{data}, solo se conservarán aquellas que existan y sean numéricas
+(o \code{haven_labelled}). Si es \code{NULL} o vacío, solo se aplica
+\verb{FORMATS ALL (F8.0).}}
 }
 \value{
 Invisiblemente, una lista con los vectores de variables
-ordinales, de escala y nominales (dummies), junto con la ruta del
+ordinales, de escala, nominales dummies, nominales no dummies,
+el vector final usado en \code{decimales_2}, junto con la ruta del
 archivo \code{.sps}.
 }
 \description{
@@ -34,10 +46,21 @@ En particular:
 \item \code{measure = "nominal"}  -> \verb{VARIABLE LEVEL ... (NOMINAL).}
 }
 
-Las variables nominales que se incluyen suelen ser las dummies
-generadas a partir de \code{select_multiple} (por ejemplo \code{var.1}, \code{var.2},
-\code{var.x}), marcadas como nominales en \code{\link[=reporte_data]{reporte_data()}}.
+Las variables nominales incluyen tanto las dummies generadas a partir
+de \code{select_multiple} (por ejemplo \code{var.1}, \code{var.2}, \code{var.x}) como
+otras variables nominales simples (p107, p108, etc.), siempre que
+tengan el atributo \code{measure = "nominal"}.
+
+Además, opcionalmente se generan sentencias \code{FORMATS} para los
+decimales:
+\itemize{
+\item Por defecto, todas las variables numéricas quedan con formato
+\code{F8.0} (sin decimales): \verb{FORMATS ALL (F8.0).}
+\item Las variables listadas en \code{decimales_2} se formatean con \code{F8.2}
+(dos decimales): \verb{FORMATS var1 var2 ... (F8.2).}
+}
 
 Para evitar líneas demasiado largas, las variables se agrupan en
-bloques de hasta 3 nombres por sentencia \verb{VARIABLE LEVEL}.
+bloques de hasta 3 nombres por sentencia \verb{VARIABLE LEVEL}, y en
+bloques de hasta 10 nombres por sentencia \verb{FORMATS ... (F8.2).}
 }
