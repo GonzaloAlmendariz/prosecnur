@@ -143,8 +143,8 @@ directamente a \code{graficar_barras_apiladas()}.}
 \code{graficar_dico()}.}
 
 \item{colores_estratos}{Vector nombrado opcional de colores HEX para los
-estratos en barras agrupadas (nombres = etiquetas de estrato). Si se
-define \code{estilos_barras_agrupadas$colores_series}, tiene prioridad.}
+estratos en barras agrupadas (se mantiene como respaldo si sus nombres
+coinciden con las etiquetas de serie).}
 
 \item{opciones_excluir}{Vector de labels de opciones a excluir de la
 variable de interés (por ejemplo, categorías de no respuesta).}

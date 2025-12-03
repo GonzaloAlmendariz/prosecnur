@@ -41,6 +41,7 @@ graficar_barras_agrupadas(
   color_ejes = "#004B8D",
   size_ejes = 9,
   color_fondo = NA,
+  grosor_barras = 0.6,
   extra_derecha_rel = 0.25,
   mostrar_leyenda = TRUE,
   invertir_leyenda = FALSE,
@@ -110,97 +111,46 @@ agrega encabezado.}
 
 \item{subtitulo}{Subtítulo opcional del gráfico.}
 
-\item{nota_pie}{Nota o fuente para el pie de página (por ejemplo,
-\code{"Fuente: Pulso PUCP 2025"}).}
+\item{nota_pie}{Nota o fuente para el pie de página.}
 
 \item{nota_pie_derecha}{Texto adicional para el pie de página que se
-concatenará a la derecha de \code{nota_pie} (por ejemplo,
-\code{"N total = 52"}). Ambos se muestran en una única línea de caption.}
+concatenará a la derecha de \code{nota_pie}.}
 
-\item{pos_titulo}{Alineación horizontal del título. Puede ser
-\code{"centro"}, \code{"izquierda"} o \code{"derecha"}.}
+\item{pos_titulo}{Alineación horizontal del título: \code{"centro"}, \code{"izquierda"}
+o \code{"derecha"}.}
 
-\item{pos_nota_pie}{Alineación horizontal de la nota al pie (caption). Puede ser
+\item{pos_nota_pie}{Alineación horizontal de la nota al pie (caption):
 \code{"derecha"}, \code{"izquierda"} o \code{"centro"}.}
 
-\item{color_titulo}{Color del título.}
+\item{color_titulo, size_titulo, color_subtitulo, size_subtitulo, }{color_nota_pie,size_nota_pie,color_leyenda,size_leyenda,
+color_texto_barras,color_texto_barras_fuera,size_texto_barras,
+color_barra_extra,size_barra_extra,color_ejes,size_ejes,
+color_fondo Parámetros estéticos.}
 
-\item{size_titulo}{Tamaño del título.}
-
-\item{color_subtitulo}{Color del subtítulo.}
-
-\item{size_subtitulo}{Tamaño del subtítulo.}
-
-\item{color_nota_pie}{Color del texto del pie de página (caption).}
-
-\item{size_nota_pie}{Tamaño del texto del pie de página (caption).}
-
-\item{color_leyenda}{Color del texto de la leyenda.}
-
-\item{size_leyenda}{Tamaño del texto de la leyenda.}
-
-\item{color_texto_barras}{Color del texto de los porcentajes cuando la
-etiqueta se dibuja dentro de la barra.}
-
-\item{color_texto_barras_fuera}{Color del texto de los porcentajes cuando
-la etiqueta se dibuja fuera de la barra.}
-
-\item{size_texto_barras}{Tamaño del texto de los porcentajes.}
-
-\item{color_barra_extra}{Color del texto de la barra extra (N).}
-
-\item{size_barra_extra}{Tamaño del texto de la barra extra (N).}
-
-\item{color_ejes}{Color del texto de las categorías en el eje.}
-
-\item{size_ejes}{Tamaño del texto de las categorías en el eje.}
-
-\item{color_fondo}{Color de fondo del gráfico. Si es \code{NA} (por defecto),
-el fondo será transparente (útil para insertar en PPT/Word).}
+\item{grosor_barras}{Grosor relativo de cada barra dentro de su grupo.}
 
 \item{extra_derecha_rel}{Porción adicional a la derecha, en unidades de
-proporción. Cuando \code{escala_valor} es proporcional y
-\code{mostrar_barra_extra = TRUE}, un valor de 0.25 implica que el
-espacio 0–1 (0–100\\%) ocupa ~80\\% del ancho y la barra extra ~20\\%.}
+proporción, para la barra extra.}
 
-\item{mostrar_leyenda}{Lógico; si \code{FALSE}, oculta la leyenda (útil
-cuando solo hay una serie).}
+\item{mostrar_leyenda, invertir_leyenda, invertir_barras, invertir_series}{Controles de leyenda y orden.}
 
-\item{invertir_leyenda}{Lógico; si \code{TRUE}, invierte el orden de los
-ítems de la leyenda.}
+\item{textos_negrita}{Vector que puede incluir \code{"titulo"}, \code{"porcentajes"},
+\code{"leyenda"} y/o \code{"barra_extra"}.}
 
-\item{invertir_barras}{Lógico; si \code{TRUE}, invierte el orden en que las
-categorías aparecen en el eje vertical (orden de las barras).}
+\item{exportar}{\code{"rplot"}, \code{"png"}, \code{"ppt"} o \code{"word"}.}
 
-\item{invertir_series}{Lógico; si \code{TRUE}, invierte el orden de las
-series dentro de cada grupo (útil para mantener orden visual coherente).}
+\item{path_salida}{Ruta del archivo cuando \code{exportar != "rplot"}.}
 
-\item{textos_negrita}{Vector de caracteres que indica qué elementos deben
-mostrarse en negrita. Puede incluir cualquiera de:
-\code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"barra_extra"}.}
-
-\item{exportar}{Método de salida: \code{"rplot"} (devuelve un objeto
-\code{ggplot}), \code{"png"} (exporta un archivo PNG), \code{"ppt"} o \code{"Word"}
-(exporta una diapositiva PPTX con el gráfico incrustado).}
-
-\item{path_salida}{Ruta del archivo a crear cuando \code{exportar} no es
-\code{"rplot"}.}
-
-\item{ancho}{Ancho del gráfico (cuando se exporta a archivo).}
-
-\item{alto}{Alto del gráfico (cuando se exporta a archivo).}
-
-\item{dpi}{Resolución en puntos por pulgada (solo para PNG).}
+\item{ancho, alto, dpi}{Parámetros de exportación.}
 }
 \value{
-Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
-invisible, el gráfico exportado si se utiliza \code{"png"} o \code{"ppt"}.
+Un objeto \code{ggplot} si \code{exportar = "rplot"}.
 }
 \description{
 Genera un gráfico de barras horizontales agrupadas donde cada categoría
 (por ejemplo, servicios, enfermedades, regiones) se muestra en el eje
 vertical, y para cada una se comparan dos o más porcentajes en el eje
-horizontal (por ejemplo, "\\% capacitado en el área" y "\\% capacitado en M\&R").
+horizontal (por ejemplo, "\% capacitado en el área" y "\% capacitado en M&R").
 }
 \details{
 La función está pensada para usarse directamente con tablas de indicadores

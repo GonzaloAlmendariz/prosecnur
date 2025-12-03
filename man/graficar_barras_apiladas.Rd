@@ -40,6 +40,7 @@ graficar_barras_apiladas(
   color_ejes = "#000000",
   size_ejes = 9,
   color_fondo = NA,
+  grosor_barras = 0.7,
   extra_derecha_rel = 0.1,
   mostrar_leyenda = TRUE,
   invertir_leyenda = FALSE,
@@ -50,6 +51,7 @@ graficar_barras_apiladas(
   path_salida = NULL,
   ancho = 10,
   alto = 6,
+  alto_por_categoria = NULL,
   dpi = 300
 )
 }
@@ -155,6 +157,9 @@ sobreescribir internamente si se usa un preset).}
 \item{color_fondo}{Color de fondo del gráfico. Si es \code{NA} (por defecto),
 el fondo será transparente (útil para insertar en PPT/Word).}
 
+\item{grosor_barras}{Ancho relativo de las barras (argumento \code{width} de
+\code{geom_col()}). Toma valores típicos entre 0 y 1. Por defecto 0.7.}
+
 \item{extra_derecha_rel}{Porcentaje adicional a la derecha para ubicar la
 barra extra, relativo a la longitud de la barra más larga.}
 
@@ -187,6 +192,10 @@ mostrarse en negrita. Puede incluir cualquiera de:
 \item{ancho}{Ancho del gráfico (cuando se exporta a archivo).}
 
 \item{alto}{Alto del gráfico (cuando se exporta a archivo).}
+
+\item{alto_por_categoria}{Alto (en pulgadas) a asignar por categoría cuando
+no se especifica \code{alto}. Si es \code{NULL}, se usan los valores por
+defecto históricos.}
 
 \item{dpi}{Resolución en puntos por pulgada (solo para PNG).}
 }

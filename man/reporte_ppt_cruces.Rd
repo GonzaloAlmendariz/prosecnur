@@ -146,8 +146,8 @@ directamente a \code{graficar_barras_apiladas()}.}
 \code{graficar_dico()}.}
 
 \item{colores_estratos}{Vector nombrado opcional de colores HEX para los
-estratos en barras agrupadas (nombres = etiquetas de estrato). Si se
-define \code{estilos_barras_agrupadas$colores_series}, tiene prioridad.}
+estratos en barras agrupadas (se mantiene como respaldo si sus nombres
+coinciden con las etiquetas de serie).}
 
 \item{opciones_excluir}{Vector de labels de opciones a excluir de la
 variable de interés (por ejemplo, categorías de no respuesta).}
@@ -222,13 +222,16 @@ A partir de esa tabla, se generan los insumos para los graficadores:
 \code{colores_apiladas_por_listname[[list_name_v]]}, igual que en
 \code{reporte_ppt()}, con soporte de objetos tipo
 \code{list(colores = ..., preset_barra_extra = ...)}.
-\item Barras agrupadas:
-\item Cada fila es una categoría de \code{v}.
-\item Las series son los estratos (una barra por estrato).
-\item Los colores de las series se leen de
-\code{estilos_barras_agrupadas$colores_series} o, si no existe,
-de \code{colores_estratos}. En su defecto se usa una paleta por
-defecto con nombres = etiquetas de estrato.
+\item Barras agrupadas (cruces):
+\item Cada fila es un estrato (\code{categoria} = etiqueta del estrato).
+\item Las series (barras dentro de cada estrato) son las categorías de
+la variable \code{v}.
+\item Los colores de las series se intentan obtener primero de
+\code{colores_apiladas_por_listname[[list_name_v]]} (por
+\code{list_name}); en su defecto de
+\code{estilos_barras_agrupadas$colores_series} o de una paleta
+por defecto. \code{colores_estratos} se mantiene como respaldo si
+sus nombres coinciden con las etiquetas de serie.
 \item Dicotómicas:
 \item Cada estrato es un "indicador" distinto.
 \item Se calcula el porcentaje de la categoría "positiva" sobre el total

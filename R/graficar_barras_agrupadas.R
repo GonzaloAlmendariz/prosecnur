@@ -1,16 +1,9 @@
-# =============================================================================
-# graficar_barras_agrupadas()
-# -----------------------------------------------------------------------------
-# Barras horizontales agrupadas para comparar 2+ indicadores por categoría
-# (por ejemplo, % capacitado en el área vs % capacitado en M&R).
-# =============================================================================
-
 #' Graficar barras horizontales agrupadas a partir de una tabla ancha
 #'
 #' Genera un gráfico de barras horizontales agrupadas donde cada categoría
 #' (por ejemplo, servicios, enfermedades, regiones) se muestra en el eje
 #' vertical, y para cada una se comparan dos o más porcentajes en el eje
-#' horizontal (por ejemplo, "\% capacitado en el área" y "\% capacitado en M\&R").
+#' horizontal (por ejemplo, "% capacitado en el área" y "% capacitado en M&R").
 #'
 #' La función está pensada para usarse directamente con tablas de indicadores
 #' ya calculadas (formato ancho), sin necesidad de reestructurar los datos
@@ -45,7 +38,6 @@
 #'   el porcentaje se dibuja centrado dentro de la barra. Si la barra es
 #'   menor a este umbral, el porcentaje se dibuja ligeramente a la derecha del
 #'   final de la barra.
-#'
 #' @param mostrar_barra_extra Lógico; si \code{TRUE}, agrega una "barra extra"
 #'   de texto al extremo derecho de cada categoría (típicamente el N, por
 #'   ejemplo `"N=305"`).
@@ -54,66 +46,32 @@
 #' @param titulo_barra_extra Texto que se coloca como encabezado encima de la
 #'   columna de barra extra (por ejemplo, `"Total"`). Si es \code{NULL}, no se
 #'   agrega encabezado.
-#'
 #' @param titulo Título del gráfico.
 #' @param subtitulo Subtítulo opcional del gráfico.
-#' @param nota_pie Nota o fuente para el pie de página (por ejemplo,
-#'   `"Fuente: Pulso PUCP 2025"`).
+#' @param nota_pie Nota o fuente para el pie de página.
 #' @param nota_pie_derecha Texto adicional para el pie de página que se
-#'   concatenará a la derecha de \code{nota_pie} (por ejemplo,
-#'   `"N total = 52"`). Ambos se muestran en una única línea de caption.
-#' @param pos_titulo Alineación horizontal del título. Puede ser
-#'   \code{"centro"}, \code{"izquierda"} o \code{"derecha"}.
-#' @param pos_nota_pie Alineación horizontal de la nota al pie (caption). Puede ser
-#'   \code{"derecha"}, \code{"izquierda"} o \code{"centro"}.
-#'
-#' @param color_titulo Color del título.
-#' @param size_titulo Tamaño del título.
-#' @param color_subtitulo Color del subtítulo.
-#' @param size_subtitulo Tamaño del subtítulo.
-#' @param color_nota_pie Color del texto del pie de página (caption).
-#' @param size_nota_pie Tamaño del texto del pie de página (caption).
-#' @param color_leyenda Color del texto de la leyenda.
-#' @param size_leyenda Tamaño del texto de la leyenda.
-#' @param color_texto_barras Color del texto de los porcentajes cuando la
-#'   etiqueta se dibuja dentro de la barra.
-#' @param color_texto_barras_fuera Color del texto de los porcentajes cuando
-#'   la etiqueta se dibuja fuera de la barra.
-#' @param size_texto_barras Tamaño del texto de los porcentajes.
-#' @param color_barra_extra Color del texto de la barra extra (N).
-#' @param size_barra_extra Tamaño del texto de la barra extra (N).
-#' @param color_ejes Color del texto de las categorías en el eje.
-#' @param size_ejes Tamaño del texto de las categorías en el eje.
-#' @param color_fondo Color de fondo del gráfico. Si es \code{NA} (por defecto),
-#'   el fondo será transparente (útil para insertar en PPT/Word).
-#'
+#'   concatenará a la derecha de \code{nota_pie}.
+#' @param pos_titulo Alineación horizontal del título: `"centro"`, `"izquierda"`
+#'   o `"derecha"`.
+#' @param pos_nota_pie Alineación horizontal de la nota al pie (caption):
+#'   `"derecha"`, `"izquierda"` o `"centro"`.
+#' @param color_titulo,size_titulo,color_subtitulo,size_subtitulo,
+#'   color_nota_pie,size_nota_pie,color_leyenda,size_leyenda,
+#'   color_texto_barras,color_texto_barras_fuera,size_texto_barras,
+#'   color_barra_extra,size_barra_extra,color_ejes,size_ejes,
+#'   color_fondo Parámetros estéticos.
+#' @param grosor_barras Grosor relativo de cada barra dentro de su grupo.
 #' @param extra_derecha_rel Porción adicional a la derecha, en unidades de
-#'   proporción. Cuando \code{escala_valor} es proporcional y
-#'   \code{mostrar_barra_extra = TRUE}, un valor de 0.25 implica que el
-#'   espacio 0–1 (0–100\%) ocupa ~80\% del ancho y la barra extra ~20\%.
-#' @param mostrar_leyenda Lógico; si \code{FALSE}, oculta la leyenda (útil
-#'   cuando solo hay una serie).
-#' @param invertir_leyenda Lógico; si \code{TRUE}, invierte el orden de los
-#'   ítems de la leyenda.
-#' @param invertir_barras Lógico; si \code{TRUE}, invierte el orden en que las
-#'   categorías aparecen en el eje vertical (orden de las barras).
-#' @param invertir_series Lógico; si \code{TRUE}, invierte el orden de las
-#'   series dentro de cada grupo (útil para mantener orden visual coherente).
-#' @param textos_negrita Vector de caracteres que indica qué elementos deben
-#'   mostrarse en negrita. Puede incluir cualquiera de:
-#'   \code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"barra_extra"}.
+#'   proporción, para la barra extra.
+#' @param mostrar_leyenda,invertir_leyenda,invertir_barras,invertir_series
+#'   Controles de leyenda y orden.
+#' @param textos_negrita Vector que puede incluir `"titulo"`, `"porcentajes"`,
+#'   `"leyenda"` y/o `"barra_extra"`.
+#' @param exportar `"rplot"`, `"png"`, `"ppt"` o `"word"`.
+#' @param path_salida Ruta del archivo cuando `exportar != "rplot"`.
+#' @param ancho,alto,dpi Parámetros de exportación.
 #'
-#' @param exportar Método de salida: \code{"rplot"} (devuelve un objeto
-#'   \code{ggplot}), \code{"png"} (exporta un archivo PNG), \code{"ppt"} o \code{"Word"}
-#'   (exporta una diapositiva PPTX con el gráfico incrustado).
-#' @param path_salida Ruta del archivo a crear cuando \code{exportar} no es
-#'   \code{"rplot"}.
-#' @param ancho Ancho del gráfico (cuando se exporta a archivo).
-#' @param alto Alto del gráfico (cuando se exporta a archivo).
-#' @param dpi Resolución en puntos por pulgada (solo para PNG).
-#'
-#' @return Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
-#'   invisible, el gráfico exportado si se utiliza \code{"png"} o \code{"ppt"}.
+#' @return Un objeto \code{ggplot} si \code{exportar = "rplot"}.
 #' @export
 graficar_barras_agrupadas <- function(
     data,
@@ -153,7 +111,8 @@ graficar_barras_agrupadas <- function(
     color_ejes                = "#004B8D",
     size_ejes                 = 9,
     color_fondo               = NA,
-    extra_derecha_rel         = 0.25,  # 0.25 → 0–100% ≈ 80% + 20% barra extra
+    grosor_barras             = 0.6,
+    extra_derecha_rel         = 0.25,
     mostrar_leyenda           = TRUE,
     invertir_leyenda          = FALSE,
     invertir_barras           = FALSE,
@@ -173,11 +132,7 @@ graficar_barras_agrupadas <- function(
   pos_titulo   <- match.arg(pos_titulo)
   pos_nota_pie <- match.arg(pos_nota_pie)
 
-  # -----------------------------------------------------------------
-  # Normalizar `decimales` a un escalar numérico seguro
-  # -----------------------------------------------------------------
   decimales <- suppressWarnings(as.numeric(decimales))
-
   if (length(decimales) < 1L || !is.finite(decimales[1])) {
     decimales <- 1
   } else {
@@ -198,7 +153,7 @@ graficar_barras_agrupadas <- function(
   hjust_caption <- hjust_from_pos(pos_nota_pie)
 
   # ---------------------------------------------------------------------------
-  # 0. Validaciones básicas
+  # Validaciones básicas
   # ---------------------------------------------------------------------------
   if (!var_categoria %in% names(data)) {
     stop("`var_categoria` no existe en `data`.", call. = FALSE)
@@ -241,7 +196,6 @@ graficar_barras_agrupadas <- function(
     stop("Las columnas de porcentaje deben ser numéricas.", call. = FALSE)
   }
 
-  # Etiquetas legibles de series
   df_long$.serie <- dplyr::recode(df_long$.col_pct, !!!etiquetas_series)
 
   # Escala interna 0–1
@@ -251,22 +205,17 @@ graficar_barras_agrupadas <- function(
     df_long$.valor_plot <- df_long$.valor
   }
 
-  # Eliminar combinaciones sin valor o 0 para evitar huecos en el dodge
-  df_long <- df_long |>
-    dplyr::filter(!is.na(.valor_plot) & .valor_plot > 0)
+  # Mantener ceros; SOLO NA → 0
+  df_long$.valor_plot[is.na(df_long$.valor_plot)] <- 0
 
-  if (!nrow(df_long)) {
-    stop("No hay valores positivos para graficar.", call. = FALSE)
-  }
-
-  # Orden de series según etiquetas_series, con opción de invertir series
+  # Orden de series
   niveles_series <- unname(etiquetas_series)
   if (invertir_series) {
     niveles_series <- rev(niveles_series)
   }
   df_long$.serie <- factor(df_long$.serie, levels = niveles_series)
 
-  # Orden de categorías según aparición (con opción de invertir)
+  # Orden de categorías
   cat_vec  <- df_long[[var_categoria]]
   cat_lvls <- unique(cat_vec)
   if (invertir_barras) {
@@ -274,7 +223,7 @@ graficar_barras_agrupadas <- function(
   }
   df_long[[var_categoria]] <- factor(cat_vec, levels = cat_lvls)
 
-  # Nº de series por categoría (para ajustar automáticamente el tamaño del texto)
+  # Tamaño de texto según nº de series
   n_series <- length(unique(df_long$.serie))
   size_texto_barras_eff <- dplyr::case_when(
     n_series <= 2 ~ size_texto_barras * 1.00,
@@ -283,13 +232,13 @@ graficar_barras_agrupadas <- function(
     TRUE          ~ size_texto_barras * 0.55
   )
 
-  # Máximo valor observado (en proporción 0–1)
   max_valor <- max(df_long$.valor_plot, na.rm = TRUE)
 
   # ---------------------------------------------------------------------------
-  # 2. Gráfico base (antes de coord_flip)
+  # 2. Gráfico base
   # ---------------------------------------------------------------------------
   width_dodge <- 0.7
+
   p <- ggplot2::ggplot(
     df_long,
     ggplot2::aes_string(
@@ -300,90 +249,85 @@ graficar_barras_agrupadas <- function(
   ) +
     ggplot2::geom_col(
       position = ggplot2::position_dodge(width = width_dodge),
-      width    = 0.6
+      width    = grosor_barras
     )
 
   # ---------------------------------------------------------------------------
-  # 3. Etiquetas de porcentaje dentro o fuera de la barra
+  # 3. Etiquetas de porcentaje (un solo geom_text, siempre alineado al dodge)
   # ---------------------------------------------------------------------------
   if (mostrar_valores) {
+
     df_lab <- df_long
-    df_lab$lab <- scales::percent(df_lab$.valor_plot, accuracy = 10^(-decimales))
 
-    # No mostrar etiquetas por debajo del umbral mínimo
-    df_lab$lab[df_lab$.valor_plot < umbral_etiqueta] <- ""
-
-    # Offset pequeño para las que van fuera (en proporción 0–1)
-    offset_lab <- max_valor * 0.015
-
-    df_lab$valor_label <- ifelse(
-      df_lab$.valor_plot >= umbral_posicion,
-      # Barras grandes: etiqueta al centro de la barra
-      df_lab$.valor_plot / 2,
-      # Barras pequeñas: etiqueta ligeramente a la derecha del final
-      df_lab$.valor_plot + offset_lab
+    # Texto de etiqueta
+    df_lab$lab <- scales::percent(
+      df_lab$.valor_plot,
+      accuracy = 10^(-decimales)
     )
 
-    # Split: dentro vs fuera
-    df_in  <- df_lab[df_lab$.valor_plot >= umbral_posicion & df_lab$lab != "", , drop = FALSE]
-    df_out <- df_lab[df_lab$.valor_plot <  umbral_posicion & df_lab$lab != "", , drop = FALSE]
+    # Nunca etiquetar 0 % ni valores bajo umbral de visibilidad
+    df_lab$lab[df_lab$.valor_plot <= 0] <- ""
+    df_lab$lab[df_lab$.valor_plot < umbral_etiqueta] <- ""
 
-    if (nrow(df_in)) {
-      p <- p +
-        ggplot2::geom_text(
-          data        = df_in,
-          mapping     = ggplot2::aes_string(
-            x     = var_categoria,
-            y     = "valor_label",
-            label = "lab",
-            group = ".serie"
-          ),
-          inherit.aes = FALSE,
-          position    = ggplot2::position_dodge(width = width_dodge),
-          hjust       = 0.5,
-          vjust       = 0.5,
-          color       = color_texto_barras,
-          size        = size_texto_barras_eff,
-          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-          show.legend = FALSE
-        )
+    # Umbral para decidir dentro / fuera
+    umbral_posicion_eff <- umbral_posicion
+    if (!is.finite(umbral_posicion_eff) || umbral_posicion_eff <= 0) {
+      umbral_posicion_eff <- 0.15
     }
 
-    if (nrow(df_out)) {
-      p <- p +
-        ggplot2::geom_text(
-          data        = df_out,
-          mapping     = ggplot2::aes_string(
-            x     = var_categoria,
-            y     = "valor_label",
-            label = "lab",
-            group = ".serie"
-          ),
-          inherit.aes = FALSE,
-          position    = ggplot2::position_dodge(width = width_dodge),
-          hjust       = 0,   # fuera, a la derecha del extremo de la barra
-          vjust       = 0.5,
-          color       = color_texto_barras_fuera,
-          size        = size_texto_barras_eff,
-          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-          show.legend = FALSE
-        )
-    }
+    offset_lab <- max_valor * 0.015
+
+    # ¿Etiqueta "dentro" de la barra?
+    df_lab$inside <- df_lab$.valor_plot >= umbral_posicion_eff & df_lab$lab != ""
+
+    # Posición horizontal (antes del coord_flip):
+    #  - dentro: en el centro (valor/2)
+    #  - fuera: justo después del extremo (valor + offset)
+    df_lab$valor_label <- df_lab$.valor_plot
+    df_lab$valor_label[df_lab$inside] <-
+      df_lab$.valor_plot[df_lab$inside] / 2
+    df_lab$valor_label[!df_lab$inside & df_lab$.valor_plot > 0] <-
+      df_lab$.valor_plot[!df_lab$inside & df_lab$.valor_plot > 0] + offset_lab
+
+    # hjust por fila
+    df_lab$hjust_label <- ifelse(df_lab$inside, 0.5, 0)
+
+    # color por fila
+    df_lab$col_label <- ifelse(
+      df_lab$inside,
+      color_texto_barras,
+      color_texto_barras_fuera
+    )
+
+    p <- p +
+      ggplot2::geom_text(
+        data        = df_lab,
+        mapping     = ggplot2::aes(
+          x       = .data[[var_categoria]],
+          y       = valor_label,
+          label   = lab,
+          group   = .serie,
+          colour  = col_label,
+          hjust   = hjust_label    # ← AHORA AQUÍ, CORRECTO
+        ),
+        inherit.aes = FALSE,
+        position    = ggplot2::position_dodge(width = width_dodge),
+        vjust       = 0.5,
+        size        = size_texto_barras_eff,
+        fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+        show.legend = FALSE
+      ) +
+      ggplot2::scale_colour_identity(guide = "none")
   }
 
   # ---------------------------------------------------------------------------
-  # 4. Escala Y (valores) con espacio extra y eje profesional si porcentaje
+  # 4. Escala Y (proporción + espacio para barra extra)
   # ---------------------------------------------------------------------------
-
-  # y_lim: límite superior del eje Y (en proporción)
-  # y_extra: posición donde se dibuja la barra extra (N)
   if (escala_valor %in% c("proporcion_1", "proporcion_100")) {
 
     if (mostrar_barra_extra) {
-      # 0–1 = 0–100% para las barras (≈80% del ancho),
-      # 1–(1+extra_derecha_rel) reservado para barra extra.
       y_lim   <- 1 + extra_derecha_rel
-      y_extra <- 1 + extra_derecha_rel * 0.5  # centrada en el "colchón" derecho
+      y_extra <- 1 + extra_derecha_rel * 0.5
     } else {
       y_lim   <- 1
       y_extra <- NA_real_
@@ -392,14 +336,12 @@ graficar_barras_agrupadas <- function(
     p <- p +
       ggplot2::scale_y_continuous(
         limits = c(0, y_lim),
-        # omitimos 0%, mostramos 20–100% en posición real 0.2–1
         breaks = seq(0.2, 1, by = 0.2),
         labels = scales::percent_format(accuracy = 1),
         expand = ggplot2::expansion(mult = c(0, 0.02))
       )
 
   } else {
-    # Caso general (conteos u otra métrica: sin eje % explícito)
     y_lim   <- max_valor * (1 + extra_derecha_rel)
     y_extra <- max_valor * (1 + extra_derecha_rel * 0.95)
 
@@ -466,14 +408,13 @@ graficar_barras_agrupadas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 6. Colores, orientación horizontal y tema
+  # 6. Colores, orientación y tema
   # ---------------------------------------------------------------------------
   if (!is.null(colores_series)) {
     p <- p +
       ggplot2::scale_fill_manual(values = colores_series)
   }
 
-  # Construir caption combinado
   caption_text <- NULL
   if (!is.null(nota_pie) && nzchar(nota_pie) &&
       !is.null(nota_pie_derecha) && nzchar(nota_pie_derecha)) {
@@ -484,17 +425,13 @@ graficar_barras_agrupadas <- function(
     caption_text <- nota_pie_derecha
   }
 
-  # Tema base (sin eje X detallado aún)
   base_theme <- ggplot2::theme_minimal(base_size = 9) +
     ggplot2::theme(
       panel.grid.major.y = ggplot2::element_blank(),
       panel.grid.minor   = ggplot2::element_blank(),
-      panel.grid.major.x = ggplot2::element_blank(),  # sin grid vertical por defecto
-
+      panel.grid.major.x = ggplot2::element_blank(),
       axis.title.x       = ggplot2::element_blank(),
       axis.title.y       = ggplot2::element_blank(),
-
-      # Eje de categorías (vertical tras coord_flip)
       axis.text.y        = ggplot2::element_text(
         color = color_ejes,
         size  = size_ejes,
@@ -502,12 +439,9 @@ graficar_barras_agrupadas <- function(
         vjust = 0.5
       ),
       axis.line.y        = ggplot2::element_line(color = color_ejes, linewidth = 0.3),
-
-      # Eje X (valores) por defecto sin texto ni ticks
       axis.text.x        = ggplot2::element_blank(),
       axis.ticks.x       = ggplot2::element_blank(),
       axis.line.x        = ggplot2::element_blank(),
-
       legend.title       = ggplot2::element_blank(),
       legend.position    = if (mostrar_leyenda) "bottom" else "none",
       legend.text        = ggplot2::element_text(
@@ -515,7 +449,6 @@ graficar_barras_agrupadas <- function(
         size  = size_leyenda,
         face  = if ("leyenda" %in% textos_negrita) "bold" else "plain"
       ),
-
       plot.margin        = ggplot2::margin(t = 15, r = 80, b = 15, l = 5),
       plot.title         = ggplot2::element_text(
         hjust = hjust_titulo,
@@ -537,7 +470,6 @@ graficar_barras_agrupadas <- function(
       panel.background   = ggplot2::element_rect(fill = color_fondo, color = NA)
     )
 
-  # Eje de porcentajes minimalista SOLO si estamos en escala de proporción
   if (escala_valor %in% c("proporcion_1", "proporcion_100")) {
     eje_theme <- ggplot2::theme(
       axis.text.x  = ggplot2::element_text(
@@ -554,7 +486,7 @@ graficar_barras_agrupadas <- function(
       )
     )
   } else {
-    eje_theme <- ggplot2::theme()  # nada extra
+    eje_theme <- ggplot2::theme()
   }
 
   p <- p +
@@ -590,7 +522,6 @@ graficar_barras_agrupadas <- function(
       )
     }
 
-    # Ancho pensado para página Word estándar (A4 / Letter con márgenes)
     width_word  <- if (!missing(ancho) && !is.null(ancho)) ancho else 6.5
     height_word <- if (!missing(alto)  && !is.null(alto))  alto  else 4.5
 
@@ -600,7 +531,7 @@ graficar_barras_agrupadas <- function(
       value  = p,
       width  = width_word,
       height = height_word,
-      style  = "centered"  # usa estilo de párrafo centrado de Word
+      style  = "centered"
     )
     print(doc, target = path_salida)
 

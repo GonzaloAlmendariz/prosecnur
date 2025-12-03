@@ -83,6 +83,8 @@
 #' @param size_ejes Tamaño del texto de las categorías en el eje Y.
 #' @param color_fondo Color de fondo del gráfico. Si es \code{NA} (por defecto),
 #'   el fondo será transparente (útil para insertar en PPT/Word).
+#' @param grosor_barras Ancho relativo de las barras (argumento `width` de
+#'   \code{geom_col()}). Toma valores típicos entre 0 y 1. Por defecto 0.7.
 #'
 #' @param extra_derecha_rel Porcentaje adicional a la derecha para ubicar la
 #'   barra extra, relativo a la longitud de la barra más larga.
@@ -108,6 +110,9 @@
 #'   \code{"rplot"}.
 #' @param ancho Ancho del gráfico (cuando se exporta a archivo).
 #' @param alto Alto del gráfico (cuando se exporta a archivo).
+#' @param alto_por_categoria Alto (en pulgadas) a asignar por categoría cuando
+#'   no se especifica \code{alto}. Si es \code{NULL}, se usan los valores por
+#'   defecto históricos.
 #' @param dpi Resolución en puntos por pulgada (solo para PNG).
 #'
 #' @return Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
@@ -152,6 +157,7 @@ graficar_barras_apiladas <- function(
     color_ejes          = "#000000",
     size_ejes           = 9,
     color_fondo         = NA,
+    grosor_barras       = 0.7,
     extra_derecha_rel   = 0.10,
     mostrar_leyenda     = TRUE,
     invertir_leyenda    = FALSE,
@@ -162,6 +168,7 @@ graficar_barras_apiladas <- function(
     path_salida         = NULL,
     ancho               = 10,
     alto                = 6,
+    alto_por_categoria  = NULL,
     dpi                 = 300
 ) {
 
@@ -271,8 +278,6 @@ graficar_barras_apiladas <- function(
 
   max_suma <- max(df_sum$suma, na.rm = TRUE)
 
-  # Si NO hay barra extra, el eje llega solo hasta la suma máxima.
-  # Si SÍ hay barra extra, se agrega espacio adicional a la derecha.
   if (mostrar_barra_extra) {
     x_max <- max_suma * (1 + extra_derecha_rel)
   } else {
@@ -290,7 +295,7 @@ graficar_barras_apiladas <- function(
       fill = ".grupo"
     )
   ) +
-    ggplot2::geom_col(width = 0.7)
+    ggplot2::geom_col(width = grosor_barras)
 
   # ---------------------------------------------------------------------------
   # 3. Etiquetas dentro de las barras (cálculo manual con cumsum)
@@ -312,11 +317,20 @@ graficar_barras_apiladas <- function(
       ) |>
       dplyr::ungroup()
 
-    df_lab$lab <- scales::percent(
-      df_lab$.valor_plot,
-      accuracy = 10^(-decimales)
-    )
+    # Formato de porcentajes: enteros si lo son, con decimales si no
+    pct_num <- df_lab$.valor_plot * 100
+    tol <- 10^(-(decimales + 1))
+    es_entero <- is.finite(pct_num) & (abs(pct_num - round(pct_num)) < tol)
 
+    lab <- character(nrow(df_lab))
+    fmt_no_entero <- paste0("%.", decimales, "f%%")
+
+    lab[es_entero]   <- sprintf("%d%%", round(pct_num[es_entero]))
+    lab[!es_entero]  <- sprintf(fmt_no_entero, pct_num[!es_entero])
+
+    df_lab$lab <- lab
+
+    # Ocultar etiquetas bajo el umbral
     df_lab$lab[
       df_lab$.valor_plot < umbral_etiqueta | is.na(df_lab$.valor_plot)
     ] <- ""
@@ -340,12 +354,12 @@ graficar_barras_apiladas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 4. Escala X sin eje visible (con margen a la izquierda)
+  # 4. Escala X sin eje visible (barras pegadas al eje)
   # ---------------------------------------------------------------------------
   p <- p +
     ggplot2::scale_x_continuous(
       limits = c(0, x_max),
-      expand = ggplot2::expansion(mult = c(0.05, 0))  # 5% solo a la izquierda
+      expand = ggplot2::expansion(mult = c(0, 0))
     ) +
     ggplot2::coord_cartesian(clip = "off")
 
@@ -564,8 +578,12 @@ graficar_barras_apiladas <- function(
   )
 
   # ---------------------------------------------------------------------------
-  # 7. Exportación
+  # 7. Exportación (con alto automático opcional)
   # ---------------------------------------------------------------------------
+
+  # Número de categorías únicas (para alto_por_categoria)
+  n_categorias <- length(unique(df_long[[var_categoria]]))
+
   if (exportar == "rplot") {
     return(p)
   }
@@ -574,6 +592,7 @@ graficar_barras_apiladas <- function(
     stop("Debe especificar `path_salida` cuando `exportar` no es 'rplot'.", call. = FALSE)
   }
 
+  # ---------------------- WORD ----------------------
   if (exportar == "word") {
     if (!requireNamespace("officer", quietly = TRUE)) {
       stop(
@@ -582,9 +601,15 @@ graficar_barras_apiladas <- function(
       )
     }
 
-    # Ancho pensado para página Word estándar (A4 / Letter con márgenes)
-    width_word  <- if (!missing(ancho) && !is.null(ancho)) ancho else 6.5
-    height_word <- if (!missing(alto)  && !is.null(alto))  alto  else 4.5
+    width_word <- if (!missing(ancho) && !is.null(ancho)) ancho else 6.5
+
+    height_word <- if (!missing(alto) && !is.null(alto)) {
+      alto
+    } else if (!is.null(alto_por_categoria)) {
+      n_categorias * alto_por_categoria
+    } else {
+      4.5  # valor histórico
+    }
 
     doc <- officer::read_docx()
     doc <- officer::body_add_gg(
@@ -592,25 +617,36 @@ graficar_barras_apiladas <- function(
       value  = p,
       width  = width_word,
       height = height_word,
-      style  = "centered"  # usa el estilo de párrafo centrado de Word
+      style  = "centered"
     )
     print(doc, target = path_salida)
 
     return(invisible(p))
   }
 
+  # Altura efectiva para PNG / PPT
+  height_plot <- if (!missing(alto) && !is.null(alto)) {
+    alto
+  } else if (!is.null(alto_por_categoria)) {
+    n_categorias * alto_por_categoria
+  } else {
+    alto  # el default del argumento (6)
+  }
+
+  # ---------------------- PNG ----------------------
   if (exportar == "png") {
     ggplot2::ggsave(
       filename = path_salida,
       plot     = p,
       width    = ancho,
-      height   = alto,
+      height   = height_plot,
       dpi      = dpi,
       bg       = if (is.na(color_fondo)) "transparent" else color_fondo
     )
     return(invisible(p))
   }
 
+  # ---------------------- PPT ----------------------
   if (exportar == "ppt") {
     if (!requireNamespace("officer", quietly = TRUE) ||
         !requireNamespace("rvg", quietly = TRUE)) {

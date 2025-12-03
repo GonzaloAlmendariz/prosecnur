@@ -46,13 +46,16 @@
 #'           \code{colores_apiladas_por_listname[[list_name_v]]}, igual que en
 #'           \code{reporte_ppt()}, con soporte de objetos tipo
 #'           \code{list(colores = ..., preset_barra_extra = ...)}.
-#'   \item Barras agrupadas:
-#'     \item Cada fila es una categoría de \code{v}.
-#'     \item Las series son los estratos (una barra por estrato).
-#'     \item Los colores de las series se leen de
-#'           \code{estilos_barras_agrupadas$colores_series} o, si no existe,
-#'           de \code{colores_estratos}. En su defecto se usa una paleta por
-#'           defecto con nombres = etiquetas de estrato.
+#'   \item Barras agrupadas (cruces):
+#'     \item Cada fila es un estrato (\code{categoria} = etiqueta del estrato).
+#'     \item Las series (barras dentro de cada estrato) son las categorías de
+#'           la variable \code{v}.
+#'     \item Los colores de las series se intentan obtener primero de
+#'           \code{colores_apiladas_por_listname[[list_name_v]]} (por
+#'           \code{list_name}); en su defecto de
+#'           \code{estilos_barras_agrupadas$colores_series} o de una paleta
+#'           por defecto. \code{colores_estratos} se mantiene como respaldo si
+#'           sus nombres coinciden con las etiquetas de serie.
 #'   \item Dicotómicas:
 #'     \item Cada estrato es un "indicador" distinto.
 #'     \item Se calcula el porcentaje de la categoría "positiva" sobre el total
@@ -154,8 +157,8 @@
 #'   \code{graficar_dico()}.
 #'
 #' @param colores_estratos Vector nombrado opcional de colores HEX para los
-#'   estratos en barras agrupadas (nombres = etiquetas de estrato). Si se
-#'   define \code{estilos_barras_agrupadas$colores_series}, tiene prioridad.
+#'   estratos en barras agrupadas (se mantiene como respaldo si sus nombres
+#'   coinciden con las etiquetas de serie).
 #'
 #' @param opciones_excluir Vector de labels de opciones a excluir de la
 #'   variable de interés (por ejemplo, categorías de no respuesta).
@@ -229,7 +232,7 @@ reporte_ppt_cruces <- function(
     estilos_barras_apiladas  = list(),
     estilos_dico             = list(),
 
-    # Colores por estrato en barras agrupadas
+    # Colores por estrato en barras agrupadas (respaldo)
     colores_estratos = NULL,
 
     # Opciones de la variable a excluir
@@ -509,10 +512,13 @@ reporte_ppt_cruces <- function(
     )
   }
 
+  # ---------------------------------------------------------------------------
+  # NUEVO: barras agrupadas con eje = estrato y series = categorías
+  # ---------------------------------------------------------------------------
   .build_tab_barras_agrupadas_cruce <- function(crc, var_label) {
 
-    n_cat <- length(crc$categorias)
-    n_est <- length(crc$estr_labels)
+    n_cat <- length(crc$categorias)   # categorías de v (series)
+    n_est <- length(crc$estr_labels)  # estratos (filas)
     if (n_cat == 0L || n_est == 0L) return(NULL)
 
     # matriz de porcentajes categoría (filas) x estrato (columnas)
@@ -522,10 +528,9 @@ reporte_ppt_cruces <- function(
       if (Nj > 0) pct_mat[, j] <- crc$n_mat[, j] / Nj
     }
 
-    # 1) Eliminar filas cuya suma es 0 (todas 0/NA)
+    # 1) Eliminar categorías cuya suma es 0 (todas 0/NA)
     keep_rows <- rowSums(pct_mat, na.rm = TRUE) > 0
-
-    # 1-bis) Eliminar filas cuyo label de categoría es NA (evita fila "NA")
+    # 1-bis) Eliminar categorías con label NA
     keep_rows <- keep_rows & !is.na(crc$categorias)
 
     if (!any(keep_rows)) return(NULL)
@@ -534,7 +539,7 @@ reporte_ppt_cruces <- function(
     categorias_keep <- crc$categorias[keep_rows]
     n_cat           <- length(categorias_keep)
 
-    # 2) Eliminar columnas (estratos) cuya suma es 0 (todas 0/NA)
+    # 2) Eliminar estratos cuya suma es 0 (todas 0/NA)
     keep_cols <- colSums(pct_mat, na.rm = TRUE) > 0
     if (!any(keep_cols)) return(NULL)
 
@@ -543,23 +548,23 @@ reporte_ppt_cruces <- function(
     N_estrato_keep   <- crc$N_estrato[keep_cols]
     n_est            <- length(estr_labels_keep)
 
-    # 3) Construir data.frame para graficar
+    # 3) Construir data.frame: filas = estratos, series = categorías
     df <- tibble::tibble(
-      categoria = categorias_keep,
-      n_base    = sum(N_estrato_keep, na.rm = TRUE)
+      categoria = estr_labels_keep,
+      n_base    = as.numeric(N_estrato_keep)
     )
 
-    cols_pct <- paste0("pct_", seq_len(n_est))
-    for (j in seq_len(n_est)) {
-      v <- as.numeric(pct_mat[, j])
-      # 4) 0% → NA para que no se dibuje barra ni se deje hueco dentro del grupo
+    cols_pct <- paste0("pct_", seq_len(n_cat))
+    for (i in seq_len(n_cat)) {
+      v <- as.numeric(pct_mat[i, ])
+      # 4) 0% → NA para no dibujar barra ni generar huecos visuales
       v[!is.na(v) & abs(v) < 1e-12] <- NA_real_
-      df[[cols_pct[j]]] <- v
+      df[[cols_pct[i]]] <- v
     }
 
-    # series = estratos
+    # series = categorías de la variable
     etiquetas_series <- stats::setNames(
-      as.character(estr_labels_keep),
+      as.character(categorias_keep),
       cols_pct
     )
 
@@ -568,8 +573,8 @@ reporte_ppt_cruces <- function(
       cols_porcentaje  = cols_pct,
       etiquetas_series = etiquetas_series,
       info_dim         = list(
-        n_cat      = n_cat,
-        n_estratos = n_est,
+        n_cat      = n_cat,            # Nº de series (categorías de v)
+        n_estratos = n_est,            # Nº de filas (estratos)
         N_estrato  = N_estrato_keep,
         N_total    = sum(N_estrato_keep, na.rm = TRUE)
       )
@@ -726,7 +731,33 @@ reporte_ppt_cruces <- function(
 
             args_extra <- list()
 
-            if (is.null(estilos_barras_agrupadas$colores_series)) {
+            ## 1) PRIORIDAD: paleta por list_name, usando colores_apiladas_por_listname
+            if (!is.null(list_name_v) && !is.na(list_name_v) &&
+                !is.null(colores_apiladas_por_listname[[list_name_v]])) {
+
+              pal_obj <- colores_apiladas_por_listname[[list_name_v]]
+
+              # Puede ser vector simple o lista con $colores
+              pal_vec <- if (is.list(pal_obj) && !is.null(pal_obj$colores)) {
+                pal_obj$colores
+              } else {
+                pal_obj
+              }
+
+              # Reordenar y filtrar a las series presentes
+              pal_vec <- pal_vec[etiquetas_series]
+              pal_vec <- pal_vec[!is.na(pal_vec)]
+
+              if (length(pal_vec) == length(etiquetas_series)) {
+                args_extra$colores_series <- stats::setNames(
+                  as.character(pal_vec),
+                  etiquetas_series
+                )
+              }
+            }
+
+            ## 2) RESPALDO: si no hubo paleta por list_name, usar colores_estratos
+            if (is.null(args_extra$colores_series)) {
               if (!is.null(colores_estratos) &&
                   all(etiquetas_series %in% names(colores_estratos))) {
 
@@ -735,7 +766,9 @@ reporte_ppt_cruces <- function(
                   as.character(cs),
                   etiquetas_series
                 )
+
               } else {
+                # Paleta genérica de respaldo
                 pal <- c(
                   "#004B8D", "#F26C4F", "#8CC63E",
                   "#FFC20E", "#A54399", "#00A3E0", "#7F7F7F"
@@ -748,19 +781,11 @@ reporte_ppt_cruces <- function(
               }
             }
 
-            if (is.null(estilos_barras_agrupadas$size_texto_barras)) {
-              n_cat  <- tab_agr$info_dim$n_cat
-              n_est  <- tab_agr$info_dim$n_estratos
-              size_auto <- if (n_est <= 3) {
-                if (n_cat <= 4) 4.5 else if (n_cat <= 8) 4.0 else 3.5
-              } else if (n_est <= 5) {
-                if (n_cat <= 4) 4.0 else 3.5
-              } else {
-                3.0
-              }
-              args_extra$size_texto_barras <- size_auto
-            }
+            ## 3) Limpiar estilos para evitar 'colores_series' duplicado
+            estilos_barras_agrupadas_clean <- estilos_barras_agrupadas
+            estilos_barras_agrupadas_clean$colores_series <- NULL
 
+            ## 4) Construir argumentos finales para el graficador
             args_barras <- c(
               list(
                 data             = tab_agr$data,
@@ -777,12 +802,11 @@ reporte_ppt_cruces <- function(
                 exportar            = "rplot"
               ),
               args_extra,
-              estilos_barras_agrupadas
+              estilos_barras_agrupadas_clean
             )
 
             p <- do.call(graficar_barras_agrupadas, args_barras)
           }
-
         }
 
         if (tipo_grafico == "barras_apiladas") {
@@ -797,7 +821,7 @@ reporte_ppt_cruces <- function(
             if (!is.null(colores_grupos)) args_extra$colores_grupos <- colores_grupos
 
             # --------------------------------------------------
-            # NUEVO: inversión por list_name desde estilos_barras_apiladas
+            # Inversión por list_name desde estilos_barras_apiladas
             # --------------------------------------------------
             ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
             ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
@@ -897,34 +921,65 @@ reporte_ppt_cruces <- function(
               args_extra <- list()
 
               if (is.null(estilos_barras_agrupadas$colores_series)) {
-                if (!is.null(colores_estratos) &&
+
+                colores_series <- NULL
+
+                if (!is.na(list_name_v) &&
+                    !is.null(colores_apiladas_por_listname[[list_name_v]])) {
+
+                  obj_col <- colores_apiladas_por_listname[[list_name_v]]
+
+                  col_vec <- NULL
+                  if (is.list(obj_col)) {
+                    if (!is.null(obj_col$colores)) col_vec <- obj_col$colores
+                  } else {
+                    col_vec <- obj_col
+                  }
+
+                  if (!is.null(col_vec)) {
+                    if (is.null(names(col_vec))) {
+                      pal <- rep(as.character(col_vec),
+                                 length.out = length(etiquetas_series))
+                      colores_series <- stats::setNames(pal, etiquetas_series)
+                    } else {
+                      cs <- col_vec[etiquetas_series]
+                      if (all(!is.na(cs))) {
+                        colores_series <- stats::setNames(as.character(cs),
+                                                          etiquetas_series)
+                      }
+                    }
+                  }
+                }
+
+                if (is.null(colores_series) &&
+                    !is.null(colores_estratos) &&
                     all(etiquetas_series %in% names(colores_estratos))) {
 
                   cs <- colores_estratos[etiquetas_series]
-                  args_extra$colores_series <- stats::setNames(
-                    as.character(cs),
-                    etiquetas_series
-                  )
-                } else {
+                  colores_series <- stats::setNames(as.character(cs),
+                                                    etiquetas_series)
+                }
+
+                if (is.null(colores_series)) {
                   pal <- c(
                     "#004B8D", "#F26C4F", "#8CC63E",
                     "#FFC20E", "#A54399", "#00A3E0", "#7F7F7F"
                   )
                   pal <- rep(pal, length.out = length(etiquetas_series))
-                  args_extra$colores_series <- stats::setNames(
-                    pal,
-                    etiquetas_series
-                  )
+                  colores_series <- stats::setNames(pal, etiquetas_series)
                 }
+
+                args_extra$colores_series <- colores_series
               }
 
               if (is.null(estilos_barras_agrupadas$size_texto_barras)) {
-                n_cat  <- tab_agr$info_dim$n_cat
-                n_est  <- tab_agr$info_dim$n_estratos
-                size_auto <- if (n_est <= 3) {
-                  if (n_cat <= 4) 4.5 else if (n_cat <= 8) 4.0 else 3.5
-                } else if (n_est <= 5) {
-                  if (n_cat <= 4) 4.0 else 3.5
+                n_series   <- tab_agr$info_dim$n_cat
+                n_cat_plot <- tab_agr$info_dim$n_estratos
+
+                size_auto <- if (n_series <= 3) {
+                  if (n_cat_plot <= 4) 4.5 else if (n_cat_plot <= 8) 4.0 else 3.5
+                } else if (n_series <= 5) {
+                  if (n_cat_plot <= 4) 4.0 else 3.5
                 } else {
                   3.0
                 }
@@ -934,7 +989,7 @@ reporte_ppt_cruces <- function(
               args_barras <- c(
                 list(
                   data             = tab_agr$data,
-                  var_categoria    = "categoria",
+                  var_categoria    = "categoria",  # estrato
                   var_n            = "n_base",
                   cols_porcentaje  = cols_porcentaje,
                   etiquetas_series = etiquetas_series,
