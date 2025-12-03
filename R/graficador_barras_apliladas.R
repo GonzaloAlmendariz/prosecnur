@@ -33,8 +33,12 @@
 #' @param mostrar_valores Lógico; si \code{TRUE}, muestra porcentajes dentro
 #'   de cada segmento.
 #' @param decimales Número de decimales para los porcentajes internos.
-#' @param umbral_etiqueta Mínima proporción para mostrar texto dentro de un
-#'   segmento (por ejemplo, 0.03 equivale a 3\%).
+#' @param umbral_etiqueta Mínima proporción para mostrar texto en tamaño
+#'   normal dentro de un segmento (por ejemplo, 0.03 equivale a 3\%).
+#' @param umbral_etiqueta_peq Mínima proporción para mostrar texto en tamaño
+#'   reducido. Los segmentos con proporción entre \code{umbral_etiqueta_peq}
+#'   y \code{umbral_etiqueta} se muestran con letra más pequeña. Si es
+#'   \code{NULL}, se asume igual a \code{umbral_etiqueta}.
 #'
 #' @param mostrar_barra_extra Lógico; si \code{TRUE}, agrega una “barra extra”
 #'   de texto al extremo derecho de cada barra (típicamente para mostrar el N
@@ -76,6 +80,9 @@
 #' @param size_leyenda Tamaño del texto de la leyenda.
 #' @param color_texto_barras Color del texto dentro de los segmentos.
 #' @param size_texto_barras Tamaño del texto dentro de los segmentos.
+#' @param size_texto_barras_peq Tamaño del texto para etiquetas de segmentos
+#'   pequeños (ver \code{umbral_etiqueta_peq}). Si es \code{NULL}, se usa el
+#'   mismo valor de \code{size_texto_barras}.
 #' @param color_barra_extra Color base del texto de la barra extra (se puede
 #'   sobreescribir internamente si se usa un preset).
 #' @param size_barra_extra Tamaño del texto de la barra extra.
@@ -88,6 +95,13 @@
 #'
 #' @param extra_derecha_rel Porcentaje adicional a la derecha para ubicar la
 #'   barra extra, relativo a la longitud de la barra más larga.
+#' @param espacio_izquierda_rel Proporción del rango del eje X que se deja
+#'   como espacio en blanco a la izquierda (entre el borde del panel y el
+#'   comienzo de las barras). Por defecto 0.05 (5\%).
+#' @param ancho_max_eje_y Número aproximado de caracteres por línea para las
+#'   etiquetas del eje Y. Si no es \code{NULL}, se insertan saltos de línea
+#'   automáticos entre palabras usando \pkg{stringr}.
+#'
 #' @param mostrar_leyenda Lógico; si \code{FALSE}, oculta la leyenda.
 #' @param invertir_leyenda Lógico; si \code{TRUE}, invierte el orden de los
 #'   ítems de la leyenda sin alterar el orden de las barras ni de los segmentos.
@@ -97,7 +111,8 @@
 #'   apilan los segmentos dentro de cada barra (orden horizontal de los colores).
 #' @param textos_negrita Vector de caracteres que indica qué elementos deben
 #'   mostrarse en negrita. Puede incluir cualquiera de:
-#'   \code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"barra_extra"}.
+#'   \code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"},
+#'   \code{"barra_extra"}, \code{"eje_y"}.
 #'
 #' @param exportar Método de salida:
 #'   \itemize{
@@ -126,50 +141,54 @@ graficar_barras_apiladas <- function(
     var_n,
     cols_porcentaje,
     etiquetas_grupos,
-    escala_valor        = c("proporcion_1", "proporcion_100"),
-    colores_grupos      = NULL,
-    mostrar_valores     = TRUE,
-    decimales           = 1,
-    umbral_etiqueta     = 0.03,
-    mostrar_barra_extra = TRUE,
-    barra_extra_preset  = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
-    prefijo_barra_extra = "N=",
-    titulo_barra_extra  = NULL,
-    titulo              = NULL,
-    subtitulo           = NULL,
-    nota_pie            = NULL,
-    nota_pie_derecha    = NULL,
-    pos_titulo          = c("centro", "izquierda", "derecha"),
-    pos_nota_pie        = c("derecha", "izquierda", "centro"),
+    escala_valor          = c("proporcion_1", "proporcion_100"),
+    colores_grupos        = NULL,
+    mostrar_valores       = TRUE,
+    decimales             = 1,
+    umbral_etiqueta       = 0.03,
+    umbral_etiqueta_peq   = NULL,
+    mostrar_barra_extra   = TRUE,
+    barra_extra_preset    = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
+    prefijo_barra_extra   = "N=",
+    titulo_barra_extra    = NULL,
+    titulo                = NULL,
+    subtitulo             = NULL,
+    nota_pie              = NULL,
+    nota_pie_derecha      = NULL,
+    pos_titulo            = c("centro", "izquierda", "derecha"),
+    pos_nota_pie          = c("derecha", "izquierda", "centro"),
     # Estilo de texto y layout
-    color_titulo        = "#000000",
-    size_titulo         = 11,
-    color_subtitulo     = "#000000",
-    size_subtitulo      = 9,
-    color_nota_pie      = "#000000",
-    size_nota_pie       = 8,
-    color_leyenda       = "#000000",
-    size_leyenda        = 8,
-    color_texto_barras  = "white",
-    size_texto_barras   = 3,
-    color_barra_extra   = "#000000",
-    size_barra_extra    = 3,
-    color_ejes          = "#000000",
-    size_ejes           = 9,
-    color_fondo         = NA,
-    grosor_barras       = 0.7,
-    extra_derecha_rel   = 0.10,
-    mostrar_leyenda     = TRUE,
-    invertir_leyenda    = FALSE,
-    invertir_barras     = FALSE,
-    invertir_segmentos  = FALSE,
-    textos_negrita      = NULL,
-    exportar            = c("rplot", "png", "ppt", "word"),
-    path_salida         = NULL,
-    ancho               = 10,
-    alto                = 6,
-    alto_por_categoria  = NULL,
-    dpi                 = 300
+    color_titulo          = "#000000",
+    size_titulo           = 11,
+    color_subtitulo       = "#000000",
+    size_subtitulo        = 9,
+    color_nota_pie        = "#000000",
+    size_nota_pie         = 8,
+    color_leyenda         = "#000000",
+    size_leyenda          = 8,
+    color_texto_barras    = "white",
+    size_texto_barras     = 3,
+    size_texto_barras_peq = NULL,
+    color_barra_extra     = "#000000",
+    size_barra_extra      = 3,
+    color_ejes            = "#000000",
+    size_ejes             = 9,
+    color_fondo           = NA,
+    grosor_barras         = 0.7,
+    extra_derecha_rel     = 0.10,
+    espacio_izquierda_rel = 0.05,
+    ancho_max_eje_y       = NULL,
+    mostrar_leyenda       = TRUE,
+    invertir_leyenda      = FALSE,
+    invertir_barras       = FALSE,
+    invertir_segmentos    = FALSE,
+    textos_negrita        = NULL,
+    exportar              = c("rplot", "png", "ppt", "word"),
+    path_salida           = NULL,
+    ancho                 = 10,
+    alto                  = 6,
+    alto_por_categoria    = NULL,
+    dpi                   = 300
 ) {
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
@@ -181,14 +200,19 @@ graficar_barras_apiladas <- function(
   pos_nota_pie       <- match.arg(pos_nota_pie)
 
   # -----------------------------------------------------------------
-  # Normalizar `decimales` a un escalar numérico seguro
+  # Normalizar `decimales` y tamaños de texto seguros
   # -----------------------------------------------------------------
   decimales <- suppressWarnings(as.numeric(decimales))
-
   if (length(decimales) < 1L || !is.finite(decimales[1])) {
     decimales <- 1
   } else {
     decimales <- decimales[1]
+  }
+
+  size_texto_barras_peq <- size_texto_barras_peq %||% size_texto_barras
+
+  if (is.null(umbral_etiqueta_peq)) {
+    umbral_etiqueta_peq <- umbral_etiqueta
   }
 
   hjust_titulo  <- hjust_from_pos(pos_titulo)
@@ -295,7 +319,12 @@ graficar_barras_apiladas <- function(
       fill = ".grupo"
     )
   ) +
-    ggplot2::geom_col(width = grosor_barras)
+    ggplot2::geom_col(width = grosor_barras) +
+    ggplot2::geom_vline(
+      xintercept = 0,
+      color      = NA,
+      linewidth  = 0.3
+    )
 
   # ---------------------------------------------------------------------------
   # 3. Etiquetas dentro de las barras (cálculo manual con cumsum)
@@ -325,43 +354,83 @@ graficar_barras_apiladas <- function(
     lab <- character(nrow(df_lab))
     fmt_no_entero <- paste0("%.", decimales, "f%%")
 
-    lab[es_entero]   <- sprintf("%d%%", round(pct_num[es_entero]))
-    lab[!es_entero]  <- sprintf(fmt_no_entero, pct_num[!es_entero])
+    lab[es_entero]  <- sprintf("%d%%", round(pct_num[es_entero]))
+    lab[!es_entero] <- sprintf(fmt_no_entero, pct_num[!es_entero])
 
     df_lab$lab <- lab
 
-    # Ocultar etiquetas bajo el umbral
-    df_lab$lab[
-      df_lab$.valor_plot < umbral_etiqueta | is.na(df_lab$.valor_plot)
-    ] <- ""
-
-    df_lab <- df_lab[df_lab$lab != "", , drop = FALSE]
-
-    p <- p +
-      ggplot2::geom_text(
-        data        = df_lab,
-        mapping     = ggplot2::aes_string(
-          x     = "x_center",
-          y     = var_categoria,
-          label = "lab"
-        ),
-        inherit.aes = FALSE,
-        color       = color_texto_barras,
-        size        = size_texto_barras,
-        fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-        show.legend = FALSE
+    # Clasificar etiquetas según umbrales (grande / pequeña / oculta)
+    df_lab <- df_lab |>
+      dplyr::mutate(
+        .tamano_etq = dplyr::case_when(
+          .valor_plot >= umbral_etiqueta      ~ "grande",
+          .valor_plot >= umbral_etiqueta_peq  ~ "peq",
+          TRUE                                ~ "ninguna"
+        )
+      ) |>
+      dplyr::filter(
+        !is.na(.valor_plot),
+        .tamano_etq != "ninguna"
       )
+
+    df_lab_grande <- df_lab[df_lab$.tamano_etq == "grande", , drop = FALSE]
+    df_lab_peq    <- df_lab[df_lab$.tamano_etq == "peq",    , drop = FALSE]
+
+    if (nrow(df_lab_grande) > 0) {
+      p <- p +
+        ggplot2::geom_text(
+          data        = df_lab_grande,
+          mapping     = ggplot2::aes_string(
+            x     = "x_center",
+            y     = var_categoria,
+            label = "lab"
+          ),
+          inherit.aes = FALSE,
+          color       = color_texto_barras,
+          size        = size_texto_barras,
+          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+          show.legend = FALSE
+        )
+    }
+
+    if (nrow(df_lab_peq) > 0) {
+      p <- p +
+        ggplot2::geom_text(
+          data        = df_lab_peq,
+          mapping     = ggplot2::aes_string(
+            x     = "x_center",
+            y     = var_categoria,
+            label = "lab"
+          ),
+          inherit.aes = FALSE,
+          color       = color_texto_barras,
+          size        = size_texto_barras_peq,
+          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+          show.legend = FALSE
+        )
+    }
   }
 
   # ---------------------------------------------------------------------------
-  # 4. Escala X sin eje visible (barras pegadas al eje)
+  # 4. Escala X con margen proporcional e Y con wrap opcional
   # ---------------------------------------------------------------------------
   p <- p +
     ggplot2::scale_x_continuous(
       limits = c(0, x_max),
-      expand = ggplot2::expansion(mult = c(0, 0))
+      expand = ggplot2::expansion(mult = c(espacio_izquierda_rel, 0))
     ) +
     ggplot2::coord_cartesian(clip = "off")
+
+  if (!is.null(ancho_max_eje_y)) {
+    if (!requireNamespace("stringr", quietly = TRUE)) {
+      stop("Para usar `ancho_max_eje_y` se requiere el paquete 'stringr'.",
+           call. = FALSE)
+    }
+    p <- p +
+      ggplot2::scale_y_discrete(
+        labels = function(x) stringr::str_wrap(x, width = ancho_max_eje_y)
+      )
+  }
 
   # ---------------------------------------------------------------------------
   # 5.1. Preparar tabla base para barra extra (N o Top/Bottom Box)
@@ -535,10 +604,11 @@ graficar_barras_apiladas <- function(
       axis.text.y        = ggplot2::element_text(
         color = color_ejes,
         size  = size_ejes,
-        hjust = 0.5,
-        vjust = 0.5
+        hjust = 1,
+        vjust = 0.5,
+        face  = if ("eje_y" %in% textos_negrita) "bold" else "plain"
       ),
-      axis.line.y        = ggplot2::element_line(color = color_ejes, linewidth = 0.3),
+      axis.line.y        = ggplot2::element_blank(),
       legend.title       = ggplot2::element_blank(),
       legend.position    = if (mostrar_leyenda) "bottom" else "none",
       legend.text        = ggplot2::element_text(
@@ -546,7 +616,8 @@ graficar_barras_apiladas <- function(
         size  = size_leyenda,
         face  = if ("leyenda" %in% textos_negrita) "bold" else "plain"
       ),
-      plot.margin        = ggplot2::margin(t = 15, r = 80, b = 5, l = 5),
+      plot.margin        = ggplot2::margin(t = 15, r = 25, b = 5, l = 25),
+      plot.title.position = "plot",
       plot.title         = ggplot2::element_text(
         hjust = hjust_titulo,
         color = color_titulo,
@@ -581,7 +652,6 @@ graficar_barras_apiladas <- function(
   # 7. Exportación (con alto automático opcional)
   # ---------------------------------------------------------------------------
 
-  # Número de categorías únicas (para alto_por_categoria)
   n_categorias <- length(unique(df_long[[var_categoria]]))
 
   if (exportar == "rplot") {
@@ -608,7 +678,7 @@ graficar_barras_apiladas <- function(
     } else if (!is.null(alto_por_categoria)) {
       n_categorias * alto_por_categoria
     } else {
-      4.5  # valor histórico
+      4.5
     }
 
     doc <- officer::read_docx()
@@ -630,7 +700,7 @@ graficar_barras_apiladas <- function(
   } else if (!is.null(alto_por_categoria)) {
     n_categorias * alto_por_categoria
   } else {
-    alto  # el default del argumento (6)
+    alto
   }
 
   # ---------------------- PNG ----------------------

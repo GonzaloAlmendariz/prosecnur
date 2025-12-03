@@ -15,6 +15,7 @@ graficar_barras_apiladas(
   mostrar_valores = TRUE,
   decimales = 1,
   umbral_etiqueta = 0.03,
+  umbral_etiqueta_peq = NULL,
   mostrar_barra_extra = TRUE,
   barra_extra_preset = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
   prefijo_barra_extra = "N=",
@@ -35,6 +36,7 @@ graficar_barras_apiladas(
   size_leyenda = 8,
   color_texto_barras = "white",
   size_texto_barras = 3,
+  size_texto_barras_peq = NULL,
   color_barra_extra = "#000000",
   size_barra_extra = 3,
   color_ejes = "#000000",
@@ -42,6 +44,8 @@ graficar_barras_apiladas(
   color_fondo = NA,
   grosor_barras = 0.7,
   extra_derecha_rel = 0.1,
+  espacio_izquierda_rel = 0.05,
+  ancho_max_eje_y = NULL,
   mostrar_leyenda = TRUE,
   invertir_leyenda = FALSE,
   invertir_barras = FALSE,
@@ -84,8 +88,13 @@ de cada segmento.}
 
 \item{decimales}{Número de decimales para los porcentajes internos.}
 
-\item{umbral_etiqueta}{Mínima proporción para mostrar texto dentro de un
-segmento (por ejemplo, 0.03 equivale a 3\\%).}
+\item{umbral_etiqueta}{Mínima proporción para mostrar texto en tamaño
+normal dentro de un segmento (por ejemplo, 0.03 equivale a 3\\%).}
+
+\item{umbral_etiqueta_peq}{Mínima proporción para mostrar texto en tamaño
+reducido. Los segmentos con proporción entre \code{umbral_etiqueta_peq}
+y \code{umbral_etiqueta} se muestran con letra más pequeña. Si es
+\code{NULL}, se asume igual a \code{umbral_etiqueta}.}
 
 \item{mostrar_barra_extra}{Lógico; si \code{TRUE}, agrega una “barra extra”
 de texto al extremo derecho de cada barra (típicamente para mostrar el N
@@ -145,6 +154,10 @@ Ambos se muestran en una única línea de caption.}
 
 \item{size_texto_barras}{Tamaño del texto dentro de los segmentos.}
 
+\item{size_texto_barras_peq}{Tamaño del texto para etiquetas de segmentos
+pequeños (ver \code{umbral_etiqueta_peq}). Si es \code{NULL}, se usa el
+mismo valor de \code{size_texto_barras}.}
+
 \item{color_barra_extra}{Color base del texto de la barra extra (se puede
 sobreescribir internamente si se usa un preset).}
 
@@ -163,6 +176,14 @@ el fondo será transparente (útil para insertar en PPT/Word).}
 \item{extra_derecha_rel}{Porcentaje adicional a la derecha para ubicar la
 barra extra, relativo a la longitud de la barra más larga.}
 
+\item{espacio_izquierda_rel}{Proporción del rango del eje X que se deja
+como espacio en blanco a la izquierda (entre el borde del panel y el
+comienzo de las barras). Por defecto 0.05 (5\\%).}
+
+\item{ancho_max_eje_y}{Número aproximado de caracteres por línea para las
+etiquetas del eje Y. Si no es \code{NULL}, se insertan saltos de línea
+automáticos entre palabras usando \pkg{stringr}.}
+
 \item{mostrar_leyenda}{Lógico; si \code{FALSE}, oculta la leyenda.}
 
 \item{invertir_leyenda}{Lógico; si \code{TRUE}, invierte el orden de los
@@ -176,7 +197,8 @@ apilan los segmentos dentro de cada barra (orden horizontal de los colores).}
 
 \item{textos_negrita}{Vector de caracteres que indica qué elementos deben
 mostrarse en negrita. Puede incluir cualquiera de:
-\code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"}, \code{"barra_extra"}.}
+\code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"},
+\code{"barra_extra"}, \code{"eje_y"}.}
 
 \item{exportar}{Método de salida:
 \itemize{
