@@ -557,29 +557,23 @@ graficar_barras_agrupadas <- function(
   n_categorias <- length(unique(df_long[[var_categoria]]))
 
   # Parámetros de descomposición de altura
-  alto_min_total   <- 2.5   # altura mínima razonable en pulgadas
-  alto_max_total   <- 9.0   # tope máximo
-  alto_leyenda_row <- 0.35  # alto aproximado por fila de leyenda
+  alto_max_total   <- 9.0   # tope máximo en pulgadas
+  alto_leyenda_row <- 0.35  # alto aprox. por fila de leyenda
   alto_caption     <- 0.25  # bloque adicional si hay caption
 
   # Leyenda: cuántos ítems y cuántas filas
   n_items_leyenda <- length(levels(df_long$.serie))
-
   if (!exists("n_filas_leyenda")) {
     # Por defecto: máximo 5 ítems por fila
-    n_filas_leyenda <- if (n_items_leyenda <= 0) {
-      0L
-    } else {
-      ceiling(n_items_leyenda / 5)
-    }
+    n_filas_leyenda <- if (n_items_leyenda <= 0) 0L else ceiling(n_items_leyenda / 5)
   }
 
   tiene_caption <- !is.null(caption_text) && nzchar(caption_text)
 
-  # alto_por_categoria efectivo (para cuando no se pasa explícito)
+  # Si no se pasa alto_por_categoria, uso un default razonable
   alto_por_cat_eff <- alto_por_categoria %||% 0.35
 
-  # Panel de barras
+  # Panel de barras (solo barras)
   alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
 
   # Leyenda
@@ -592,8 +586,15 @@ graficar_barras_agrupadas <- function(
   # Caption interno (nota_pie)
   alto_cap <- if (tiene_caption) alto_caption else 0
 
+  # Altura total (antes de topes)
   alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap
-  alto_total_sugerido <- max(alto_min_total, min(alto_max_total, alto_total_sugerido))
+
+  # Tope máximo, pero SIN mínimo rígido
+  alto_total_sugerido <- min(alto_max_total, alto_total_sugerido)
+
+  # Si quieres un mínimo suave dependiente del grosor de barra:
+  alto_min_suave <- (alto_por_cat_eff * 1.2) + alto_leyenda + alto_cap
+  alto_total_sugerido <- max(alto_min_suave, alto_total_sugerido)
 
   # Si solo queremos el ggplot, devolvemos p con el alto sugerido como atributo
   if (exportar == "rplot") {
@@ -608,8 +609,6 @@ graficar_barras_agrupadas <- function(
   # Altura efectiva para PNG / PPT / WORD
   height_plot <- if (!missing(alto) && !is.null(alto)) {
     alto
-  } else if (!is.null(alto_por_categoria)) {
-    alto_total_sugerido
   } else {
     alto_total_sugerido
   }

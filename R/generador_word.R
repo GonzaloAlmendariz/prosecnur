@@ -102,7 +102,8 @@ reporte_word <- function(
     colores_apiladas_por_listname = list(),
 
     # Defaults por tipo de pregunta
-    default_so = c("barras_agrupadas", "barras_apiladas"),
+    # SO → apiladas por defecto, SM → agrupadas
+    default_so = c("barras_apiladas", "barras_agrupadas"),
     default_sm = c("barras_agrupadas", "barras_apiladas"),
 
     # Barra extra en barras apiladas/agrupadas
@@ -235,15 +236,70 @@ reporte_word <- function(
       dplyr::filter(is.na(.data$n) == FALSE & .data$n > 0)
   }
 
+  # Helper: dado un vector de frecuencias n, devuelve porcentajes ENTEROS
+  # que suman exactamente 100 (pensado para barras apiladas).
+  .pct_enteros_100 <- function(n) {
+    n <- as.numeric(n)
+    if (!length(n) || all(is.na(n))) {
+      return(numeric(0))
+    }
+
+    n[is.na(n)] <- 0
+    total <- sum(n)
+
+    if (!is.finite(total) || total <= 0) {
+      return(rep(0L, length(n)))
+    }
+
+    # Porcentajes crudos en 0–100
+    raw_pct   <- n / total * 100
+    floor_pct <- floor(raw_pct)
+
+    # Cuánto falta o sobra para llegar a 100
+    resid <- as.integer(round(100 - sum(floor_pct)))
+
+    frac <- raw_pct - floor_pct
+
+    if (resid > 0) {
+      # Asignar +1 a los mayores restos decimales
+      ord <- order(frac, decreasing = TRUE, na.last = TRUE)
+      idx <- head(ord, resid)
+      floor_pct[idx] <- floor_pct[idx] + 1L
+    } else if (resid < 0) {
+      # Quitar 1 a los menores restos decimales
+      resid_neg <- abs(resid)
+      ord <- order(frac, decreasing = FALSE, na.last = TRUE)
+      idx <- head(ord, resid_neg)
+      floor_pct[idx] <- pmax(0L, floor_pct[idx] - 1L)
+    }
+
+    floor_pct
+  }
+
   .build_tab_barras_agrupadas <- function(tab_freq, var_label) {
     if (!nrow(tab_freq)) return(NULL)
 
     n_total <- sum(tab_freq$n, na.rm = TRUE)
 
+    pct_raw <- tab_freq$pct
+    if (all(is.na(pct_raw))) return(NULL)
+
+    # Detectar escala de pct (0–1 o 0–100)
+    max_pct <- max(pct_raw, na.rm = TRUE)
+    if (is.finite(max_pct) && max_pct <= 1 + 1e-8) {
+      pct_0_100 <- pct_raw * 100
+    } else {
+      pct_0_100 <- pct_raw
+    }
+
+    # Convertir a enteros (no imponemos suma 100, por SM puede ser > 100)
+    pct_int   <- round(pct_0_100)
+    pct_prop  <- pct_int / 100
+
     tibble::tibble(
       categoria = tab_freq$Opciones,
       n_base    = n_total,
-      pct       = tab_freq$pct
+      pct       = pct_prop
     )
   }
 
@@ -251,7 +307,14 @@ reporte_word <- function(
     if (!nrow(tab_freq)) return(NULL)
 
     n_total <- sum(tab_freq$n, na.rm = TRUE)
-    n_cat   <- nrow(tab_freq)
+    if (!is.finite(n_total) || n_total <= 0) return(NULL)
+
+    n_cat <- nrow(tab_freq)
+
+    # 1) Porcentajes enteros que suman 100 a partir de los conteos n
+    pct_int  <- .pct_enteros_100(tab_freq$n)  # p.ej. 23, 17, 60
+    # 2) Proporciones 0–1 para graficar con escala_valor = "proporcion_1"
+    pct_prop <- pct_int / 100
 
     cols_pct <- paste0("pct_", seq_len(n_cat))
     df_wide  <- tibble::tibble(
@@ -260,7 +323,7 @@ reporte_word <- function(
     )
 
     for (i in seq_len(n_cat)) {
-      df_wide[[cols_pct[i]]] <- tab_freq$pct[i]
+      df_wide[[cols_pct[i]]] <- pct_prop[i]
     }
 
     etiquetas_grupos <- stats::setNames(as.character(tab_freq$Opciones), cols_pct)
@@ -292,18 +355,22 @@ reporte_word <- function(
 
     n_pos <- sub$n[sub$Opciones == pos_lab][1]
     n_neg <- sub$n[sub$Opciones == neg_lab][1]
-    denom <- n_pos + n_neg
+    n_vec <- c(n_pos, n_neg)
 
-    if (!is.finite(denom) || denom <= 0) return(NULL)
+    if (!all(is.finite(n_vec)) || sum(n_vec) <= 0) return(NULL)
 
-    pct_si <- n_pos / denom * 100
+    # ---- Porcentajes enteros que suman 100 ----
+    pct_int <- .pct_enteros_100(n_vec)
+
+    # Valor que usará el graficador (solo el % "sí")
+    pct_si  <- pct_int[1]   # ya entero y corregido
 
     indicador_val <- if (incluir_titulo_var) "" else (var_label %||% var)
 
     tibble::tibble(
       indicador = indicador_val,
-      pct_si    = pct_si,
-      n_total   = denom
+      pct_si    = pct_si,        # entero 0–100
+      n_total   = sum(n_vec)
     )
   }
 
@@ -449,6 +516,8 @@ reporte_word <- function(
           )
 
           p <- do.call(graficar_barras_agrupadas, args_barras)
+
+
         }
 
         if (tipo_grafico == "barras_apiladas") {
@@ -864,12 +933,21 @@ reporte_word <- function(
 
         doc <- officer::body_add_fpar(doc, titulo_word, style = "Normal")
 
-        # Gráfico (sin estilo personalizado; usa Normal de la plantilla)
+        # Gráfico: usar alto sugerido por el graficador si existe
+        width_word <- 6.1
+
+        alto_sugerido <- attr(p, "alto_word_sugerido", exact = TRUE)
+        height_word <- if (!is.null(alto_sugerido) && is.finite(alto_sugerido)) {
+          alto_sugerido
+        } else {
+          3.5  # fallback por si algún gráfico no trae atributo
+        }
+
         doc <- officer::body_add_gg(
           doc,
           value  = p,
-          width  = 6.1,
-          height = 3.5
+          width  = width_word,
+          height = height_word
         )
 
         # Pie gris debajo del gráfico (fuente) a la izquierda

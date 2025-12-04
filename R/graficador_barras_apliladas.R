@@ -681,20 +681,23 @@ graficar_barras_apiladas <- function(
     )
 
   # ---------------------------------------------------------------------------
-  # 7. Exportación (incluye alto_por_categoria con topes min/max)
+  # 7. Exportación (altura total = panel + leyenda + caption)
   # ---------------------------------------------------------------------------
   n_categorias <- length(unique(df_long[[var_categoria]]))
 
-  # Límites internos de alto en pulgadas (coherentes con otros graficadores)
-  alto_min <- 4.5
-  alto_max <- 7.0
+  # Parámetros de descomposición de altura en pulgadas
+  alto_max_total <- 9.0     # tope máximo global
+  alto_caption   <- 0.25    # bloque adicional si hay caption
 
   # -------------------------------------------
   # Cálculo de alto sugerido para Word/PNG/PPT
   # -------------------------------------------
+
+  # Alto "por barra" efectivo (si no se pasa, usamos un default razonable)
   alto_por_cat_eff <- alto_por_categoria %||% 0.35
 
-  # Panel de barras (solo la zona de categorías)
+  # Panel de barras (solo zona de categorías)
+  # En apiladas típicamente hay 1 categoría, pero lo dejamos general
   alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
 
   # Aprox. espacio para leyenda (si la hay)
@@ -708,10 +711,18 @@ graficar_barras_apiladas <- function(
   }
 
   # Aprox. espacio para caption interno (nota_pie / nota_pie_derecha)
-  alto_caption <- if (!is.null(caption_text) && nzchar(caption_text)) 0.25 else 0
+  tiene_caption <- !is.null(caption_text) && nzchar(caption_text)
+  alto_cap      <- if (tiene_caption) alto_caption else 0
 
-  alto_total_sugerido <- alto_panel + alto_leyenda + alto_caption
-  alto_total_sugerido <- max(alto_min, min(alto_max, alto_total_sugerido))
+  # Altura total sugerida (antes de topes)
+  alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap
+
+  # Tope máximo absoluto
+  alto_total_sugerido <- min(alto_max_total, alto_total_sugerido)
+
+  # Mínimo "suave" dependiente del grosor de barra + leyenda + caption
+  alto_min_suave <- (alto_por_cat_eff * 1.2) + alto_leyenda + alto_cap
+  alto_total_sugerido <- max(alto_min_suave, alto_total_sugerido)
 
   # Si solo queremos el ggplot, devolvemos p pero con el alto sugerido como atributo
   if (exportar == "rplot") {
@@ -726,9 +737,6 @@ graficar_barras_apiladas <- function(
   # Altura efectiva común para PNG / PPT / WORD
   height_plot <- if (!missing(alto) && !is.null(alto)) {
     alto
-  } else if (!is.null(alto_por_categoria)) {
-    # respeta compatibilidad hacia atrás, pero usando el mismo cálculo
-    alto_total_sugerido
   } else {
     alto_total_sugerido
   }

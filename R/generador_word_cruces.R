@@ -67,7 +67,8 @@ reporte_word_cruces <- function(
     colores_apiladas_por_listname = list(),
 
     # Defaults por tipo de pregunta
-    default_so = c("barras_agrupadas", "barras_apiladas"),
+    # SO → apiladas por defecto, SM → agrupadas
+    default_so = c("barras_apiladas", "barras_agrupadas"),
     default_sm = c("barras_agrupadas", "barras_apiladas"),
 
     # Barra extra en barras apiladas/agrupadas
@@ -359,43 +360,48 @@ reporte_word_cruces <- function(
     n_est <- length(crc$estr_labels)
     if (n_cat == 0L || n_est == 0L) return(NULL)
 
+    # Proporciones por opción (fila) y estrato (columna)
     pct_mat <- matrix(NA_real_, nrow = n_cat, ncol = n_est)
     for (j in seq_len(n_est)) {
       Nj <- crc$N_estrato[j]
       if (Nj > 0) pct_mat[, j] <- crc$n_mat[, j] / Nj
     }
 
-    keep_rows <- rowSums(pct_mat, na.rm = TRUE) > 0
-    keep_rows <- keep_rows & !is.na(crc$categorias)
+    # 1) Filtrar opciones sin información
+    keep_cat <- rowSums(pct_mat, na.rm = TRUE) > 0
+    keep_cat <- keep_cat & !is.na(crc$categorias)
 
-    if (!any(keep_rows)) return(NULL)
+    if (!any(keep_cat)) return(NULL)
 
-    pct_mat         <- pct_mat[keep_rows, , drop = FALSE]
-    categorias_keep <- crc$categorias[keep_rows]
-    n_cat           <- length(categorias_keep)
+    pct_mat   <- pct_mat[keep_cat, , drop = FALSE]
+    cats_keep <- crc$categorias[keep_cat]
+    n_cat     <- length(cats_keep)
 
-    keep_cols <- colSums(pct_mat, na.rm = TRUE) > 0
-    if (!any(keep_cols)) return(NULL)
+    # 2) Filtrar estratos sin información
+    keep_est <- colSums(pct_mat, na.rm = TRUE) > 0
+    if (!any(keep_est)) return(NULL)
 
-    pct_mat          <- pct_mat[, keep_cols, drop = FALSE]
-    estr_labels_keep <- crc$estr_labels[keep_cols]
-    N_estrato_keep   <- crc$N_estrato[keep_cols]
-    n_est            <- length(estr_labels_keep)
+    pct_mat        <- pct_mat[, keep_est, drop = FALSE]
+    estr_labels    <- crc$estr_labels[keep_est]
+    N_estrato_keep <- crc$N_estrato[keep_est]
+    n_est          <- length(estr_labels)
 
+    # 3) Eje de categorías = ESTRATOS
     df <- tibble::tibble(
-      categoria = categorias_keep,
-      n_base    = sum(N_estrato_keep, na.rm = TRUE)
+      categoria = estr_labels,
+      n_base    = as.numeric(N_estrato_keep)
     )
 
-    cols_pct <- paste0("pct_", seq_len(n_est))
-    for (j in seq_len(n_est)) {
-      v <- as.numeric(pct_mat[, j])
+    # 4) Series = OPCIONES de la variable
+    cols_pct <- paste0("pct_", seq_len(n_cat))
+    for (k in seq_len(n_cat)) {
+      v <- as.numeric(pct_mat[k, ])
       v[!is.na(v) & abs(v) < 1e-12] <- NA_real_
-      df[[cols_pct[j]]] <- v
+      df[[cols_pct[k]]] <- v
     }
 
     etiquetas_series <- stats::setNames(
-      as.character(estr_labels_keep),
+      as.character(cats_keep),
       cols_pct
     )
 
@@ -566,6 +572,9 @@ reporte_word_cruces <- function(
 
             args_extra <- list()
 
+            # ------------------------------------------------------------------
+            # Colores por estrato (solo si estilos_barras_agrupadas no los fija)
+            # ------------------------------------------------------------------
             if (is.null(estilos_barras_agrupadas$colores_series)) {
               if (!is.null(colores_estratos) &&
                   all(etiquetas_series %in% names(colores_estratos))) {
@@ -588,9 +597,13 @@ reporte_word_cruces <- function(
               }
             }
 
+            # ------------------------------------------------------------------
+            # Tamaño automático de texto (solo si estilos no lo fija)
+            # ------------------------------------------------------------------
             if (is.null(estilos_barras_agrupadas$size_texto_barras)) {
-              n_cat  <- tab_agr$info_dim$n_cat
-              n_est  <- tab_agr$info_dim$n_estratos
+              n_cat <- tab_agr$info_dim$n_cat
+              n_est <- tab_agr$info_dim$n_estratos
+
               size_auto <- if (n_est <= 3) {
                 if (n_cat <= 4) 4.5 else if (n_cat <= 8) 4.0 else 3.5
               } else if (n_est <= 5) {
@@ -598,32 +611,51 @@ reporte_word_cruces <- function(
               } else {
                 3.0
               }
+
               args_extra$size_texto_barras <- size_auto
             }
 
+            # ------------------------------------------------------------------
+            # Limpiar estilos_barras_agrupadas para no duplicar argumentos
+            # ------------------------------------------------------------------
+            estilos_clean <- estilos_barras_agrupadas
+            # Elimina de estilos cualquier nombre que ya esté en args_extra
+            if (length(args_extra) > 0) {
+              estilos_clean[names(args_extra)] <- NULL
+            }
+
+            # ------------------------------------------------------------------
+            # Llamada final a graficar_barras_agrupadas
+            # ------------------------------------------------------------------
             args_barras <- c(
               list(
-                data             = tab_agr$data,
-                var_categoria    = "categoria",
-                var_n            = "n_base",
-                cols_porcentaje  = cols_porcentaje,
-                etiquetas_series = etiquetas_series,
-                escala_valor     = "proporcion_1",
-                mostrar_valores  = TRUE,
-                titulo           = titulo_plot,
-                subtitulo        = NULL,
-                nota_pie         = nota_pie_plot,
+                data               = tab_agr$data,
+                var_categoria      = "categoria",
+                var_n              = "n_base",
+                cols_porcentaje    = cols_porcentaje,
+                etiquetas_series   = etiquetas_series,
+                escala_valor       = "proporcion_1",
+                mostrar_valores    = TRUE,
+                titulo             = titulo_plot,
+                subtitulo          = NULL,
+                nota_pie           = nota_pie_plot,
                 mostrar_barra_extra = FALSE,
                 exportar            = "rplot"
               ),
               args_extra,
-              estilos_barras_agrupadas
+              estilos_clean
             )
 
             p <- do.call(graficar_barras_agrupadas, args_barras)
-          }
 
+            # Guardar cuántas series (opciones) tiene este cruce
+            # para ajustar luego la altura en Word.
+            if (!is.null(tab_agr$info_dim) && !is.null(tab_agr$info_dim$n_cat)) {
+              attr(p, "n_series_cruce") <- tab_agr$info_dim$n_cat
+            }
+          }
         }
+
 
         if (tipo_grafico == "barras_apiladas") {
 
@@ -1054,9 +1086,35 @@ reporte_word_cruces <- function(
 
         doc <- officer::body_add_fpar(doc, titulo_word, style = "Normal")
 
-        # Ancho ~ 15.5 cm → convertir a pulgadas
-        width_in  <- 15.5 / 2.54
-        height_in <- 9 / 2.54  # altura razonable; puedes ajustar si quieres
+        # Ancho fijo ~ 15.5 cm en pulgadas
+        width_in <- 15.5 / 2.54
+
+        # Altura base sugerida por el graficador (si existe)
+        alto_sugerido <- attr(p_i, "alto_word_sugerido", exact = TRUE)
+
+        # Número de series (opciones) en cruces agrupados, si fue marcado antes
+        n_series_cruce <- attr(p_i, "n_series_cruce", exact = TRUE)
+
+        # Factor de ajuste por número de series:
+        #   - 1 serie  → factor = 1
+        #   - 3 series → factor ~ 1.5
+        #   - 5+ series → factor tope = 2
+        factor_series <- if (!is.null(n_series_cruce) &&
+                             is.finite(n_series_cruce) &&
+                             n_series_cruce > 1) {
+
+          f <- 1 + 0.25 * (n_series_cruce - 1)
+          max(1, min(2, f))  # limitar entre 1x y 2x
+        } else {
+          1
+        }
+
+        height_in <- if (!is.null(alto_sugerido) && is.finite(alto_sugerido)) {
+          alto_sugerido * factor_series
+        } else {
+          # Fallback si por algún motivo no hay alto_sugerido
+          (9 / 2.54) * factor_series
+        }
 
         doc <- officer::body_add_gg(
           doc,

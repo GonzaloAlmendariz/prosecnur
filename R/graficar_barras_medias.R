@@ -557,6 +557,7 @@ graficar_barras_numericas <- function(
   # ---------------------------------------------------------------------------
   # 7. Exportación (altura total = panel + leyenda + caption)
   # ---------------------------------------------------------------------------
+
   n_categorias <- length(unique(df_long[[var_categoria]]))
 
   # Parámetros de descomposición de altura (en pulgadas)
@@ -567,7 +568,9 @@ graficar_barras_numericas <- function(
 
   # Leyenda: cuántos ítems y cuántas filas
   n_items_leyenda <- length(levels(df_long$.serie))
+
   if (!exists("n_filas_leyenda")) {
+    # Máximo 5 ítems por fila como aproximación
     n_filas_leyenda <- if (n_items_leyenda <= 0) {
       0L
     } else {
@@ -577,17 +580,20 @@ graficar_barras_numericas <- function(
 
   tiene_caption <- !is.null(nota_pie) && nzchar(nota_pie)
 
-  # alto_por_categoria efectivo
+  # alto_por_categoria efectivo (default si no se pasa)
   alto_por_cat_eff <- alto_por_categoria %||% 0.35
 
+  # Panel de barras
   alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
 
+  # Leyenda
   alto_leyenda <- if (mostrar_leyenda && n_items_leyenda > 0) {
     n_filas_leyenda * alto_leyenda_row
   } else {
     0
   }
 
+  # Caption interno (nota_pie)
   alto_cap <- if (tiene_caption) alto_caption else 0
 
   alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap
@@ -606,8 +612,6 @@ graficar_barras_numericas <- function(
   # Altura efectiva para PNG / PPT / WORD
   height_plot <- if (!missing(alto) && !is.null(alto)) {
     alto
-  } else if (!is.null(alto_por_categoria)) {
-    alto_total_sugerido
   } else {
     alto_total_sugerido
   }
@@ -672,4 +676,5 @@ graficar_barras_numericas <- function(
   }
 
   p
+
 }
