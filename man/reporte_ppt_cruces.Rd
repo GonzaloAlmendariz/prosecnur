@@ -26,7 +26,7 @@ reporte_ppt_cruces(
   dico_labels_por_var = list(),
   dico_labels_por_listname = list(),
   colores_apiladas_por_listname = list(),
-  default_so = c("barras_agrupadas", "barras_apiladas"),
+  default_so = c("barras_apiladas", "barras_agrupadas"),
   default_sm = c("barras_agrupadas", "barras_apiladas"),
   barra_extra = c("ninguna", "total_n"),
   estilos_barras_agrupadas = list(),

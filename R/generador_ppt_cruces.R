@@ -221,7 +221,8 @@ reporte_ppt_cruces <- function(
     colores_apiladas_por_listname = list(),
 
     # Defaults por tipo de pregunta
-    default_so = c("barras_agrupadas", "barras_apiladas"),
+    # SO → apiladas por defecto, SM → agrupadas
+    default_so = c("barras_apiladas", "barras_agrupadas"),
     default_sm = c("barras_agrupadas", "barras_apiladas"),
 
     # Barra extra en barras apiladas/agrupadas
@@ -328,10 +329,10 @@ reporte_ppt_cruces <- function(
 
   .titulo_var_safe <- function(var_name) {
     label_variable(
-      var            = var_name,
-      dic_vars       = dic_vars,
+      var             = var_name,
+      dic_vars        = dic_vars,
       labels_override = labels_override,
-      data           = data
+      data            = data
     )
   }
 
@@ -450,16 +451,55 @@ reporte_ppt_cruces <- function(
     )
   }
 
+  # Helper: porcentajes ENTEROS que suman exactamente 100 (para apiladas / dico)
+  .pct_enteros_100 <- function(n) {
+    n <- as.numeric(n)
+    if (!length(n) || all(is.na(n))) {
+      return(numeric(0))
+    }
+
+    n[is.na(n)] <- 0
+    total <- sum(n)
+
+    if (!is.finite(total) || total <= 0) {
+      return(rep(0L, length(n)))
+    }
+
+    raw_pct   <- n / total * 100
+    floor_pct <- floor(raw_pct)
+
+    resid <- as.integer(round(100 - sum(floor_pct)))
+    frac  <- raw_pct - floor_pct
+
+    if (resid > 0) {
+      ord <- order(frac, decreasing = TRUE, na.last = TRUE)
+      idx <- head(ord, resid)
+      floor_pct[idx] <- floor_pct[idx] + 1L
+    } else if (resid < 0) {
+      resid_neg <- abs(resid)
+      ord <- order(frac, decreasing = FALSE, na.last = TRUE)
+      idx <- head(ord, resid_neg)
+      floor_pct[idx] <- pmax(0L, floor_pct[idx] - 1L)
+    }
+
+    floor_pct
+  }
+
   .build_tab_barras_apiladas_cruce <- function(crc, var_label, list_name_v) {
 
     n_cat <- length(crc$categorias)
     n_est <- length(crc$estr_labels)
     if (n_cat == 0L || n_est == 0L) return(NULL)
 
-    pct_mat <- matrix(NA_real_, nrow = n_cat, ncol = n_est)
+    # Matriz de porcentajes ENTEROS por estrato (columnas) que suman 100
+    pct_int_mat <- matrix(NA_integer_, nrow = n_cat, ncol = n_est)
     for (j in seq_len(n_est)) {
       Nj <- crc$N_estrato[j]
-      if (Nj > 0) pct_mat[, j] <- crc$n_mat[, j] / Nj
+      if (Nj > 0) {
+        pct_int_mat[, j] <- .pct_enteros_100(crc$n_mat[, j])
+      } else {
+        pct_int_mat[, j] <- 0L
+      }
     }
 
     df <- tibble::tibble(
@@ -469,7 +509,8 @@ reporte_ppt_cruces <- function(
 
     cols_pct <- paste0("pct_", seq_len(n_cat))
     for (k in seq_len(n_cat)) {
-      df[[cols_pct[k]]] <- as.numeric(pct_mat[k, ])
+      # Guardar como proporciones 0–1 (para escala_valor = "proporcion_1")
+      df[[cols_pct[k]]] <- pct_int_mat[k, ] / 100
     }
 
     etiquetas_grupos <- stats::setNames(
@@ -512,8 +553,123 @@ reporte_ppt_cruces <- function(
     )
   }
 
+  .build_tab_barras_agrupadas_cruce <- function(crc, var_label) {
+
+    n_cat <- length(crc$categorias)
+    n_est <- length(crc$estr_labels)
+    if (n_cat == 0L || n_est == 0L) return(NULL)
+
+    # Proporciones por opción (fila) y estrato (columna)
+    pct_mat <- matrix(NA_real_, nrow = n_cat, ncol = n_est)
+    for (j in seq_len(n_est)) {
+      Nj <- crc$N_estrato[j]
+      if (Nj > 0) pct_mat[, j] <- crc$n_mat[, j] / Nj
+    }
+
+    # 1) Filtrar opciones sin información
+    keep_cat <- rowSums(pct_mat, na.rm = TRUE) > 0
+    keep_cat <- keep_cat & !is.na(crc$categorias)
+
+    if (!any(keep_cat)) return(NULL)
+
+    pct_mat   <- pct_mat[keep_cat, , drop = FALSE]
+    cats_keep <- crc$categorias[keep_cat]
+    n_cat     <- length(cats_keep)
+
+    # 2) Filtrar estratos sin información
+    keep_est <- colSums(pct_mat, na.rm = TRUE) > 0
+    if (!any(keep_est)) return(NULL)
+
+    pct_mat        <- pct_mat[, keep_est, drop = FALSE]
+    estr_labels    <- crc$estr_labels[keep_est]
+    N_estrato_keep <- crc$N_estrato[keep_est]
+    n_est          <- length(estr_labels)
+
+    # Convertir proporciones a enteros (no imponemos suma 100, puede >100)
+    pct_mat_int <- matrix(NA_real_, nrow = n_cat, ncol = n_est)
+    for (j in seq_len(n_est)) {
+      col_raw <- pct_mat[, j] * 100
+      pct_mat_int[, j] <- round(col_raw) / 100
+    }
+
+    # 3) Eje de categorías = ESTRATOS
+    df <- tibble::tibble(
+      categoria = estr_labels,
+      n_base    = as.numeric(N_estrato_keep)
+    )
+
+    # 4) Series = OPCIONES de la variable
+    cols_pct <- paste0("pct_", seq_len(n_cat))
+    for (k in seq_len(n_cat)) {
+      v <- as.numeric(pct_mat_int[k, ])
+      v[!is.na(v) & abs(v) < 1e-12] <- NA_real_
+      df[[cols_pct[k]]] <- v
+    }
+
+    etiquetas_series <- stats::setNames(
+      as.character(cats_keep),
+      cols_pct
+    )
+
+    list(
+      data             = df,
+      cols_porcentaje  = cols_pct,
+      etiquetas_series = etiquetas_series,
+      info_dim         = list(
+        n_cat      = n_cat,
+        n_estratos = n_est,
+        N_estrato  = N_estrato_keep,
+        N_total    = sum(N_estrato_keep, na.rm = TRUE)
+      )
+    )
+  }
+
+  .build_tab_dico_cruce <- function(crc, var_name, var_label, labels_dico) {
+
+    if (length(labels_dico) < 2L) return(NULL)
+
+    pos_lab <- labels_dico[1]
+    neg_lab <- labels_dico[2]
+
+    idx_pos <- which(crc$categorias == pos_lab)
+    idx_neg <- which(crc$categorias == neg_lab)
+    if (!length(idx_pos) || !length(idx_neg)) {
+      warning(
+        "En la variable '", var_name, "' no se encontraron ambas categorías ",
+        "indicadas en `labels_dico` dentro del cruce. Se omitirá tratamiento ",
+        "dicotómico en cruces.",
+        call. = FALSE
+      )
+      return(NULL)
+    }
+
+    idx_pos <- idx_pos[1]
+    idx_neg <- idx_neg[1]
+
+    n_pos <- crc$n_mat[idx_pos, ]
+    n_neg <- crc$n_mat[idx_neg, ]
+    denom <- n_pos + n_neg
+
+    # Para cada estrato: enteros que sumen 100 entre Sí / No
+    pct_si <- rep(NA_real_, length(denom))
+    for (j in seq_along(denom)) {
+      if (denom[j] > 0) {
+        p_pair   <- .pct_enteros_100(c(n_pos[j], n_neg[j])) # c(%Sí, %No)
+        pct_si[j] <- p_pair[1]                              # 0–100 entero
+      } else {
+        pct_si[j] <- NA_real_
+      }
+    }
+
+    tibble::tibble(
+      indicador = as.character(crc$estr_labels),
+      pct_si    = as.numeric(pct_si),   # escala 0–100, entero
+      n_total   = as.numeric(denom)
+    )
+  }
+
   # ---------------------------------------------------------------------------
-  # NUEVO: barras agrupadas con eje = estrato y series = categorías
+  # barras agrupadas con eje = estrato y series = categorías
   # ---------------------------------------------------------------------------
   .build_tab_barras_agrupadas_cruce <- function(crc, var_label) {
 
@@ -864,8 +1020,12 @@ reporte_ppt_cruces <- function(
                 subtitulo           = NULL,
                 nota_pie            = nota_pie_plot,
 
+                # ------------------------------
+                # BARRA EXTRA: lógica elegante
+                # ------------------------------
                 mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
                 barra_extra_preset  = preset_extra,
+
                 prefijo_barra_extra = if (!is.null(preset_extra)) {
                   ""
                 } else if (barra_extra == "total_n") {
@@ -873,14 +1033,20 @@ reporte_ppt_cruces <- function(
                 } else {
                   ""
                 },
-                titulo_barra_extra  = if (!is.null(preset_extra)) {
+
+                # Sin título excepto cuando tú lo definas
+                titulo_barra_extra = NULL,
+
+                # Color:
+                # - Si hay preset → dejar NULL (para que el Top2Box se pinte VERDE)
+                # - Si NO hay preset → N= en azul (#092147)
+                color_barra_extra = if (!is.null(preset_extra)) {
                   NULL
-                } else if (barra_extra == "total_n") {
-                  "Total"
                 } else {
-                  NULL
+                  "#092147"
                 },
 
+                # ------------------------------
                 exportar           = "rplot",
                 invertir_segmentos = invertir_segmentos_var,
                 invertir_leyenda   = invertir_leyenda_var

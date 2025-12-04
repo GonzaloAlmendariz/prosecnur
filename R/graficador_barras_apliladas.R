@@ -475,9 +475,12 @@ graficar_barras_apiladas <- function(
         prefijo_extra_int <- "N="
       }
 
-      if (missing(color_barra_extra)) {
+      # Para totales: respetar el color que venga del estilo, salvo que no se haya
+      # pasado nada explícito.
+      if (missing(color_barra_extra) || is.null(color_barra_extra)) {
         color_barra_extra_int <- pulso_azul
       }
+
       fontface_barra_extra <- "bold"
 
     } else {
@@ -519,12 +522,12 @@ graficar_barras_apiladas <- function(
         }
       }
 
+      # Pasar a porcentaje 0–100 para impresión
       df_wide_extra$valor_extra <- df_wide_extra$valor_extra * 100
 
-      if (missing(color_barra_extra)) {
-        color_barra_extra_int <- pulso_verde
-      }
-      fontface_barra_extra <- "bold"
+      # Para Top/Bottom Box: forzar verde, sin respetar el color del estilo.
+      color_barra_extra_int <- pulso_verde
+      fontface_barra_extra  <- "bold"
     }
   }
 
@@ -540,7 +543,10 @@ graficar_barras_apiladas <- function(
         by = var_categoria
       ) |>
       dplyr::mutate(
-        xpos = suma * (1 + extra_derecha_rel * 0.5),
+        # Centro "teórico" de la columna de barra extra para cada barra
+        xpos_col = suma * (1 + extra_derecha_rel * 0.5),
+        # Mover un poquito a la izquierda todos los textos (N o %)
+        xpos_text = xpos_col - max_suma * 0.015,
         lab_valor = dplyr::case_when(
           barra_extra_preset %in% c("top2box", "top3box", "bottom2box") ~
             sprintf("%.1f%%", valor_extra),
@@ -549,11 +555,12 @@ graficar_barras_apiladas <- function(
         lab_extra = paste0(prefijo_extra_int, lab_valor)
       )
 
+    # Textos de la barra extra (N, Top2Box, etc.), ligeramente a la izquierda
     p <- p +
       ggplot2::geom_text(
         data        = df_extra,
         mapping     = ggplot2::aes_string(
-          x     = "xpos",
+          x     = "xpos_text",
           y     = var_categoria,
           label = "lab_extra"
         ),
@@ -564,30 +571,37 @@ graficar_barras_apiladas <- function(
         fontface    = fontface_barra_extra
       )
 
+    # Encabezado de la barra extra (Total / Top 2 Box / etc.)
     if (!is.null(titulo_extra_int) && nzchar(titulo_extra_int)) {
 
-      lvls <- levels(df_long[[var_categoria]])
-      cat_superior <- if (invertir_barras) tail(lvls, 1) else head(lvls, 1)
+      # y = categoría superior (después de invertir o no),
+      # x = centro global de la columna de barra extra,
+      # hjust = 0.5 para centrar sobre la columna,
+      # vjust más negativo para que quede claramente por encima de la primera barra
+      lvls         <- levels(df_long[[var_categoria]])
+      cat_superior <- tail(lvls, 1)
 
-      df_header <- df_extra[df_extra[[var_categoria]] == cat_superior, , drop = FALSE]
+      df_header <- data.frame(
+        var_cat     = cat_superior,
+        xpos_header = max_suma * (1 + extra_derecha_rel * 0.5)
+      )
+      names(df_header)[1] <- var_categoria
 
-      if (nrow(df_header) == 1L) {
-        p <- p +
-          ggplot2::geom_text(
-            data        = df_header,
-            mapping     = ggplot2::aes_string(
-              x = "xpos",
-              y = var_categoria
-            ),
-            label       = titulo_extra_int,
-            inherit.aes = FALSE,
-            hjust       = 0,
-            vjust       = -1.2,
-            size        = size_barra_extra,
-            color       = color_barra_extra_int,
-            fontface    = fontface_barra_extra
-          )
-      }
+      p <- p +
+        ggplot2::geom_text(
+          data        = df_header,
+          mapping     = ggplot2::aes_string(
+            x = "xpos_header",
+            y = var_categoria
+          ),
+          label       = titulo_extra_int,
+          inherit.aes = FALSE,
+          hjust       = 0.5,
+          vjust       = -5,
+          size        = size_barra_extra,
+          color       = color_barra_extra_int,
+          fontface    = fontface_barra_extra
+        )
     }
   }
 

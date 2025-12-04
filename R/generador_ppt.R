@@ -197,7 +197,8 @@ reporte_ppt <- function(
     colores_apiladas_por_listname = list(),
 
     # Defaults por tipo de pregunta
-    default_so = c("barras_agrupadas", "barras_apiladas"),
+    # SO → apiladas por defecto, SM → agrupadas
+    default_so = c("barras_apiladas", "barras_agrupadas"),
     default_sm = c("barras_agrupadas", "barras_apiladas"),
 
     # Barra extra en barras apiladas/agrupadas
@@ -341,15 +342,70 @@ reporte_ppt <- function(
       dplyr::filter(is.na(.data$n) == FALSE & .data$n > 0)
   }
 
+  # Helper: dado un vector de frecuencias n, devuelve porcentajes ENTEROS
+  # que suman exactamente 100 (pensado para barras apiladas / dico).
+  .pct_enteros_100 <- function(n) {
+    n <- as.numeric(n)
+    if (!length(n) || all(is.na(n))) {
+      return(numeric(0))
+    }
+
+    n[is.na(n)] <- 0
+    total <- sum(n)
+
+    if (!is.finite(total) || total <= 0) {
+      return(rep(0L, length(n)))
+    }
+
+    # Porcentajes crudos en 0–100
+    raw_pct   <- n / total * 100
+    floor_pct <- floor(raw_pct)
+
+    # Cuánto falta o sobra para llegar a 100
+    resid <- as.integer(round(100 - sum(floor_pct)))
+
+    frac <- raw_pct - floor_pct
+
+    if (resid > 0) {
+      # Asignar +1 a los mayores restos decimales
+      ord <- order(frac, decreasing = TRUE, na.last = TRUE)
+      idx <- head(ord, resid)
+      floor_pct[idx] <- floor_pct[idx] + 1L
+    } else if (resid < 0) {
+      # Quitar 1 a los menores restos decimales
+      resid_neg <- abs(resid)
+      ord <- order(frac, decreasing = FALSE, na.last = TRUE)
+      idx <- head(ord, resid_neg)
+      floor_pct[idx] <- pmax(0L, floor_pct[idx] - 1L)
+    }
+
+    floor_pct
+  }
+
   .build_tab_barras_agrupadas <- function(tab_freq, var_label) {
     if (!nrow(tab_freq)) return(NULL)
 
     n_total <- sum(tab_freq$n, na.rm = TRUE)
 
+    pct_raw <- tab_freq$pct
+    if (all(is.na(pct_raw))) return(NULL)
+
+    # Detectar escala de pct (0–1 o 0–100)
+    max_pct <- max(pct_raw, na.rm = TRUE)
+    if (is.finite(max_pct) && max_pct <= 1 + 1e-8) {
+      pct_0_100 <- pct_raw * 100
+    } else {
+      pct_0_100 <- pct_raw
+    }
+
+    # Convertir a enteros (no imponemos suma 100, en SM puede ser > 100)
+    pct_int  <- round(pct_0_100)
+    pct_prop <- pct_int / 100
+
     tibble::tibble(
       categoria = tab_freq$Opciones,
       n_base    = n_total,
-      pct       = tab_freq$pct
+      pct       = pct_prop
     )
   }
 
@@ -359,14 +415,18 @@ reporte_ppt <- function(
     n_total <- sum(tab_freq$n, na.rm = TRUE)
     n_cat   <- nrow(tab_freq)
 
+    # Distribución de porcentajes ENTEROS que suman 100
+    pct_int <- .pct_enteros_100(tab_freq$n)  # vector de longitud n_cat
     cols_pct <- paste0("pct_", seq_len(n_cat))
-    df_wide  <- tibble::tibble(
+
+    df_wide <- tibble::tibble(
       categoria = var_label %||% "",
       n_base    = n_total
     )
 
     for (i in seq_len(n_cat)) {
-      df_wide[[cols_pct[i]]] <- tab_freq$pct[i]
+      # Guardamos como proporción 0–1 (para escala_valor = "proporcion_1")
+      df_wide[[cols_pct[i]]] <- pct_int[i] / 100
     }
 
     etiquetas_grupos <- stats::setNames(as.character(tab_freq$Opciones), cols_pct)
@@ -402,7 +462,10 @@ reporte_ppt <- function(
 
     if (!is.finite(denom) || denom <= 0) return(NULL)
 
-    pct_si <- n_pos / denom * 100
+    # Repartir enteros que sumen 100 entre Sí / No
+    pct_pair    <- .pct_enteros_100(c(n_pos, n_neg))  # c(%Sí, %No)
+    pct_si_int  <- pct_pair[1]                        # 0–100 entero
+    pct_si      <- pct_si_int                         # escala 0–100 para dico
 
     indicador_val <- if (incluir_titulo_var) "" else (var_label %||% var)
 

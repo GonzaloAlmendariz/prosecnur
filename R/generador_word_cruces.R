@@ -187,6 +187,46 @@ reporte_word_cruces <- function(
     NA_character_
   }
 
+  # Helper: dado un vector de frecuencias n, devuelve porcentajes ENTEROS
+  # que suman exactamente 100 (pensado para barras apiladas / dico).
+  .pct_enteros_100 <- function(n) {
+    n <- as.numeric(n)
+    if (!length(n) || all(is.na(n))) {
+      return(numeric(0))
+    }
+
+    n[is.na(n)] <- 0
+    total <- sum(n)
+
+    if (!is.finite(total) || total <= 0) {
+      return(rep(0L, length(n)))
+    }
+
+    # Porcentajes crudos en 0–100
+    raw_pct   <- n / total * 100
+    floor_pct <- floor(raw_pct)
+
+    # Cuánto falta o sobra para llegar a 100
+    resid <- as.integer(round(100 - sum(floor_pct)))
+
+    frac <- raw_pct - floor_pct
+
+    if (resid > 0) {
+      # Asignar +1 a los mayores restos decimales
+      ord <- order(frac, decreasing = TRUE, na.last = TRUE)
+      idx <- head(ord, resid)
+      floor_pct[idx] <- floor_pct[idx] + 1L
+    } else if (resid < 0) {
+      # Quitar 1 a los menores restos decimales
+      resid_neg <- abs(resid)
+      ord <- order(frac, decreasing = FALSE, na.last = TRUE)
+      idx <- head(ord, resid_neg)
+      floor_pct[idx] <- pmax(0L, floor_pct[idx] - 1L)
+    }
+
+    floor_pct
+  }
+
   .cruce_counts <- function(var_name, estrato_name) {
 
     tp <- tipo_pregunta(
@@ -298,10 +338,15 @@ reporte_word_cruces <- function(
     n_est <- length(crc$estr_labels)
     if (n_cat == 0L || n_est == 0L) return(NULL)
 
+    # pct_mat en PROPORCIONES (0–1), pero a partir de porcentajes enteros que suman 100
     pct_mat <- matrix(NA_real_, nrow = n_cat, ncol = n_est)
     for (j in seq_len(n_est)) {
       Nj <- crc$N_estrato[j]
-      if (Nj > 0) pct_mat[, j] <- crc$n_mat[, j] / Nj
+      if (Nj > 0) {
+        n_col       <- crc$n_mat[, j]
+        pct_int_col <- .pct_enteros_100(n_col)   # enteros 0–100 que suman 100
+        pct_mat[, j] <- pct_int_col / 100        # pasar a 0–1 (escala proporcion_1)
+      }
     }
 
     df <- tibble::tibble(
@@ -386,13 +431,18 @@ reporte_word_cruces <- function(
     N_estrato_keep <- crc$N_estrato[keep_est]
     n_est          <- length(estr_labels)
 
-    # 3) Eje de categorías = ESTRATOS
+    # 3) Redondear a enteros (NO se fuerza suma 100, por SM puede ser > 100)
+    pct_0_100 <- pct_mat * 100
+    pct_int   <- round(pct_0_100)
+    pct_mat   <- pct_int / 100
+
+    # 4) Eje de categorías = ESTRATOS
     df <- tibble::tibble(
       categoria = estr_labels,
       n_base    = as.numeric(N_estrato_keep)
     )
 
-    # 4) Series = OPCIONES de la variable
+    # 5) Series = OPCIONES de la variable
     cols_pct <- paste0("pct_", seq_len(n_cat))
     for (k in seq_len(n_cat)) {
       v <- as.numeric(pct_mat[k, ])
@@ -444,12 +494,26 @@ reporte_word_cruces <- function(
     n_neg <- crc$n_mat[idx_neg, ]
     denom <- n_pos + n_neg
 
-    pct_si <- ifelse(denom > 0, n_pos / denom * 100, NA_real_)
+    # Porcentaje enteros que suman 100
+    pct_si_int <- rep(NA_real_, length(denom))
+    for (j in seq_along(denom)) {
+      if (is.finite(denom[j]) && denom[j] > 0) {
+        n_pair   <- c(n_pos[j], n_neg[j])
+        pct_pair <- .pct_enteros_100(n_pair)   # c(%Sí, %No) enteros que suman 100
+        pct_si_int[j] <- pct_pair[1]           # Sí en 0–100
+      } else {
+        pct_si_int[j] <- NA_real_
+      }
+    }
+
+
+    pct_si_prop <- pct_si_int / 100
 
     tibble::tibble(
       indicador = as.character(crc$estr_labels),
-      pct_si    = as.numeric(pct_si),
-      n_total   = as.numeric(denom)
+      pct_si    = pct_si_prop,
+      n_total   = as.numeric(denom),
+      pct_si_int = pct_si_int
     )
   }
 
@@ -708,8 +772,13 @@ reporte_word_cruces <- function(
                 titulo              = titulo_plot,
                 subtitulo           = NULL,
                 nota_pie            = nota_pie_plot,
+
+                # ------------------------------
+                # BARRA EXTRA: lógica elegante
+                # ------------------------------
                 mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
                 barra_extra_preset  = preset_extra,
+
                 prefijo_barra_extra = if (!is.null(preset_extra)) {
                   ""
                 } else if (barra_extra == "total_n") {
@@ -717,13 +786,20 @@ reporte_word_cruces <- function(
                 } else {
                   ""
                 },
-                titulo_barra_extra  = if (!is.null(preset_extra)) {
+
+                # Sin título excepto cuando tú lo definas
+                titulo_barra_extra = NULL,
+
+                # Color:
+                # - Si hay preset → dejar NULL (para que el Top2Box se pinte VERDE)
+                # - Si NO hay preset → N= en azul (#092147)
+                color_barra_extra = if (!is.null(preset_extra)) {
                   NULL
-                } else if (barra_extra == "total_n") {
-                  "Total"
                 } else {
-                  NULL
+                  "#092147"
                 },
+
+                # ------------------------------
                 exportar           = "rplot",
                 invertir_segmentos = invertir_segmentos_var,
                 invertir_leyenda   = invertir_leyenda_var
