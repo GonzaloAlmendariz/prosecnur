@@ -16,6 +16,7 @@ graficar_barras_agrupadas(
   decimales = 1,
   umbral_etiqueta = 0.03,
   umbral_posicion = 0.15,
+  sufijo_etiqueta = "",
   mostrar_barra_extra = TRUE,
   prefijo_barra_extra = "N=",
   titulo_barra_extra = NULL,
@@ -43,6 +44,8 @@ graficar_barras_agrupadas(
   color_fondo = NA,
   grosor_barras = 0.6,
   extra_derecha_rel = 0.25,
+  espacio_izquierda_rel = 0.05,
+  ancho_max_eje_y = NULL,
   mostrar_leyenda = TRUE,
   invertir_leyenda = FALSE,
   invertir_barras = FALSE,
@@ -52,6 +55,7 @@ graficar_barras_agrupadas(
   path_salida = NULL,
   ancho = 10,
   alto = 6,
+  alto_por_categoria = NULL,
   dpi = 300
 )
 }
@@ -96,6 +100,10 @@ el porcentaje se dibuja centrado dentro de la barra. Si la barra es
 menor a este umbral, el porcentaje se dibuja ligeramente a la derecha del
 final de la barra.}
 
+\item{sufijo_etiqueta}{String opcional que se añade al final de cada
+etiqueta de porcentaje (por ejemplo, \code{" pts"}). Se aplica solo a las
+etiquetas visibles.}
+
 \item{mostrar_barra_extra}{Lógico; si \code{TRUE}, agrega una "barra extra"
 de texto al extremo derecho de cada categoría (típicamente el N, por
 ejemplo \code{"N=305"}).}
@@ -132,6 +140,15 @@ color_fondo Parámetros estéticos.}
 \item{extra_derecha_rel}{Porción adicional a la derecha, en unidades de
 proporción, para la barra extra.}
 
+\item{espacio_izquierda_rel}{Proporción del rango del eje de porcentajes
+que se deja como espacio en blanco en el extremo izquierdo. Para
+\code{escala_valor} proporcional, el eje se fija en 0 sin expansión extra.}
+
+\item{ancho_max_eje_y}{Número aproximado de caracteres por línea para las
+etiquetas de las categorías (eje Y tras el \code{coord_flip}). Si no es
+\code{NULL}, se insertan saltos de línea automáticos entre palabras usando
+\pkg{stringr}.}
+
 \item{mostrar_leyenda, invertir_leyenda, invertir_barras, invertir_series}{Controles de leyenda y orden.}
 
 \item{textos_negrita}{Vector que puede incluir \code{"titulo"}, \code{"porcentajes"},
@@ -141,7 +158,15 @@ proporción, para la barra extra.}
 
 \item{path_salida}{Ruta del archivo cuando \code{exportar != "rplot"}.}
 
-\item{ancho, alto, dpi}{Parámetros de exportación.}
+\item{ancho, alto}{Parámetros de tamaño del gráfico.}
+
+\item{alto_por_categoria}{Alto (en pulgadas) a asignar por categoría en el
+área de barras cuando no se especifica \code{alto}. Sobre ese alto se suma
+automáticamente un bloque fijo para la leyenda (si \code{mostrar_leyenda})
+y otro más pequeño para el caption (si existe), y luego se acota entre un
+mínimo y un máximo razonables para mantener la consistencia visual.}
+
+\item{dpi}{Resolución para PNG.}
 }
 \value{
 Un objeto \code{ggplot} si \code{exportar = "rplot"}.

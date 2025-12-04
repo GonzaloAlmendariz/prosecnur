@@ -38,6 +38,9 @@
 #'   el porcentaje se dibuja centrado dentro de la barra. Si la barra es
 #'   menor a este umbral, el porcentaje se dibuja ligeramente a la derecha del
 #'   final de la barra.
+#' @param sufijo_etiqueta String opcional que se añade al final de cada
+#'   etiqueta de porcentaje (por ejemplo, `" pts"`). Se aplica solo a las
+#'   etiquetas visibles.
 #' @param mostrar_barra_extra Lógico; si \code{TRUE}, agrega una "barra extra"
 #'   de texto al extremo derecho de cada categoría (típicamente el N, por
 #'   ejemplo `"N=305"`).
@@ -63,13 +66,26 @@
 #' @param grosor_barras Grosor relativo de cada barra dentro de su grupo.
 #' @param extra_derecha_rel Porción adicional a la derecha, en unidades de
 #'   proporción, para la barra extra.
+#' @param espacio_izquierda_rel Proporción del rango del eje de porcentajes
+#'   que se deja como espacio en blanco en el extremo izquierdo. Para
+#'   \code{escala_valor} proporcional, el eje se fija en 0 sin expansión extra.
+#' @param ancho_max_eje_y Número aproximado de caracteres por línea para las
+#'   etiquetas de las categorías (eje Y tras el \code{coord_flip}). Si no es
+#'   \code{NULL}, se insertan saltos de línea automáticos entre palabras usando
+#'   \pkg{stringr}.
 #' @param mostrar_leyenda,invertir_leyenda,invertir_barras,invertir_series
 #'   Controles de leyenda y orden.
 #' @param textos_negrita Vector que puede incluir `"titulo"`, `"porcentajes"`,
 #'   `"leyenda"` y/o `"barra_extra"`.
 #' @param exportar `"rplot"`, `"png"`, `"ppt"` o `"word"`.
 #' @param path_salida Ruta del archivo cuando `exportar != "rplot"`.
-#' @param ancho,alto,dpi Parámetros de exportación.
+#' @param ancho,alto Parámetros de tamaño del gráfico.
+#' @param alto_por_categoria Alto (en pulgadas) a asignar por categoría en el
+#'   área de barras cuando no se especifica \code{alto}. Sobre ese alto se suma
+#'   automáticamente un bloque fijo para la leyenda (si \code{mostrar_leyenda})
+#'   y otro más pequeño para el caption (si existe), y luego se acota entre un
+#'   mínimo y un máximo razonables para mantener la consistencia visual.
+#' @param dpi Resolución para PNG.
 #'
 #' @return Un objeto \code{ggplot} si \code{exportar = "rplot"}.
 #' @export
@@ -85,6 +101,7 @@ graficar_barras_agrupadas <- function(
     decimales                 = 1,
     umbral_etiqueta           = 0.03,
     umbral_posicion           = 0.15,
+    sufijo_etiqueta           = "",
     mostrar_barra_extra       = TRUE,
     prefijo_barra_extra       = "N=",
     titulo_barra_extra        = NULL,
@@ -113,6 +130,8 @@ graficar_barras_agrupadas <- function(
     color_fondo               = NA,
     grosor_barras             = 0.6,
     extra_derecha_rel         = 0.25,
+    espacio_izquierda_rel     = 0.05,
+    ancho_max_eje_y           = NULL,
     mostrar_leyenda           = TRUE,
     invertir_leyenda          = FALSE,
     invertir_barras           = FALSE,
@@ -122,6 +141,7 @@ graficar_barras_agrupadas <- function(
     path_salida               = NULL,
     ancho                     = 10,
     alto                      = 6,
+    alto_por_categoria        = NULL,
     dpi                       = 300
 ) {
 
@@ -253,21 +273,33 @@ graficar_barras_agrupadas <- function(
     )
 
   # ---------------------------------------------------------------------------
-  # 3. Etiquetas de porcentaje (un solo geom_text, siempre alineado al dodge)
+  # 3. Etiquetas de porcentaje
   # ---------------------------------------------------------------------------
   if (mostrar_valores) {
 
     df_lab <- df_long
 
-    # Texto de etiqueta
-    df_lab$lab <- scales::percent(
-      df_lab$.valor_plot,
-      accuracy = 10^(-decimales)
-    )
+    # Construir etiqueta numérica: enteros sin decimales, resto con `decimales`
+    pct_num <- df_lab$.valor_plot * 100
+    tol <- 10^(-(decimales + 1))
+    es_entero <- is.finite(pct_num) & (abs(pct_num - round(pct_num)) < tol)
 
-    # Nunca etiquetar 0 % ni valores bajo umbral de visibilidad
-    df_lab$lab[df_lab$.valor_plot <= 0] <- ""
-    df_lab$lab[df_lab$.valor_plot < umbral_etiqueta] <- ""
+    lab_base <- character(nrow(df_lab))
+    fmt_no_entero <- paste0("%.", decimales, "f%%")
+
+    lab_base[es_entero]  <- sprintf("%d%%", round(pct_num[es_entero]))
+    lab_base[!es_entero] <- sprintf(fmt_no_entero, pct_num[!es_entero])
+
+    # Ocultar 0% y valores bajo umbral
+    lab_base[df_lab$.valor_plot <= 0] <- NA_character_
+    lab_base[df_lab$.valor_plot < umbral_etiqueta] <- NA_character_
+
+    # Añadir sufijo solo a etiquetas visibles
+    df_lab$lab <- ifelse(
+      !is.na(lab_base),
+      paste0(lab_base, sufijo_etiqueta),
+      ""
+    )
 
     # Umbral para decidir dentro / fuera
     umbral_posicion_eff <- umbral_posicion
@@ -277,22 +309,15 @@ graficar_barras_agrupadas <- function(
 
     offset_lab <- max_valor * 0.015
 
-    # ¿Etiqueta "dentro" de la barra?
     df_lab$inside <- df_lab$.valor_plot >= umbral_posicion_eff & df_lab$lab != ""
 
-    # Posición horizontal (antes del coord_flip):
-    #  - dentro: en el centro (valor/2)
-    #  - fuera: justo después del extremo (valor + offset)
     df_lab$valor_label <- df_lab$.valor_plot
     df_lab$valor_label[df_lab$inside] <-
       df_lab$.valor_plot[df_lab$inside] / 2
     df_lab$valor_label[!df_lab$inside & df_lab$.valor_plot > 0] <-
       df_lab$.valor_plot[!df_lab$inside & df_lab$.valor_plot > 0] + offset_lab
 
-    # hjust por fila
     df_lab$hjust_label <- ifelse(df_lab$inside, 0.5, 0)
-
-    # color por fila
     df_lab$col_label <- ifelse(
       df_lab$inside,
       color_texto_barras,
@@ -301,14 +326,14 @@ graficar_barras_agrupadas <- function(
 
     p <- p +
       ggplot2::geom_text(
-        data        = df_lab,
+        data        = df_lab[df_lab$lab != "", , drop = FALSE],
         mapping     = ggplot2::aes(
           x       = .data[[var_categoria]],
           y       = valor_label,
           label   = lab,
           group   = .serie,
           colour  = col_label,
-          hjust   = hjust_label    # ← AHORA AQUÍ, CORRECTO
+          hjust   = hjust_label
         ),
         inherit.aes = FALSE,
         position    = ggplot2::position_dodge(width = width_dodge),
@@ -336,7 +361,7 @@ graficar_barras_agrupadas <- function(
     p <- p +
       ggplot2::scale_y_continuous(
         limits = c(0, y_lim),
-        breaks = seq(0.2, 1, by = 0.2),
+        breaks = seq(0.25, 1, by = 0.25),
         labels = scales::percent_format(accuracy = 1),
         expand = ggplot2::expansion(mult = c(0, 0.02))
       )
@@ -348,7 +373,7 @@ graficar_barras_agrupadas <- function(
     p <- p +
       ggplot2::scale_y_continuous(
         limits = c(0, y_lim),
-        expand = ggplot2::expansion(mult = c(0, 0.05))
+        expand = ggplot2::expansion(mult = c(espacio_izquierda_rel, 0.05))
       )
   }
 
@@ -408,11 +433,22 @@ graficar_barras_agrupadas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 6. Colores, orientación y tema
+  # 6. Colores, orientación, tema y wrap de eje de categorías
   # ---------------------------------------------------------------------------
   if (!is.null(colores_series)) {
     p <- p +
       ggplot2::scale_fill_manual(values = colores_series)
+  }
+
+  if (!is.null(ancho_max_eje_y)) {
+    if (!requireNamespace("stringr", quietly = TRUE)) {
+      stop("Para usar `ancho_max_eje_y` se requiere el paquete 'stringr'.",
+           call. = FALSE)
+    }
+    p <- p +
+      ggplot2::scale_x_discrete(
+        labels = function(x) stringr::str_wrap(x, width = ancho_max_eje_y)
+      )
   }
 
   caption_text <- NULL
@@ -435,10 +471,10 @@ graficar_barras_agrupadas <- function(
       axis.text.y        = ggplot2::element_text(
         color = color_ejes,
         size  = size_ejes,
-        hjust = 0.5,
+        hjust = 1,
         vjust = 0.5
       ),
-      axis.line.y        = ggplot2::element_line(color = color_ejes, linewidth = 0.3),
+      axis.line.y        = ggplot2::element_blank(),
       axis.text.x        = ggplot2::element_blank(),
       axis.ticks.x       = ggplot2::element_blank(),
       axis.line.x        = ggplot2::element_blank(),
@@ -477,16 +513,31 @@ graficar_barras_agrupadas <- function(
         size  = size_ejes
       ),
       axis.ticks.x = ggplot2::element_line(
-        color = "#7F7F7F",
+        color     = "#7F7F7F",
         linewidth = 0.3
       ),
       axis.line.x  = ggplot2::element_line(
-        color = "#7F7F7F",
+        color     = "#7F7F7F",
         linewidth = 0.4
       )
     )
   } else {
     eje_theme <- ggplot2::theme()
+  }
+
+  # Número de ítems en la leyenda y filas necesarias (máx. 5 por fila)
+  n_items_leyenda <- length(levels(df_long$.serie))
+  n_por_fila      <- 5L
+  n_filas_leyenda <- max(1L, ceiling(n_items_leyenda / n_por_fila))
+
+  if (mostrar_leyenda) {
+    p <- p +
+      ggplot2::guides(
+        fill = ggplot2::guide_legend(
+          nrow    = n_filas_leyenda,
+          reverse = invertir_leyenda
+        )
+      )
   }
 
   p <- p +
@@ -499,14 +550,54 @@ graficar_barras_agrupadas <- function(
       caption  = caption_text
     )
 
-  if (invertir_leyenda && mostrar_leyenda) {
-    p <- p + ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE))
+  # ---------------------------------------------------------------------------
+  # 7. Exportación (altura total = panel + leyenda + caption)
+  # ---------------------------------------------------------------------------
+
+  n_categorias <- length(unique(df_long[[var_categoria]]))
+
+  # Parámetros de descomposición de altura
+  alto_min_total   <- 2.5   # altura mínima razonable en pulgadas
+  alto_max_total   <- 9.0   # tope máximo
+  alto_leyenda_row <- 0.35  # alto aproximado por fila de leyenda
+  alto_caption     <- 0.25  # bloque adicional si hay caption
+
+  # Leyenda: cuántos ítems y cuántas filas
+  n_items_leyenda <- length(levels(df_long$.serie))
+
+  if (!exists("n_filas_leyenda")) {
+    # Por defecto: máximo 5 ítems por fila
+    n_filas_leyenda <- if (n_items_leyenda <= 0) {
+      0L
+    } else {
+      ceiling(n_items_leyenda / 5)
+    }
   }
 
-  # ---------------------------------------------------------------------------
-  # 7. Exportación
-  # ---------------------------------------------------------------------------
+  tiene_caption <- !is.null(caption_text) && nzchar(caption_text)
+
+  # alto_por_categoria efectivo (para cuando no se pasa explícito)
+  alto_por_cat_eff <- alto_por_categoria %||% 0.35
+
+  # Panel de barras
+  alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
+
+  # Leyenda
+  alto_leyenda <- if (mostrar_leyenda && n_items_leyenda > 0) {
+    n_filas_leyenda * alto_leyenda_row
+  } else {
+    0
+  }
+
+  # Caption interno (nota_pie)
+  alto_cap <- if (tiene_caption) alto_caption else 0
+
+  alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap
+  alto_total_sugerido <- max(alto_min_total, min(alto_max_total, alto_total_sugerido))
+
+  # Si solo queremos el ggplot, devolvemos p con el alto sugerido como atributo
   if (exportar == "rplot") {
+    attr(p, "alto_word_sugerido") <- alto_total_sugerido
     return(p)
   }
 
@@ -514,6 +605,16 @@ graficar_barras_agrupadas <- function(
     stop("Debe especificar `path_salida` cuando `exportar` no es 'rplot'.", call. = FALSE)
   }
 
+  # Altura efectiva para PNG / PPT / WORD
+  height_plot <- if (!missing(alto) && !is.null(alto)) {
+    alto
+  } else if (!is.null(alto_por_categoria)) {
+    alto_total_sugerido
+  } else {
+    alto_total_sugerido
+  }
+
+  # ---------------------- WORD ----------------------
   if (exportar == "word") {
     if (!requireNamespace("officer", quietly = TRUE)) {
       stop(
@@ -522,15 +623,14 @@ graficar_barras_agrupadas <- function(
       )
     }
 
-    width_word  <- if (!missing(ancho) && !is.null(ancho)) ancho else 6.5
-    height_word <- if (!missing(alto)  && !is.null(alto))  alto  else 4.5
+    width_word <- if (!missing(ancho) && !is.null(ancho)) ancho else 6.5
 
     doc <- officer::read_docx()
     doc <- officer::body_add_gg(
       doc,
       value  = p,
       width  = width_word,
-      height = height_word,
+      height = height_plot,
       style  = "centered"
     )
     print(doc, target = path_salida)
@@ -538,18 +638,20 @@ graficar_barras_agrupadas <- function(
     return(invisible(p))
   }
 
+  # ---------------------- PNG ----------------------
   if (exportar == "png") {
     ggplot2::ggsave(
       filename = path_salida,
       plot     = p,
       width    = ancho,
-      height   = alto,
+      height   = height_plot,
       dpi      = dpi,
       bg       = if (is.na(color_fondo)) "transparent" else color_fondo
     )
     return(invisible(p))
   }
 
+  # ---------------------- PPT ----------------------
   if (exportar == "ppt") {
     if (!requireNamespace("officer", quietly = TRUE) ||
         !requireNamespace("rvg", quietly = TRUE)) {

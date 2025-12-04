@@ -125,9 +125,11 @@
 #'   \code{"rplot"}.
 #' @param ancho Ancho del gráfico (cuando se exporta a archivo).
 #' @param alto Alto del gráfico (cuando se exporta a archivo).
-#' @param alto_por_categoria Alto (en pulgadas) a asignar por categoría cuando
-#'   no se especifica \code{alto}. Si es \code{NULL}, se usan los valores por
-#'   defecto históricos.
+#' @param alto_por_categoria Alto (en pulgadas) a asignar por categoría en el
+#'   área de barras cuando no se especifica \code{alto}. Sobre ese alto se suma
+#'   automáticamente un bloque fijo para la leyenda (si \code{mostrar_leyenda})
+#'   y otro más pequeño para el caption (si existe), para evitar que la barra
+#'   desaparezca cuando hay pocas categorías.
 #' @param dpi Resolución en puntos por pulgada (solo para PNG).
 #'
 #' @return Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
@@ -192,6 +194,16 @@ graficar_barras_apiladas <- function(
 ) {
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
+
+  hjust_from_pos <- function(x) {
+    switch(
+      x,
+      "izquierda" = 0,
+      "centro"    = 0.5,
+      "derecha"   = 1,
+      0.5
+    )
+  }
 
   escala_valor       <- match.arg(escala_valor)
   exportar           <- match.arg(exportar)
@@ -301,6 +313,12 @@ graficar_barras_apiladas <- function(
     dplyr::summarise(suma = sum(.valor_plot, na.rm = TRUE), .groups = "drop")
 
   max_suma <- max(df_sum$suma, na.rm = TRUE)
+
+  # Para gráficos tipo 100% (escala_valor = "proporcion_100"),
+  # forzar que el máximo del eje sea siempre 1 (100%)
+  if (escala_valor == "proporcion_100") {
+    max_suma <- 1
+  }
 
   if (mostrar_barra_extra) {
     x_max <- max_suma * (1 + extra_derecha_rel)
@@ -574,7 +592,7 @@ graficar_barras_apiladas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 6. Colores, caption y tema
+  # 6. Colores, caption, leyenda centrada y tema
   # ---------------------------------------------------------------------------
   if (!is.null(colores_grupos)) {
     p <- p +
@@ -591,75 +609,128 @@ graficar_barras_apiladas <- function(
     caption_text <- nota_pie_derecha
   }
 
+  # Número de ítems en la leyenda y filas necesarias (máx. 5 por fila)
+  n_items_leyenda <- length(levels(df_long$.grupo))
+  n_por_fila      <- 5L
+  n_filas_leyenda <- max(1L, ceiling(n_items_leyenda / n_por_fila))
+
+  # Leyenda centrada con filas dinámicas
+  if (mostrar_leyenda) {
+    p <- p +
+      ggplot2::guides(
+        fill = ggplot2::guide_legend(
+          nrow    = n_filas_leyenda,
+          reverse = invertir_leyenda
+        )
+      )
+  }
+
   p <- p +
     ggplot2::theme_minimal(base_size = 9) +
     ggplot2::theme(
-      panel.grid.major.y = ggplot2::element_blank(),
-      panel.grid.minor   = ggplot2::element_blank(),
-      panel.grid.major.x = ggplot2::element_blank(),
-      axis.title.x       = ggplot2::element_blank(),
-      axis.text.x        = ggplot2::element_blank(),
-      axis.ticks.x       = ggplot2::element_blank(),
-      axis.title.y       = ggplot2::element_blank(),
-      axis.text.y        = ggplot2::element_text(
+      panel.grid.major.y  = ggplot2::element_blank(),
+      panel.grid.minor    = ggplot2::element_blank(),
+      panel.grid.major.x  = ggplot2::element_blank(),
+      axis.title.x        = ggplot2::element_blank(),
+      axis.text.x         = ggplot2::element_blank(),
+      axis.ticks.x        = ggplot2::element_blank(),
+      axis.title.y        = ggplot2::element_blank(),
+      axis.text.y         = ggplot2::element_text(
         color = color_ejes,
         size  = size_ejes,
         hjust = 1,
         vjust = 0.5,
         face  = if ("eje_y" %in% textos_negrita) "bold" else "plain"
       ),
-      axis.line.y        = ggplot2::element_blank(),
-      legend.title       = ggplot2::element_blank(),
-      legend.position    = if (mostrar_leyenda) "bottom" else "none",
-      legend.text        = ggplot2::element_text(
+      axis.line.y         = ggplot2::element_blank(),
+      legend.title        = ggplot2::element_blank(),
+      legend.position     = if (mostrar_leyenda) "bottom" else "none",
+      legend.justification = "center",
+      legend.box          = "horizontal",
+      legend.box.just     = "center",
+      legend.text         = ggplot2::element_text(
         color = color_leyenda,
         size  = size_leyenda,
         face  = if ("leyenda" %in% textos_negrita) "bold" else "plain"
       ),
-      plot.margin        = ggplot2::margin(t = 15, r = 25, b = 5, l = 25),
+      plot.margin         = ggplot2::margin(t = 15, r = 10, b = 5, l = 10),
       plot.title.position = "plot",
-      plot.title         = ggplot2::element_text(
+      plot.title          = ggplot2::element_text(
         hjust = hjust_titulo,
         color = color_titulo,
         size  = size_titulo,
         face  = if ("titulo" %in% textos_negrita) "bold" else "plain"
       ),
-      plot.subtitle      = ggplot2::element_text(
+      plot.subtitle       = ggplot2::element_text(
         hjust = hjust_titulo,
         color = color_subtitulo,
         size  = size_subtitulo
       ),
-      plot.caption       = ggplot2::element_text(
+      plot.caption        = ggplot2::element_text(
         hjust = hjust_caption,
         color = color_nota_pie,
         size  = size_nota_pie
       ),
-      plot.background    = ggplot2::element_rect(fill = color_fondo, color = NA),
-      panel.background   = ggplot2::element_rect(fill = color_fondo, color = NA)
+      plot.background     = ggplot2::element_rect(fill = color_fondo, color = NA),
+      panel.background    = ggplot2::element_rect(fill = color_fondo, color = NA)
+    ) +
+    ggplot2::labs(
+      title    = titulo,
+      subtitle = subtitulo,
+      caption  = caption_text
     )
 
-  if (invertir_leyenda && mostrar_leyenda) {
-    p <- p + ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE))
-  }
-
-  p <- p + ggplot2::labs(
-    title    = titulo,
-    subtitle = subtitulo,
-    caption  = caption_text
-  )
-
   # ---------------------------------------------------------------------------
-  # 7. Exportación (con alto automático opcional)
+  # 7. Exportación (incluye alto_por_categoria con topes min/max)
   # ---------------------------------------------------------------------------
-
   n_categorias <- length(unique(df_long[[var_categoria]]))
 
+  # Límites internos de alto en pulgadas (coherentes con otros graficadores)
+  alto_min <- 4.5
+  alto_max <- 7.0
+
+  # -------------------------------------------
+  # Cálculo de alto sugerido para Word/PNG/PPT
+  # -------------------------------------------
+  alto_por_cat_eff <- alto_por_categoria %||% 0.35
+
+  # Panel de barras (solo la zona de categorías)
+  alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
+
+  # Aprox. espacio para leyenda (si la hay)
+  n_items_leyenda <- length(levels(df_long$.grupo))
+  alto_leyenda <- if (mostrar_leyenda && n_items_leyenda > 0) {
+    if (n_items_leyenda <= 5)       0.5
+    else if (n_items_leyenda <=10)  0.8
+    else                            1.1
+  } else {
+    0
+  }
+
+  # Aprox. espacio para caption interno (nota_pie / nota_pie_derecha)
+  alto_caption <- if (!is.null(caption_text) && nzchar(caption_text)) 0.25 else 0
+
+  alto_total_sugerido <- alto_panel + alto_leyenda + alto_caption
+  alto_total_sugerido <- max(alto_min, min(alto_max, alto_total_sugerido))
+
+  # Si solo queremos el ggplot, devolvemos p pero con el alto sugerido como atributo
   if (exportar == "rplot") {
+    attr(p, "alto_word_sugerido") <- alto_total_sugerido
     return(p)
   }
 
   if (is.null(path_salida) || !nzchar(path_salida)) {
     stop("Debe especificar `path_salida` cuando `exportar` no es 'rplot'.", call. = FALSE)
+  }
+
+  # Altura efectiva común para PNG / PPT / WORD
+  height_plot <- if (!missing(alto) && !is.null(alto)) {
+    alto
+  } else if (!is.null(alto_por_categoria)) {
+    # respeta compatibilidad hacia atrás, pero usando el mismo cálculo
+    alto_total_sugerido
+  } else {
+    alto_total_sugerido
   }
 
   # ---------------------- WORD ----------------------
@@ -673,34 +744,17 @@ graficar_barras_apiladas <- function(
 
     width_word <- if (!missing(ancho) && !is.null(ancho)) ancho else 6.5
 
-    height_word <- if (!missing(alto) && !is.null(alto)) {
-      alto
-    } else if (!is.null(alto_por_categoria)) {
-      n_categorias * alto_por_categoria
-    } else {
-      4.5
-    }
-
     doc <- officer::read_docx()
     doc <- officer::body_add_gg(
       doc,
       value  = p,
       width  = width_word,
-      height = height_word,
+      height = height_plot,
       style  = "centered"
     )
     print(doc, target = path_salida)
 
     return(invisible(p))
-  }
-
-  # Altura efectiva para PNG / PPT
-  height_plot <- if (!missing(alto) && !is.null(alto)) {
-    alto
-  } else if (!is.null(alto_por_categoria)) {
-    n_categorias * alto_por_categoria
-  } else {
-    alto
   }
 
   # ---------------------- PNG ----------------------
