@@ -230,8 +230,8 @@ graficar_barras_apiladas <- function(
   hjust_titulo  <- hjust_from_pos(pos_titulo)
   hjust_caption <- hjust_from_pos(pos_nota_pie)
 
-  pulso_azul  <- "#004B8D"
-  pulso_verde <- "#00843D"
+  pulso_azul  <- "#002768"
+  pulso_verde <- "#5BAF31"
 
   textos_negrita <- textos_negrita %||% character(0)
 
@@ -495,7 +495,7 @@ graficar_barras_apiladas <- function(
       if (barra_extra_preset == "top2box") {
         df_wide_extra$valor_extra <- ordenado[, 1] + ordenado[, 2]
         if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
-          titulo_extra_int <- "Top 2 Box"
+          titulo_extra_int <- "TOP TWO BOX"
         }
         if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
           prefijo_extra_int <- ""
@@ -504,7 +504,7 @@ graficar_barras_apiladas <- function(
       } else if (barra_extra_preset == "top3box") {
         df_wide_extra$valor_extra <- ordenado[, 1] + ordenado[, 2] + ordenado[, 3]
         if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
-          titulo_extra_int <- "Top 3 Box"
+          titulo_extra_int <- "TOP THREE BOX"
         }
         if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
           prefijo_extra_int <- ""
@@ -515,7 +515,7 @@ graficar_barras_apiladas <- function(
         df_wide_extra$valor_extra <- ordenado[, ncol_mat] +
           ordenado[, ncol_mat - 1]
         if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
-          titulo_extra_int <- "Bottom 2 Box"
+          titulo_extra_int <- "BOTTOM TWO BOX"
         }
         if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
           prefijo_extra_int <- ""

@@ -459,7 +459,7 @@ reporte_word <- function(
 
       N_texto <- NULL
       if (is.finite(n_var) && n_var >= 0) {
-        N_texto <- sprintf("N = %s", format(n_var, big.mark = ",", scientific = FALSE))
+        N_texto <- sprintf("%s", format(n_var, big.mark = ",", scientific = FALSE))
       }
 
       var_label    <- .titulo_var_safe(v)
@@ -490,7 +490,7 @@ reporte_word <- function(
           etiquetas_series <- c(pct = "Porcentaje")
 
           colores_series <- estilos_barras_agrupadas$colores_series %||%
-            c("Porcentaje" = "#004B8D")
+            c("Porcentaje" = "#1B679D")
 
           args_barras <- c(
             list(
@@ -738,7 +738,7 @@ reporte_word <- function(
       )
     }
 
-    pulso_azul <- "#004B8D"
+    pulso_azul <- "#1B679D"
 
     # -------------------------------------------------------------------------
     # 5.1. Leer plantilla Word (análogo al PPT, con logos en encabezado)
@@ -788,7 +788,7 @@ reporte_word <- function(
       # Título del índice
       indice_titulo <- officer::fpar(
         officer::ftext(
-          "ÍNDICE DE GRÁFICAS",
+          "ÍNDICE DE GRÁFICOS",
           prop = officer::fp_text(
             bold        = TRUE,
             italic      = FALSE,
@@ -833,7 +833,7 @@ reporte_word <- function(
             # Entrada índice: "Gráfica Nro. i. " (azul) + título (negro, cursiva)
             entrada_indice <- officer::fpar(
               officer::ftext(
-                sprintf("Gráfica Nro. %d. ", i),
+                sprintf("Gráfico Nº %d. ", i),
                 prop = officer::fp_text(
                   bold        = TRUE,
                   italic      = FALSE,
@@ -869,7 +869,7 @@ reporte_word <- function(
 
           entrada_indice <- officer::fpar(
             officer::ftext(
-              sprintf("Gráfica Nro. %d. ", i),
+              sprintf("Gráfico Nº %d. ", i),
               prop = officer::fp_text(
                 bold        = TRUE,
                 italic      = FALSE,
@@ -904,37 +904,30 @@ reporte_word <- function(
 
         p        <- plots_list[[i]]
         titulo_i <- titulos_list[[i]] %||% ""
-        N_i      <- N_texto_list[[i]] %||% NULL  # reservado si luego lo usas
+        N_i      <- N_texto_list[[i]] %||% NA
 
-        # Título externo:
-        # "Gráfica Nro. i: " (negrita, azul) + título (negro, cursiva)
+        # ---------------- TÍTULO CENTRADO ----------------
+        # "Gráfico Nº i: <título_i>" todo en azul pulso
+        titulo_full <- sprintf("Gráfico Nº %d: %s", i, titulo_i)
+
         titulo_word <- officer::fpar(
           officer::ftext(
-            sprintf("Gráfica Nro. %d: ", i),
+            titulo_full,
             prop = officer::fp_text(
               bold        = TRUE,
-              italic      = FALSE,
+              italic      = TRUE,
               color       = pulso_azul,
-              font.size   = 10,
+              font.size   = 11,
               font.family = "Arial"
             )
           ),
-          officer::ftext(
-            titulo_i,
-            prop = officer::fp_text(
-              bold        = FALSE,
-              italic      = TRUE,
-              color       = "black",
-              font.size   = 10,
-              font.family = "Arial"
-            )
-          )
+          fp_p = officer::fp_par(text.align = "center")
         )
 
         doc <- officer::body_add_fpar(doc, titulo_word, style = "Normal")
 
-        # Gráfico: usar alto sugerido por el graficador si existe
-        width_word <- 6.1
+        # ---------------- GRÁFICO ----------------
+        width_word <-  17 / 2.54
 
         alto_sugerido <- attr(p, "alto_word_sugerido", exact = TRUE)
         height_word <- if (!is.null(alto_sugerido) && is.finite(alto_sugerido)) {
@@ -950,18 +943,35 @@ reporte_word <- function(
           height = height_word
         )
 
-        # Pie gris debajo del gráfico (fuente) a la izquierda
-        if (!is.null(fuente) && nzchar(fuente)) {
+        # ---------------- PIE CENTRADO ----------------
+        # Si viene N_i y fuente, construimos:
+        # "N = <N_i><fuente>"
+        pie_full <- NULL
+
+        if (!is.null(fuente) && nzchar(fuente) && !is.na(N_i)) {
+          # Ejemplo: fuente = " estudiantes. Fuente: PULSO PUCP 2025."
+          pie_full <- paste0("N = ", N_i, fuente)
+        } else if (!is.null(fuente) && nzchar(fuente)) {
+          pie_full <- fuente
+        } else if (!is.na(N_i)) {
+          pie_full <- paste0("N = ", N_i)
+        }
+
+        if (!is.null(pie_full)) {
           pie_word <- officer::fpar(
             officer::ftext(
-              fuente,
+              pie_full,
               prop = officer::fp_text(
-                color       = "#7F7F7F",
-                font.size   = 9,
+                color       = pulso_azul,
+                font.size   = 7,
+                bold        = TRUE,
+                italic      = TRUE,
                 font.family = "Arial"
               )
-            )
+            ),
+            fp_p = officer::fp_par(text.align = "center")
           )
+
           doc <- officer::body_add_fpar(doc, pie_word, style = "Normal")
         }
 

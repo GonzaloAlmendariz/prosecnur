@@ -549,7 +549,8 @@ reporte_word_cruces <- function(
   # ---------------------------------------------------------------------------
   plots_list       <- list()
   titulos_list     <- list()
-  resumenN_list    <- list()
+  resumenN_list    <- list()  # Texto tipo "N = ... | Ratio ..."
+  N_texto_list     <- list()  # SOLO el número de N
   log_list         <- list()
   seccion_por_plot <- character(0)
 
@@ -622,18 +623,27 @@ reporte_word_cruces <- function(
       }
 
       N_total_cruce <- sum(crc$N_estrato, na.rm = TRUE)
+
+      # N "puro" para el pie (solo el número)
+      if (is.finite(N_total_cruce) && N_total_cruce >= 0) {
+        N_texto_cruce <- sprintf(
+          "%s",
+          format(N_total_cruce, big.mark = ",", scientific = FALSE)
+        )
+      } else {
+        N_texto_cruce <- NA_character_
+      }
+
+      # Texto extendido (si quieres seguir usando resumenN_list)
       if (is.finite(N_total_cruce) && N_total_cruce >= 0 && total_casos > 0) {
         ratio <- N_total_cruce / total_casos * 100
         resumen_n_txt <- sprintf(
           "N = %s | Ratio de respuestas: %.1f%%",
-          format(N_total_cruce, big.mark = ",", scientific = FALSE),
+          N_texto_cruce,
           ratio
         )
       } else if (is.finite(N_total_cruce)) {
-        resumen_n_txt <- sprintf(
-          "N = %s",
-          format(N_total_cruce, big.mark = ",", scientific = FALSE)
-        )
+        resumen_n_txt <- sprintf("N = %s", N_texto_cruce)
       } else {
         resumen_n_txt <- NULL
       }
@@ -755,21 +765,32 @@ reporte_word_cruces <- function(
 
                 # Resumen N específico del estrato
                 Nj <- N_estrato[j]
+
+                # N "puro" para este estrato
+                if (is.finite(Nj) && Nj >= 0) {
+                  N_texto_j <- sprintf(
+                    "%s",
+                    format(Nj, big.mark = ",", scientific = FALSE)
+                  )
+                } else {
+                  N_texto_j <- NA_character_
+                }
+
+                # Resumen extendido (si lo quieres seguir usando)
                 if (is.finite(Nj) && Nj >= 0 && total_casos > 0) {
                   ratio_j <- Nj / total_casos * 100
                   resumenN_list[[idx_plot]] <- sprintf(
                     "N = %s | Ratio de respuestas: %.1f%%",
-                    format(Nj, big.mark = ",", scientific = FALSE),
+                    N_texto_j,
                     ratio_j
                   )
                 } else if (is.finite(Nj)) {
-                  resumenN_list[[idx_plot]] <- sprintf(
-                    "N = %s",
-                    format(Nj, big.mark = ",", scientific = FALSE)
-                  )
+                  resumenN_list[[idx_plot]] <- sprintf("N = %s", N_texto_j)
                 } else {
                   resumenN_list[[idx_plot]] <- NULL
                 }
+
+                N_texto_list[[idx_plot]] <- N_texto_j  # <- NUEVO
 
                 seccion_por_plot[idx_plot] <- sec
               }
@@ -787,7 +808,7 @@ reporte_word_cruces <- function(
             # una sola paleta azul para todas las series
             if (is.null(estilos_barras_agrupadas$colores_series)) {
 
-              pulso_azul <- "#004B8D"
+              pulso_azul <- "#1B679D"
 
               colores_series <- stats::setNames(
                 rep(pulso_azul, length(etiquetas_series)),
@@ -1004,7 +1025,7 @@ reporte_word_cruces <- function(
                 # 3) Paleta por defecto multi-color
                 if (is.null(colores_series)) {
                   pal <- c(
-                    "#004B8D", "#F26C4F", "#8CC63E",
+                    "#1B679D", "#F26C4F", "#8CC63E",
                     "#FFC20E", "#A54399", "#00A3E0", "#7F7F7F"
                   )
                   pal <- rep(pal, length.out = length(etiquetas_series))
@@ -1111,6 +1132,7 @@ reporte_word_cruces <- function(
         titulos_list[[idx_plot]]     <- titulo_slide
         resumenN_list[[idx_plot]]    <- resumen_n_txt
         seccion_por_plot[idx_plot]   <- sec
+        N_texto_list[[idx_plot]]     <- N_texto_cruce
       } else {
         log_list[[length(log_list) + 1]] <- tibble::tibble(
           seccion      = sec,
@@ -1139,7 +1161,7 @@ reporte_word_cruces <- function(
       )
     }
 
-    pulso_azul <- "#004B8D"
+    pulso_azul <- "#1B679D"
 
     # 5.1 Leer plantilla (análogo a la lógica de PPT interna)
     if (is.null(template_docx)) {
@@ -1289,81 +1311,85 @@ reporte_word_cruces <- function(
 
         p_i       <- plots_list[[i]]
         titulo_i  <- titulos_list[[i]]  %||% ""
-        resumen_i <- resumenN_list[[i]] %||% NULL
+        resumen_i <- resumenN_list[[i]] %||% NULL  # (lo puedes usar en otro lado si quieres)
+        N_i       <- N_texto_list[[i]]  %||% NA    # SOLO el número, como en reporte_word()
 
-        # TÍTULO EN WORD (arriba de la gráfica)
+        # ---------------- TÍTULO CENTRADO ----------------
+        # "Gráfico Nº i: <título_i>" todo en azul pulso
+        titulo_full <- sprintf("Gráfico Nº %d: %s", i, titulo_i)
+
         titulo_word <- officer::fpar(
           officer::ftext(
-            sprintf("Gráfica Nro. %d: ", i),
+            titulo_full,
             prop = officer::fp_text(
               bold        = TRUE,
-              italic      = FALSE,
+              italic      = TRUE,
               color       = pulso_azul,
-              font.size   = 10,
+              font.size   = 11,
               font.family = "Arial"
             )
           ),
-          officer::ftext(
-            titulo_i,
-            prop = officer::fp_text(
-              bold        = FALSE,
-              italic      = TRUE,
-              color       = "black",
-              font.size   = 10,
-              font.family = "Arial"
-            )
-          )
+          fp_p = officer::fp_par(text.align = "center")
         )
 
         doc <- officer::body_add_fpar(doc, titulo_word, style = "Normal")
 
-        # Ancho fijo ~ 15.5 cm en pulgadas
-        width_in <- 15.5 / 2.54
+        # ---------------- GRÁFICO ----------------
+        width_in <- 17 / 2.54
 
-        # Altura base sugerida por el graficador (si existe)
         alto_sugerido <- attr(p_i, "alto_word_sugerido", exact = TRUE)
+        height_in <- if (!is.null(alto_sugerido) && is.finite(alto_sugerido)) {
+          alto_sugerido
+        } else {
+          3.5
+        }
 
         doc <- officer::body_add_gg(
           doc,
           value  = p_i,
           width  = width_in,
-          height = alto_sugerido,
+          height = height_in,
           style  = "Normal"
         )
 
-        # Pie: fuente + (opcional) resumen N, en gris
-        pie_line <- NULL
+        # ---------------- PIE CENTRADO ----------------
+        # Igual que en reporte_word():
+        # - Si hay N_i y fuente:  "N = <N_i><fuente>"
+        # - Si solo fuente:       "<fuente>"
+        # - Si solo N_i:          "N = <N_i>"
+        pie_full <- NULL
 
-        if (!is.null(fuente) && nzchar(fuente)) {
-          pie_line <- fuente
+        if (!is.null(fuente) && nzchar(fuente) && !is.na(N_i)) {
+          pie_full <- paste0("N = ", N_i, fuente)
+        } else if (!is.null(fuente) && nzchar(fuente)) {
+          pie_full <- fuente
+        } else if (!is.na(N_i)) {
+          pie_full <- paste0("N = ", N_i)
         }
 
-        if (mostrar_resumen_n &&
-            !is.null(resumen_i) && nzchar(resumen_i)) {
-
-          if (is.null(pie_line)) {
-            pie_line <- resumen_i
-          } else {
-            pie_line <- paste0(pie_line, "   |   ", resumen_i)
-          }
-        }
-
-        if (!is.null(pie_line) && nzchar(pie_line)) {
+        if (!is.null(pie_full)) {
           pie_word <- officer::fpar(
             officer::ftext(
-              pie_line,
+              pie_full,
               prop = officer::fp_text(
-                color       = "#7F7F7F",
-                font.size   = 9,
+                color       = pulso_azul,
+                font.size   = 7,
+                bold        = TRUE,
+                italic      = TRUE,
                 font.family = "Arial"
               )
-            )
+            ),
+            fp_p = officer::fp_par(text.align = "center")
           )
+
           doc <- officer::body_add_fpar(doc, pie_word, style = "Normal")
         }
 
+        # Espacio entre gráficas
         doc <- officer::body_add_par(doc, "", style = "Normal")
       }
+
+
     }
 
     print(doc, target = path_word)
