@@ -606,12 +606,43 @@ graficar_barras_apiladas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 6. Colores, caption, leyenda centrada y tema
+  # 6. Colores, caption, leyenda y wrap automático de etiquetas largas
   # ---------------------------------------------------------------------------
-  if (!is.null(colores_grupos)) {
-    p <- p +
-      ggplot2::scale_fill_manual(values = colores_grupos)
+
+  # ---------------------------------------------------------------------------
+  # LEYENDA — Wrap automático de etiquetas + tamaño fijo del rectángulo
+  # ---------------------------------------------------------------------------
+
+  # Función de wrap (~40 caracteres por línea) solo si stringr está disponible
+  wrap_fun <- NULL
+  if (requireNamespace("stringr", quietly = TRUE)) {
+    wrap_fun <- function(x) stringr::str_wrap(x, width = 40)
   }
+
+  # Aplicación del wrap a la escala de colores
+  if (!is.null(colores_grupos)) {
+
+    # Paleta manual
+    p <- p +
+      ggplot2::scale_fill_manual(
+        values = colores_grupos,
+        labels = if (!is.null(wrap_fun)) wrap_fun else waiver()
+      )
+
+  } else if (!is.null(wrap_fun)) {
+
+    # Paleta por defecto de ggplot con wrap
+    p <- p +
+      ggplot2::scale_fill_discrete(labels = wrap_fun)
+
+  }
+
+  # Mantener el mismo tamaño de “swatch” aunque el texto tenga 1 o 2 líneas
+  p <- p +
+    ggplot2::theme(
+      legend.key.width  = grid::unit(0.4, "cm"),
+      legend.key.height = grid::unit(0.4, "cm")
+    )
 
   caption_text <- NULL
   if (!is.null(nota_pie) && nzchar(nota_pie) &&
