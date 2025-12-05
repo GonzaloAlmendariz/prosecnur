@@ -772,6 +772,65 @@ reporte_ppt_cruces <- function(
     )
   }
 
+
+  # Helper para SM "clásico": misma lógica que en reporte_ppt()
+  .build_tab_barras_agrupadas_simple <- function(tab_freq) {
+    if (!nrow(tab_freq)) return(NULL)
+
+    n_total <- sum(tab_freq$n, na.rm = TRUE)
+
+    pct_raw <- tab_freq$pct
+    if (all(is.na(pct_raw))) return(NULL)
+
+    # Detectar escala de pct (0–1 o 0–100)
+    max_pct <- max(pct_raw, na.rm = TRUE)
+    if (is.finite(max_pct) && max_pct <= 1 + 1e-8) {
+      pct_0_100 <- pct_raw * 100
+    } else {
+      pct_0_100 <- pct_raw
+    }
+
+    # Convertir a enteros (no imponemos suma 100, en SM puede ser > 100)
+    pct_int  <- round(pct_0_100)
+    pct_prop <- pct_int / 100
+
+    tibble::tibble(
+      categoria = tab_freq$Opciones,
+      n_base    = n_total,
+      pct       = pct_prop
+    )
+  }
+
+  # ---------------------------------------------------------------------------
+  # Helper: barras agrupadas tipo SM para UN estrato (igual que reporte_ppt)
+  # ---------------------------------------------------------------------------
+  .build_tab_barras_agrupadas_sm_estrato <- function(crc, j) {
+
+    N_j <- crc$N_estrato[j]
+    if (!is.finite(N_j) || N_j <= 0) return(NULL)
+
+    n_vec <- crc$n_mat[, j]
+    cats  <- crc$categorias
+
+    # Eliminar categorías sin frecuencia
+    keep <- !is.na(n_vec) & n_vec > 0
+    if (!any(keep)) return(NULL)
+
+    n_vec <- n_vec[keep]
+    cats  <- cats[keep]
+
+    # Porcentajes 0–100 para ese estrato
+    pct_0_100 <- (n_vec / N_j) * 100
+    pct_int   <- round(pct_0_100)     # enteros
+    pct_prop  <- pct_int / 100        # escala 0–1 para el graficador
+
+    tibble::tibble(
+      categoria = cats,
+      n_base    = N_j,
+      pct       = pct_prop
+    )
+  }
+
   # ---------------------------------------------------------------------------
   # 4. Loop por secciones y variables
   # ---------------------------------------------------------------------------
@@ -852,12 +911,16 @@ reporte_ppt_cruces <- function(
       N_total_cruce <- sum(crc$N_estrato, na.rm = TRUE)
       if (is.finite(N_total_cruce) && N_total_cruce >= 0 && total_casos > 0) {
         ratio <- N_total_cruce / total_casos * 100
-        resumen_n_txt <- sprintf("N = %s | Ratio de respuestas: %.1f%%",
-                                 format(N_total_cruce, big.mark = ",", scientific = FALSE),
-                                 ratio)
+        resumen_n_txt <- sprintf(
+          "N = %s | Ratio de respuestas: %.1f%%",
+          format(N_total_cruce, big.mark = ",", scientific = FALSE),
+          ratio
+        )
       } else if (is.finite(N_total_cruce)) {
-        resumen_n_txt <- sprintf("N = %s",
-                                 format(N_total_cruce, big.mark = ",", scientific = FALSE))
+        resumen_n_txt <- sprintf(
+          "N = %s",
+          format(N_total_cruce, big.mark = ",", scientific = FALSE)
+        )
       } else {
         resumen_n_txt <- NULL
       }
@@ -868,8 +931,10 @@ reporte_ppt_cruces <- function(
       nota_pie_plot <- NULL
 
       if (mensajes_progreso) {
-        message("   - ", v, " x ", var_cruce, " → ", tipo_grafico,
-                " (list_name = ", list_name_v, ") [", override, "]")
+        message(
+          "   - ", v, " x ", var_cruce, " → ", tipo_grafico,
+          " (list_name = ", list_name_v, ") [", override, "]"
+        )
       }
 
       p <- NULL
@@ -887,61 +952,155 @@ reporte_ppt_cruces <- function(
 
             args_extra <- list()
 
-            ## 1) PRIORIDAD: paleta por list_name, usando colores_apiladas_por_listname
-            if (!is.null(list_name_v) && !is.na(list_name_v) &&
-                !is.null(colores_apiladas_por_listname[[list_name_v]])) {
+            # COLORES por defecto (si el usuario no los definió)
+            if (is.null(estilos_barras_agrupadas$colores_series)) {
 
-              pal_obj <- colores_apiladas_por_listname[[list_name_v]]
+              pulso_azul <- "#004B8D"
 
-              # Puede ser vector simple o lista con $colores
-              pal_vec <- if (is.list(pal_obj) && !is.null(pal_obj$colores)) {
-                pal_obj$colores
-              } else {
-                pal_obj
-              }
+              colores_series <- stats::setNames(
+                rep(pulso_azul, length(etiquetas_series)),
+                etiquetas_series
+              )
 
-              # Reordenar y filtrar a las series presentes
-              pal_vec <- pal_vec[etiquetas_series]
-              pal_vec <- pal_vec[!is.na(pal_vec)]
-
-              if (length(pal_vec) == length(etiquetas_series)) {
-                args_extra$colores_series <- stats::setNames(
-                  as.character(pal_vec),
-                  etiquetas_series
-                )
-              }
+              args_extra$colores_series <- colores_series
             }
 
-            ## 2) RESPALDO: si no hubo paleta por list_name, usar colores_estratos
-            if (is.null(args_extra$colores_series)) {
-              if (!is.null(colores_estratos) &&
-                  all(etiquetas_series %in% names(colores_estratos))) {
+            # Tamaño automático de texto para el caso general (SO / multi-series)
+            if (is.null(estilos_barras_agrupadas$size_texto_barras)) {
+              n_series   <- tab_agr$info_dim$n_cat
+              n_cat_plot <- tab_agr$info_dim$n_estratos
 
-                cs <- colores_estratos[etiquetas_series]
-                args_extra$colores_series <- stats::setNames(
-                  as.character(cs),
-                  etiquetas_series
-                )
-
+              size_auto <- if (n_series <= 3) {
+                if (n_cat_plot <= 4) 4.5 else if (n_cat_plot <= 8) 4.0 else 3.5
+              } else if (n_series <= 5) {
+                if (n_cat_plot <= 4) 4.0 else 3.5
               } else {
-                # Paleta genérica de respaldo
-                pal <- c(
-                  "#004B8D", "#F26C4F", "#8CC63E",
-                  "#FFC20E", "#A54399", "#00A3E0", "#7F7F7F"
-                )
-                pal <- rep(pal, length.out = length(etiquetas_series))
-                args_extra$colores_series <- stats::setNames(
-                  pal,
-                  etiquetas_series
-                )
+                3.0
               }
+              args_extra$size_texto_barras <- size_auto
             }
 
-            ## 3) Limpiar estilos para evitar 'colores_series' duplicado
-            estilos_barras_agrupadas_clean <- estilos_barras_agrupadas
-            estilos_barras_agrupadas_clean$colores_series <- NULL
+            # -----------------------------------------------------------------
+            # CASO ESPECIAL: SM + barras agrupadas → UNA DIAPOSITIVA POR ESTRATO
+            # -----------------------------------------------------------------
+            if (tipo_v == "sm") {
 
-            ## 4) Construir argumentos finales para el graficador
+              n_estratos <- length(crc$estr_labels)
+              N_estrato  <- crc$N_estrato
+
+              for (j in seq_len(n_estratos)) {
+
+                tab_j <- .build_tab_barras_agrupadas_sm_estrato(crc, j)
+                if (is.null(tab_j) || !nrow(tab_j)) next
+
+                # Una sola serie: "Porcentaje"
+                cols_porcentaje  <- "pct"
+                etiquetas_series <- c(pct = "Porcentaje")
+
+                args_extra <- list()
+
+                # COLORES por defecto (si el usuario no los definió)
+                if (is.null(estilos_barras_agrupadas$colores_series)) {
+
+                  pulso_azul <- "#1B679D"
+
+                  colores_series <- stats::setNames(
+                    rep(pulso_azul, length(etiquetas_series)),
+                    etiquetas_series
+                  )
+
+                  args_extra$colores_series <- colores_series
+                }
+
+                # Tamaño automático de texto, ahora según Nº de categorías
+                if (is.null(estilos_barras_agrupadas$size_texto_barras)) {
+                  n_cat_plot <- nrow(tab_j)
+                  n_series   <- 1L
+
+                  size_auto <- if (n_series <= 3) {
+                    if (n_cat_plot <= 4) 4.5 else if (n_cat_plot <= 8) 4.0 else 3.5
+                  } else if (n_series <= 5) {
+                    if (n_cat_plot <= 4) 4.0 else 3.5
+                  } else {
+                    3.0
+                  }
+                  args_extra$size_texto_barras <- size_auto
+                }
+
+                args_barras_j <- c(
+                  list(
+                    data             = tab_j,
+                    var_categoria    = "categoria",  # opciones SM en eje Y (via coord_flip)
+                    var_n            = "n_base",
+                    cols_porcentaje  = cols_porcentaje,
+                    etiquetas_series = etiquetas_series,
+                    escala_valor     = "proporcion_1",
+                    mostrar_valores  = TRUE,
+                    titulo           = NULL,
+                    subtitulo        = NULL,
+                    nota_pie         = nota_pie_plot,
+                    mostrar_barra_extra = FALSE,
+                    exportar            = "rplot"
+                  ),
+                  args_extra,
+                  estilos_barras_agrupadas
+                )
+
+                p_j <- do.call(graficar_barras_agrupadas, args_barras_j)
+
+                # OJO: aquí ya NO quitamos labels del eje X, porque ahora
+                # el eje tiene las OPCIONES, que sí queremos ver.
+                # (Si hay coord_flip en el graficador, esto será el eje Y visual.)
+
+                # Registrar en el log
+                log_list[[length(log_list) + 1]] <- tibble::tibble(
+                  seccion      = sec,
+                  var          = v,
+                  estrato      = paste0(var_cruce, " = ", crc$estr_labels[j]),
+                  tipo_var     = tipo_v,
+                  list_name    = list_name_v,
+                  override     = override,
+                  tipo_grafico = "barras_agrupadas"
+                )
+
+                idx_plot <- idx_plot + 1L
+                plots_list[[idx_plot]] <- p_j
+
+                # Título de diapositiva: "Título - Estrato"
+                titulos_list[[idx_plot]] <- if (incluir_titulo_var) {
+                  paste0(var_label, " - ", crc$estr_labels[j])
+                } else {
+                  NULL
+                }
+
+                # Resumen N específico del estrato
+                Nj <- N_estrato[j]
+                if (is.finite(Nj) && Nj >= 0 && total_casos > 0) {
+                  ratio_j <- Nj / total_casos * 100
+                  resumenN_list[[idx_plot]] <- sprintf(
+                    "N = %s | Ratio de respuestas: %.1f%%",
+                    format(Nj, big.mark = ",", scientific = FALSE),
+                    ratio_j
+                  )
+                } else if (is.finite(Nj)) {
+                  resumenN_list[[idx_plot]] <- sprintf(
+                    "N = %s",
+                    format(Nj, big.mark = ",", scientific = FALSE)
+                  )
+                } else {
+                  resumenN_list[[idx_plot]] <- NULL
+                }
+
+                seccion_por_plot[idx_plot] <- sec
+              }
+
+              # Ya se agregaron todos los plots de esta variable (uno por estrato)
+              next
+            }
+
+            # -----------------------------------------------------------------
+            # Resto de casos (SO u otros): un solo gráfico con todos los estratos
+            # -----------------------------------------------------------------
             args_barras <- c(
               list(
                 data             = tab_agr$data,
@@ -951,19 +1110,20 @@ reporte_ppt_cruces <- function(
                 etiquetas_series = etiquetas_series,
                 escala_valor     = "proporcion_1",
                 mostrar_valores  = TRUE,
-                titulo           = titulo_plot,
+                titulo           = NULL,       # sin título interno
                 subtitulo        = NULL,
                 nota_pie         = nota_pie_plot,
                 mostrar_barra_extra = FALSE,
                 exportar            = "rplot"
               ),
               args_extra,
-              estilos_barras_agrupadas_clean
+              estilos_barras_agrupadas
             )
 
             p <- do.call(graficar_barras_agrupadas, args_barras)
           }
         }
+
 
         if (tipo_grafico == "barras_apiladas") {
 
@@ -1038,7 +1198,7 @@ reporte_ppt_cruces <- function(
                 titulo_barra_extra = NULL,
 
                 # Color:
-                # - Si hay preset → dejar NULL (para que el Top2Box se pinte VERDE)
+                # - Si hay preset → dejar NULL (Top2Box verde)
                 # - Si NO hay preset → N= en azul (#092147)
                 color_barra_extra = if (!is.null(preset_extra)) {
                   NULL
@@ -1046,7 +1206,6 @@ reporte_ppt_cruces <- function(
                   "#092147"
                 },
 
-                # ------------------------------
                 exportar           = "rplot",
                 invertir_segmentos = invertir_segmentos_var,
                 invertir_leyenda   = invertir_leyenda_var
@@ -1104,14 +1263,18 @@ reporte_ppt_cruces <- function(
 
                   if (!is.null(col_vec)) {
                     if (is.null(names(col_vec))) {
-                      pal <- rep(as.character(col_vec),
-                                 length.out = length(etiquetas_series))
+                      pal <- rep(
+                        as.character(col_vec),
+                        length.out = length(etiquetas_series)
+                      )
                       colores_series <- stats::setNames(pal, etiquetas_series)
                     } else {
                       cs <- col_vec[etiquetas_series]
                       if (all(!is.na(cs))) {
-                        colores_series <- stats::setNames(as.character(cs),
-                                                          etiquetas_series)
+                        colores_series <- stats::setNames(
+                          as.character(cs),
+                          etiquetas_series
+                        )
                       }
                     }
                   }
@@ -1122,8 +1285,10 @@ reporte_ppt_cruces <- function(
                     all(etiquetas_series %in% names(colores_estratos))) {
 
                   cs <- colores_estratos[etiquetas_series]
-                  colores_series <- stats::setNames(as.character(cs),
-                                                    etiquetas_series)
+                  colores_series <- stats::setNames(
+                    as.character(cs),
+                    etiquetas_series
+                  )
                 }
 
                 if (is.null(colores_series)) {
@@ -1181,18 +1346,18 @@ reporte_ppt_cruces <- function(
 
               args_dico <- c(
                 list(
-                  data              = tab_dico,
-                  var_indicador     = "indicador",
-                  var_porcentaje_si = "pct_si",
-                  var_n             = "n_total",
-                  escala_valor      = "proporcion_100",
-                  etiqueta_si       = labels_dico[1],
-                  etiqueta_no       = labels_dico[2],
-                  titulo            = titulo_plot,
-                  subtitulo         = NULL,
-                  nota_pie          = nota_pie_plot,
+                  data                = tab_dico,
+                  var_indicador       = "indicador",
+                  var_porcentaje_si   = "pct_si",
+                  var_n               = "n_total",
+                  escala_valor        = "proporcion_100",
+                  etiqueta_si         = labels_dico[1],
+                  etiqueta_no         = labels_dico[2],
+                  titulo              = titulo_plot,
+                  subtitulo           = NULL,
+                  nota_pie            = nota_pie_plot,
                   incluir_n_en_titulo = FALSE,
-                  exportar          = "rplot"
+                  exportar            = "rplot"
                 ),
                 estilos_dico
               )
@@ -1231,11 +1396,13 @@ reporte_ppt_cruces <- function(
         )
 
         idx_plot <- idx_plot + 1L
-        plots_list[[idx_plot]]       <- p
-        titulos_list[[idx_plot]]     <- titulo_slide
-        resumenN_list[[idx_plot]]    <- resumen_n_txt
-        seccion_por_plot[idx_plot]   <- sec
-      } else {
+        plots_list[[idx_plot]]     <- p
+        titulos_list[[idx_plot]]   <- titulo_slide
+        resumenN_list[[idx_plot]]  <- resumen_n_txt
+        seccion_por_plot[idx_plot] <- sec
+      } else if (tipo_grafico %in% c("barras_apiladas", "dico")) {
+        # Solo registramos aquí como omitida si falló apiladas/dico;
+        # en barras_agrupadas ya se registró antes (cuando tab_agr no es NULL).
         log_list[[length(log_list) + 1]] <- tibble::tibble(
           seccion      = sec,
           var          = v,
@@ -1252,7 +1419,7 @@ reporte_ppt_cruces <- function(
   log_decisiones <- dplyr::bind_rows(log_list)
 
   # ---------------------------------------------------------------------------
-  # 5. Exportar a PPT (misma lógica que reporte_ppt)
+  # 5. PPT (portada + secciones + diapositivas de gráficos de cruces)
   # ---------------------------------------------------------------------------
   if (!solo_lista && length(plots_list)) {
     if (!requireNamespace("officer", quietly = TRUE) ||
@@ -1263,6 +1430,7 @@ reporte_ppt_cruces <- function(
       )
     }
 
+    # 5.1. Leer plantilla
     if (is.null(template_pptx)) {
       template_interno <- system.file("plantillas/plantilla_16_9.pptx",
                                       package = "prosecnur")
@@ -1294,6 +1462,7 @@ reporte_ppt_cruces <- function(
       doc <- officer::read_pptx(path = template_pptx)
     }
 
+    # 5.2. Info de layouts
     layout_info <- tryCatch(
       officer::layout_summary(doc),
       error = function(e) NULL
@@ -1308,6 +1477,7 @@ reporte_ppt_cruces <- function(
 
     if (!is.null(layout_info)) {
 
+      # Prioridad: Graficos2 > Graficos > Blank
       if ("Graficos2" %in% layout_info$layout) {
         tiene_layout_graficos <- TRUE
         layout_graficos       <- "Graficos2"
@@ -1340,6 +1510,7 @@ reporte_ppt_cruces <- function(
       }
     }
 
+    # 5.3. Portada (Title Slide), si corresponde
     if (tiene_layout_title_slide &&
         ( !is.null(titulo_portada)    && nzchar(titulo_portada)    ||
           !is.null(subtitulo_portada) && nzchar(subtitulo_portada) ||
@@ -1355,6 +1526,7 @@ reporte_ppt_cruces <- function(
         master = "Office Theme"
       )
 
+      # Título: ctrTitle o title
       if (!is.null(titulo_portada) && nzchar(titulo_portada)) {
         loc_title <- tryCatch(
           officer::ph_location_type(type = "ctrTitle"),
@@ -1371,6 +1543,7 @@ reporte_ppt_cruces <- function(
         )
       }
 
+      # Subtítulo: subTitle
       if (!is.null(subtitulo_portada) && nzchar(subtitulo_portada)) {
         doc <- tryCatch(
           officer::ph_with(
@@ -1387,6 +1560,7 @@ reporte_ppt_cruces <- function(
         )
       }
 
+      # Fecha: dt
       if (!is.null(fecha_portada) && nzchar(fecha_portada)) {
         doc <- tryCatch(
           officer::ph_with(
@@ -1408,16 +1582,15 @@ reporte_ppt_cruces <- function(
       }
     }
 
+    # 5.4. Diapositivas de gráficos (con Section Header si existe)
     if (length(plots_list)) {
       for (i in seq_along(plots_list)) {
 
-        p_i      <- plots_list[[i]]
+        p        <- plots_list[[i]]
         st       <- titulos_list[[i]]   %||% NULL
         resumenN <- resumenN_list[[i]]  %||% NULL
 
-        # ----------------------------------------------------------
-        # Diapositiva de sección (Section Header) si cambia la sección
-        # ----------------------------------------------------------
+        # Diapositiva de sección si cambia la sección (y hay layout Section Header)
         if (tiene_layout_section_header &&
             length(seccion_por_plot) >= i) {
 
@@ -1451,12 +1624,14 @@ reporte_ppt_cruces <- function(
           }
         }
 
+        # Diapositiva de gráfico
         doc <- officer::add_slide(
           doc,
           layout = layout_graficos,
           master = "Office Theme"
         )
 
+        # Escribir título de la diapositiva si hay y existe placeholder
         if (!is.null(st) && nzchar(st)) {
           loc_gtitle <- tryCatch(
             officer::ph_location_type(type = "title"),
@@ -1480,6 +1655,7 @@ reporte_ppt_cruces <- function(
           }
         }
 
+        # Insertar gráfico en placeholder de imagen o a pantalla completa
         if (usar_pic_placeholder) {
           loc_pic <- officer::ph_location_type(type = "pic")
         } else {
@@ -1488,10 +1664,11 @@ reporte_ppt_cruces <- function(
 
         doc <- officer::ph_with(
           doc,
-          rvg::dml(ggobj = p_i, bg = "transparent"),
+          rvg::dml(ggobj = p, bg = "transparent"),
           location = loc_pic
         )
 
+        # Escribir fuente en bloque de texto izquierdo (body id = 2) si corresponde
         if (tiene_layout_graficos &&
             !is.null(fuente) && nzchar(fuente)) {
 
@@ -1517,6 +1694,7 @@ reporte_ppt_cruces <- function(
           }
         }
 
+        # Escribir resumen N en bloque de texto derecho (body id = 3) si corresponde
         if (tiene_layout_graficos &&
             mostrar_resumen_n &&
             !is.null(resumenN) && nzchar(resumenN)) {
@@ -1545,6 +1723,7 @@ reporte_ppt_cruces <- function(
       }
     }
 
+    # 5.5. Contraportada (si existe)
     if (tiene_layout_contraportada) {
       if (mensajes_progreso) {
         message("Agregando diapositiva de contraportada.")
@@ -1556,6 +1735,7 @@ reporte_ppt_cruces <- function(
         master = "Office Theme"
       )
 
+      # Si hay fecha definida, intentar ponerla en el placeholder de fecha (dt)
       if (!is.null(fecha_portada) && nzchar(fecha_portada)) {
         doc <- tryCatch(
           officer::ph_with(
@@ -1573,6 +1753,7 @@ reporte_ppt_cruces <- function(
       }
     }
 
+    # 5.6. Guardar
     print(doc, target = path_ppt)
     if (mensajes_progreso) {
       message("PPT de cruces generado en: ", normalizePath(path_ppt, winslash = "/"))
