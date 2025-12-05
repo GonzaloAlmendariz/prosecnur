@@ -551,15 +551,16 @@ graficar_barras_agrupadas <- function(
     )
 
   # ---------------------------------------------------------------------------
-  # 7. Exportación (altura total = panel + leyenda + caption)
+  # 7. Exportación (altura total = panel + eje Y + leyenda + caption)
   # ---------------------------------------------------------------------------
 
   n_categorias <- length(unique(df_long[[var_categoria]]))
 
   # Parámetros de descomposición de altura
-  alto_max_total   <- 9.0   # tope máximo en pulgadas
-  alto_leyenda_row <- 0.35  # alto aprox. por fila de leyenda
-  alto_caption     <- 0.25  # bloque adicional si hay caption
+  alto_max_total    <- 9.0   # tope máximo en pulgadas
+  alto_leyenda_row  <- 0.35  # alto aprox. por fila de leyenda
+  alto_caption      <- 0.25  # bloque adicional si hay caption
+  alto_por_cat_eff  <- alto_por_categoria %||% 0.35
 
   # Leyenda: cuántos ítems y cuántas filas
   n_items_leyenda <- length(levels(df_long$.serie))
@@ -570,29 +571,49 @@ graficar_barras_agrupadas <- function(
 
   tiene_caption <- !is.null(caption_text) && nzchar(caption_text)
 
-  # Si no se pasa alto_por_categoria, uso un default razonable
-  alto_por_cat_eff <- alto_por_categoria %||% 0.35
-
-  # Panel de barras (solo barras)
+  # 7.1 Alto del PANEL de barras (solo barras)
   alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
 
-  # Leyenda
+  # 7.2 Alto de la LEYENDA
   alto_leyenda <- if (mostrar_leyenda && n_items_leyenda > 0) {
     n_filas_leyenda * alto_leyenda_row
   } else {
     0
   }
 
-  # Caption interno (nota_pie)
+  # 7.3 Alto del CAPTION interno (nota_pie)
   alto_cap <- if (tiene_caption) alto_caption else 0
 
-  # Altura total (antes de topes)
-  alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap
+  # 7.4 Alto extra por EJE Y (cuando las etiquetas tienen varias líneas)
+  max_lineas_eje <- 1L
+  if (!is.null(ancho_max_eje_y)) {
+    if (requireNamespace("stringr", quietly = TRUE)) {
+      # Tomamos las etiquetas tal como se mostrarán en el eje
+      etiq_orig <- levels(df_long[[var_categoria]])
+      if (length(etiq_orig) == 0L) {
+        etiq_orig <- unique(as.character(df_long[[var_categoria]]))
+      }
+      etiq_wrap <- stringr::str_wrap(etiq_orig, width = ancho_max_eje_y)
+      lineas    <- stringr::str_count(etiq_wrap, "\n") + 1L
+      max_lineas_eje <- max(1L, lineas, na.rm = TRUE)
+    }
+  }
 
-  # Tope máximo, pero SIN mínimo rígido
+  # Cada línea adicional del eje Y suma un pequeño bloque de altura
+  alto_por_linea_eje <- 0.12  # puedes afinar este valor si lo ves muy grande/pequeño
+  alto_extra_eje_y <- if (max_lineas_eje > 1L) {
+    (max_lineas_eje - 1L) * alto_por_linea_eje
+  } else {
+    0
+  }
+
+  # 7.5 Altura total sugerida (panel + eje Y + leyenda + caption)
+  alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap + alto_extra_eje_y
+
+  # Tope máximo
   alto_total_sugerido <- min(alto_max_total, alto_total_sugerido)
 
-  # Si quieres un mínimo suave dependiente del grosor de barra:
+  # Mínimo "suave" dependiente del alto por categoría (para no tener gráficos enanos)
   alto_min_suave <- (alto_por_cat_eff * 1.2) + alto_leyenda + alto_cap
   alto_total_sugerido <- max(alto_min_suave, alto_total_sugerido)
 

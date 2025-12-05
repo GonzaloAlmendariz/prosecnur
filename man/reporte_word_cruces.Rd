@@ -180,6 +180,6 @@ páginas sucesivas, precedidos por una página de índice.
 }
 }
 \details{
-La lógica de construcción de cruces es idéntica a \code{reporte_ppt_cruces()}:
+La lógica de construcción de cruces es análoga a \code{reporte_ppt_cruces()};
 véase esa función para más detalles conceptuales.
 }

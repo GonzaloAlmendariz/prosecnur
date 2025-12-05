@@ -16,7 +16,7 @@
 #'         páginas sucesivas, precedidos por una página de índice.
 #' }
 #'
-#' La lógica de construcción de cruces es idéntica a \code{reporte_ppt_cruces()}:
+#' La lógica de construcción de cruces es análoga a \code{reporte_ppt_cruces()};
 #' véase esa función para más detalles conceptuales.
 #'
 #' @inheritParams reporte_ppt_cruces
@@ -208,8 +208,7 @@ reporte_word_cruces <- function(
 
     # Cuánto falta o sobra para llegar a 100
     resid <- as.integer(round(100 - sum(floor_pct)))
-
-    frac <- raw_pct - floor_pct
+    frac  <- raw_pct - floor_pct
 
     if (resid > 0) {
       # Asignar +1 a los mayores restos decimales
@@ -338,14 +337,14 @@ reporte_word_cruces <- function(
     n_est <- length(crc$estr_labels)
     if (n_cat == 0L || n_est == 0L) return(NULL)
 
-    # pct_mat en PROPORCIONES (0–1), pero a partir de porcentajes enteros que suman 100
-    pct_mat <- matrix(NA_real_, nrow = n_cat, ncol = n_est)
+    # Matriz de porcentajes ENTEROS por estrato (columnas) que suman 100
+    pct_int_mat <- matrix(NA_integer_, nrow = n_cat, ncol = n_est)
     for (j in seq_len(n_est)) {
       Nj <- crc$N_estrato[j]
       if (Nj > 0) {
-        n_col       <- crc$n_mat[, j]
-        pct_int_col <- .pct_enteros_100(n_col)   # enteros 0–100 que suman 100
-        pct_mat[, j] <- pct_int_col / 100        # pasar a 0–1 (escala proporcion_1)
+        pct_int_mat[, j] <- .pct_enteros_100(crc$n_mat[, j])
+      } else {
+        pct_int_mat[, j] <- 0L
       }
     }
 
@@ -356,7 +355,8 @@ reporte_word_cruces <- function(
 
     cols_pct <- paste0("pct_", seq_len(n_cat))
     for (k in seq_len(n_cat)) {
-      df[[cols_pct[k]]] <- as.numeric(pct_mat[k, ])
+      # Guardar como proporciones 0–1 (para escala_valor = "proporcion_1")
+      df[[cols_pct[k]]] <- pct_int_mat[k, ] / 100
     }
 
     etiquetas_grupos <- stats::setNames(
@@ -399,59 +399,59 @@ reporte_word_cruces <- function(
     )
   }
 
+  # ---------------------------------------------------------------------------
+  # barras agrupadas con eje = estrato y series = categorías (SO general)
+  # ---------------------------------------------------------------------------
   .build_tab_barras_agrupadas_cruce <- function(crc, var_label) {
 
-    n_cat <- length(crc$categorias)
-    n_est <- length(crc$estr_labels)
+    n_cat <- length(crc$categorias)   # categorías de v (series)
+    n_est <- length(crc$estr_labels)  # estratos (filas)
     if (n_cat == 0L || n_est == 0L) return(NULL)
 
-    # Proporciones por opción (fila) y estrato (columna)
+    # matriz de porcentajes categoría (filas) x estrato (columnas)
     pct_mat <- matrix(NA_real_, nrow = n_cat, ncol = n_est)
     for (j in seq_len(n_est)) {
       Nj <- crc$N_estrato[j]
       if (Nj > 0) pct_mat[, j] <- crc$n_mat[, j] / Nj
     }
 
-    # 1) Filtrar opciones sin información
-    keep_cat <- rowSums(pct_mat, na.rm = TRUE) > 0
-    keep_cat <- keep_cat & !is.na(crc$categorias)
+    # 1) Eliminar categorías cuya suma es 0 (todas 0/NA)
+    keep_rows <- rowSums(pct_mat, na.rm = TRUE) > 0
+    # 1-bis) Eliminar categorías con label NA
+    keep_rows <- keep_rows & !is.na(crc$categorias)
 
-    if (!any(keep_cat)) return(NULL)
+    if (!any(keep_rows)) return(NULL)
 
-    pct_mat   <- pct_mat[keep_cat, , drop = FALSE]
-    cats_keep <- crc$categorias[keep_cat]
-    n_cat     <- length(cats_keep)
+    pct_mat         <- pct_mat[keep_rows, , drop = FALSE]
+    categorias_keep <- crc$categorias[keep_rows]
+    n_cat           <- length(categorias_keep)
 
-    # 2) Filtrar estratos sin información
-    keep_est <- colSums(pct_mat, na.rm = TRUE) > 0
-    if (!any(keep_est)) return(NULL)
+    # 2) Eliminar estratos cuya suma es 0 (todas 0/NA)
+    keep_cols <- colSums(pct_mat, na.rm = TRUE) > 0
+    if (!any(keep_cols)) return(NULL)
 
-    pct_mat        <- pct_mat[, keep_est, drop = FALSE]
-    estr_labels    <- crc$estr_labels[keep_est]
-    N_estrato_keep <- crc$N_estrato[keep_est]
-    n_est          <- length(estr_labels)
+    pct_mat          <- pct_mat[, keep_cols, drop = FALSE]
+    estr_labels_keep <- crc$estr_labels[keep_cols]
+    N_estrato_keep   <- crc$N_estrato[keep_cols]
+    n_est            <- length(estr_labels_keep)
 
-    # 3) Redondear a enteros (NO se fuerza suma 100, por SM puede ser > 100)
-    pct_0_100 <- pct_mat * 100
-    pct_int   <- round(pct_0_100)
-    pct_mat   <- pct_int / 100
-
-    # 4) Eje de categorías = ESTRATOS
+    # 3) Construir data.frame: filas = estratos, series = categorías
     df <- tibble::tibble(
-      categoria = estr_labels,
+      categoria = estr_labels_keep,
       n_base    = as.numeric(N_estrato_keep)
     )
 
-    # 5) Series = OPCIONES de la variable
     cols_pct <- paste0("pct_", seq_len(n_cat))
-    for (k in seq_len(n_cat)) {
-      v <- as.numeric(pct_mat[k, ])
+    for (i in seq_len(n_cat)) {
+      v <- as.numeric(pct_mat[i, ])
+      # 4) 0% → NA para no dibujar barra ni generar huecos visuales
       v[!is.na(v) & abs(v) < 1e-12] <- NA_real_
-      df[[cols_pct[k]]] <- v
+      df[[cols_pct[i]]] <- v
     }
 
+    # series = categorías de la variable
     etiquetas_series <- stats::setNames(
-      as.character(cats_keep),
+      as.character(categorias_keep),
       cols_pct
     )
 
@@ -460,11 +460,41 @@ reporte_word_cruces <- function(
       cols_porcentaje  = cols_pct,
       etiquetas_series = etiquetas_series,
       info_dim         = list(
-        n_cat      = n_cat,
-        n_estratos = n_est,
+        n_cat      = n_cat,            # Nº de series (categorías de v)
+        n_estratos = n_est,            # Nº de filas (estratos)
         N_estrato  = N_estrato_keep,
         N_total    = sum(N_estrato_keep, na.rm = TRUE)
       )
+    )
+  }
+
+  # ---------------------------------------------------------------------------
+  # Helper: barras agrupadas tipo SM para UN estrato (igual que reporte_ppt)
+  # ---------------------------------------------------------------------------
+  .build_tab_barras_agrupadas_sm_estrato <- function(crc, j) {
+
+    N_j <- crc$N_estrato[j]
+    if (!is.finite(N_j) || N_j <= 0) return(NULL)
+
+    n_vec <- crc$n_mat[, j]
+    cats  <- crc$categorias
+
+    # Eliminar categorías sin frecuencia
+    keep <- !is.na(n_vec) & n_vec > 0
+    if (!any(keep)) return(NULL)
+
+    n_vec <- n_vec[keep]
+    cats  <- cats[keep]
+
+    # Porcentajes 0–100 para ese estrato
+    pct_0_100 <- (n_vec / N_j) * 100
+    pct_int   <- round(pct_0_100)     # enteros
+    pct_prop  <- pct_int / 100        # escala 0–1 para el graficador
+
+    tibble::tibble(
+      categoria = cats,
+      n_base    = N_j,
+      pct       = pct_prop
     )
   }
 
@@ -506,14 +536,11 @@ reporte_word_cruces <- function(
       }
     }
 
-
-    pct_si_prop <- pct_si_int / 100
-
     tibble::tibble(
-      indicador = as.character(crc$estr_labels),
-      pct_si    = pct_si_prop,
-      n_total   = as.numeric(denom),
-      pct_si_int = pct_si_int
+      indicador  = as.character(crc$estr_labels),
+      pct_si     = pct_si_int,      # escala 0–100
+      n_total    = as.numeric(denom),
+      pct_si_int = pct_si_int       # se deja por si quieres inspeccionarlo
     )
   }
 
@@ -634,92 +661,179 @@ reporte_word_cruces <- function(
             cols_porcentaje  <- tab_agr$cols_porcentaje
             etiquetas_series <- tab_agr$etiquetas_series
 
-            args_extra <- list()
+            # -----------------------------------------------------------------
+            # CASO ESPECIAL: SM + barras agrupadas → UNA PÁGINA POR ESTRATO
+            # (mismo comportamiento conceptual que en reporte_ppt_cruces)
+            # -----------------------------------------------------------------
+            if (tipo_v == "sm") {
 
-            # ------------------------------------------------------------------
-            # Colores por estrato (solo si estilos_barras_agrupadas no los fija)
-            # ------------------------------------------------------------------
-            if (is.null(estilos_barras_agrupadas$colores_series)) {
-              if (!is.null(colores_estratos) &&
-                  all(etiquetas_series %in% names(colores_estratos))) {
+              n_estratos <- length(crc$estr_labels)
+              N_estrato  <- crc$N_estrato
 
-                cs <- colores_estratos[etiquetas_series]
-                args_extra$colores_series <- stats::setNames(
-                  as.character(cs),
-                  etiquetas_series
+              for (j in seq_len(n_estratos)) {
+
+                tab_j <- .build_tab_barras_agrupadas_sm_estrato(crc, j)
+                if (is.null(tab_j) || !nrow(tab_j)) next
+
+                cols_porcentaje_j  <- "pct"
+                etiquetas_series_j <- c(pct = "Porcentaje")
+
+                args_extra_j <- list()
+
+                # Color por defecto: azul Pulso sólido
+                if (is.null(estilos_barras_agrupadas$colores_series)) {
+
+                  pulso_azul <- "#1B679D"
+
+                  colores_series <- stats::setNames(
+                    rep(pulso_azul, length(etiquetas_series_j)),
+                    etiquetas_series_j
+                  )
+
+                  args_extra_j$colores_series <- colores_series
+                }
+
+                # Tamaño automático según Nº de categorías en ese estrato
+                if (is.null(estilos_barras_agrupadas$size_texto_barras)) {
+                  n_cat_plot <- nrow(tab_j)
+                  n_series   <- 1L
+
+                  size_auto <- if (n_series <= 3) {
+                    if (n_cat_plot <= 4) 4.5 else if (n_cat_plot <= 8) 4.0 else 3.5
+                  } else if (n_series <= 5) {
+                    if (n_cat_plot <= 4) 4.0 else 3.5
+                  } else {
+                    3.0
+                  }
+                  args_extra_j$size_texto_barras <- size_auto
+                }
+
+                args_barras_j <- c(
+                  list(
+                    data             = tab_j,
+                    var_categoria    = "categoria",
+                    var_n            = "n_base",
+                    cols_porcentaje  = cols_porcentaje_j,
+                    etiquetas_series = etiquetas_series_j,
+                    escala_valor     = "proporcion_1",
+                    mostrar_valores  = TRUE,
+                    titulo           = NULL,
+                    subtitulo        = NULL,
+                    nota_pie         = nota_pie_plot,
+                    mostrar_barra_extra = FALSE,
+                    exportar            = "rplot"
+                  ),
+                  args_extra_j,
+                  estilos_barras_agrupadas
                 )
-              } else {
-                pal <- c(
-                  "#004B8D", "#F26C4F", "#8CC63E",
-                  "#FFC20E", "#A54399", "#00A3E0", "#7F7F7F"
+
+                p_j <- do.call(graficar_barras_agrupadas, args_barras_j)
+
+                # Para ajustar altura en Word según nº de categorías
+                attr(p_j, "n_series_cruce") <- nrow(tab_j)
+
+                # Registrar en el log
+                log_list[[length(log_list) + 1]] <- tibble::tibble(
+                  seccion      = sec,
+                  var          = v,
+                  estrato      = paste0(var_cruce, " = ", crc$estr_labels[j]),
+                  tipo_var     = tipo_v,
+                  list_name    = list_name_v,
+                  override     = override,
+                  tipo_grafico = "barras_agrupadas"
                 )
-                pal <- rep(pal, length.out = length(etiquetas_series))
-                args_extra$colores_series <- stats::setNames(
-                  pal,
-                  etiquetas_series
-                )
+
+                idx_plot <- idx_plot + 1L
+                plots_list[[idx_plot]] <- p_j
+
+                # Título en Word: "Pregunta - Estrato"
+                titulos_list[[idx_plot]] <- if (incluir_titulo_var) {
+                  paste0(var_label, " - ", crc$estr_labels[j])
+                } else {
+                  NULL
+                }
+
+                # Resumen N específico del estrato
+                Nj <- N_estrato[j]
+                if (is.finite(Nj) && Nj >= 0 && total_casos > 0) {
+                  ratio_j <- Nj / total_casos * 100
+                  resumenN_list[[idx_plot]] <- sprintf(
+                    "N = %s | Ratio de respuestas: %.1f%%",
+                    format(Nj, big.mark = ",", scientific = FALSE),
+                    ratio_j
+                  )
+                } else if (is.finite(Nj)) {
+                  resumenN_list[[idx_plot]] <- sprintf(
+                    "N = %s",
+                    format(Nj, big.mark = ",", scientific = FALSE)
+                  )
+                } else {
+                  resumenN_list[[idx_plot]] <- NULL
+                }
+
+                seccion_por_plot[idx_plot] <- sec
               }
+
+              # Ya se agregaron todos los plots de esta variable (uno por estrato)
+              next
             }
 
-            # ------------------------------------------------------------------
-            # Tamaño automático de texto (solo si estilos no lo fija)
-            # ------------------------------------------------------------------
-            if (is.null(estilos_barras_agrupadas$size_texto_barras)) {
-              n_cat <- tab_agr$info_dim$n_cat
-              n_est <- tab_agr$info_dim$n_estratos
+            # -----------------------------------------------------------------
+            # Resto de casos (SO u otros): un solo gráfico con todos los estratos
+            # -----------------------------------------------------------------
+            args_extra <- list()
 
-              size_auto <- if (n_est <= 3) {
-                if (n_cat <= 4) 4.5 else if (n_cat <= 8) 4.0 else 3.5
-              } else if (n_est <= 5) {
-                if (n_cat <= 4) 4.0 else 3.5
+            # COLORES por defecto (si el usuario no los definió):
+            # una sola paleta azul para todas las series
+            if (is.null(estilos_barras_agrupadas$colores_series)) {
+
+              pulso_azul <- "#004B8D"
+
+              colores_series <- stats::setNames(
+                rep(pulso_azul, length(etiquetas_series)),
+                etiquetas_series
+              )
+
+              args_extra$colores_series <- colores_series
+            }
+
+            # Tamaño automático de texto
+            if (is.null(estilos_barras_agrupadas$size_texto_barras)) {
+              n_series   <- tab_agr$info_dim$n_cat
+              n_cat_plot <- tab_agr$info_dim$n_estratos
+
+              size_auto <- if (n_series <= 3) {
+                if (n_cat_plot <= 4) 4.5 else if (n_cat_plot <= 8) 4.0 else 3.5
+              } else if (n_series <= 5) {
+                if (n_cat_plot <= 4) 4.0 else 3.5
               } else {
                 3.0
               }
-
               args_extra$size_texto_barras <- size_auto
             }
 
-            # ------------------------------------------------------------------
-            # Limpiar estilos_barras_agrupadas para no duplicar argumentos
-            # ------------------------------------------------------------------
-            estilos_clean <- estilos_barras_agrupadas
-            # Elimina de estilos cualquier nombre que ya esté en args_extra
-            if (length(args_extra) > 0) {
-              estilos_clean[names(args_extra)] <- NULL
-            }
-
-            # ------------------------------------------------------------------
-            # Llamada final a graficar_barras_agrupadas
-            # ------------------------------------------------------------------
             args_barras <- c(
               list(
-                data               = tab_agr$data,
-                var_categoria      = "categoria",
-                var_n              = "n_base",
-                cols_porcentaje    = cols_porcentaje,
-                etiquetas_series   = etiquetas_series,
-                escala_valor       = "proporcion_1",
-                mostrar_valores    = TRUE,
-                titulo             = titulo_plot,
-                subtitulo          = NULL,
-                nota_pie           = nota_pie_plot,
+                data             = tab_agr$data,
+                var_categoria    = "categoria",
+                var_n            = "n_base",
+                cols_porcentaje  = cols_porcentaje,
+                etiquetas_series = etiquetas_series,
+                escala_valor     = "proporcion_1",
+                mostrar_valores  = TRUE,
+                titulo           = NULL,
+                subtitulo        = NULL,
+                nota_pie         = nota_pie_plot,
                 mostrar_barra_extra = FALSE,
                 exportar            = "rplot"
               ),
               args_extra,
-              estilos_clean
+              estilos_barras_agrupadas
             )
 
             p <- do.call(graficar_barras_agrupadas, args_barras)
-
-            # Guardar cuántas series (opciones) tiene este cruce
-            # para ajustar luego la altura en Word.
-            if (!is.null(tab_agr$info_dim) && !is.null(tab_agr$info_dim$n_cat)) {
-              attr(p, "n_series_cruce") <- tab_agr$info_dim$n_cat
-            }
           }
         }
-
 
         if (tipo_grafico == "barras_apiladas") {
 
@@ -840,34 +954,74 @@ reporte_word_cruces <- function(
               args_extra <- list()
 
               if (is.null(estilos_barras_agrupadas$colores_series)) {
-                if (!is.null(colores_estratos) &&
+
+                colores_series <- NULL
+
+                # 1) Intentar colores por list_name (como en apiladas)
+                if (!is.na(list_name_v) &&
+                    !is.null(colores_apiladas_por_listname[[list_name_v]])) {
+
+                  obj_col <- colores_apiladas_por_listname[[list_name_v]]
+
+                  col_vec <- NULL
+                  if (is.list(obj_col)) {
+                    if (!is.null(obj_col$colores)) col_vec <- obj_col$colores
+                  } else {
+                    col_vec <- obj_col
+                  }
+
+                  if (!is.null(col_vec)) {
+                    if (is.null(names(col_vec))) {
+                      pal <- rep(
+                        as.character(col_vec),
+                        length.out = length(etiquetas_series)
+                      )
+                      colores_series <- stats::setNames(pal, etiquetas_series)
+                    } else {
+                      cs <- col_vec[etiquetas_series]
+                      if (all(!is.na(cs))) {
+                        colores_series <- stats::setNames(
+                          as.character(cs),
+                          etiquetas_series
+                        )
+                      }
+                    }
+                  }
+                }
+
+                # 2) Respaldo: colores_estratos si matchean nombres
+                if (is.null(colores_series) &&
+                    !is.null(colores_estratos) &&
                     all(etiquetas_series %in% names(colores_estratos))) {
 
                   cs <- colores_estratos[etiquetas_series]
-                  args_extra$colores_series <- stats::setNames(
+                  colores_series <- stats::setNames(
                     as.character(cs),
                     etiquetas_series
                   )
-                } else {
+                }
+
+                # 3) Paleta por defecto multi-color
+                if (is.null(colores_series)) {
                   pal <- c(
                     "#004B8D", "#F26C4F", "#8CC63E",
                     "#FFC20E", "#A54399", "#00A3E0", "#7F7F7F"
                   )
                   pal <- rep(pal, length.out = length(etiquetas_series))
-                  args_extra$colores_series <- stats::setNames(
-                    pal,
-                    etiquetas_series
-                  )
+                  colores_series <- stats::setNames(pal, etiquetas_series)
                 }
+
+                args_extra$colores_series <- colores_series
               }
 
               if (is.null(estilos_barras_agrupadas$size_texto_barras)) {
-                n_cat  <- tab_agr$info_dim$n_cat
-                n_est  <- tab_agr$info_dim$n_estratos
-                size_auto <- if (n_est <= 3) {
-                  if (n_cat <= 4) 4.5 else if (n_cat <= 8) 4.0 else 3.5
-                } else if (n_est <= 5) {
-                  if (n_cat <= 4) 4.0 else 3.5
+                n_series   <- tab_agr$info_dim$n_cat
+                n_cat_plot <- tab_agr$info_dim$n_estratos
+
+                size_auto <- if (n_series <= 3) {
+                  if (n_cat_plot <= 4) 4.5 else if (n_cat_plot <= 8) 4.0 else 3.5
+                } else if (n_series <= 5) {
+                  if (n_cat_plot <= 4) 4.0 else 3.5
                 } else {
                   3.0
                 }
@@ -1137,6 +1291,7 @@ reporte_word_cruces <- function(
         titulo_i  <- titulos_list[[i]]  %||% ""
         resumen_i <- resumenN_list[[i]] %||% NULL
 
+        # TÍTULO EN WORD (arriba de la gráfica)
         titulo_word <- officer::fpar(
           officer::ftext(
             sprintf("Gráfica Nro. %d: ", i),
@@ -1168,35 +1323,11 @@ reporte_word_cruces <- function(
         # Altura base sugerida por el graficador (si existe)
         alto_sugerido <- attr(p_i, "alto_word_sugerido", exact = TRUE)
 
-        # Número de series (opciones) en cruces agrupados, si fue marcado antes
-        n_series_cruce <- attr(p_i, "n_series_cruce", exact = TRUE)
-
-        # Factor de ajuste por número de series:
-        #   - 1 serie  → factor = 1
-        #   - 3 series → factor ~ 1.5
-        #   - 5+ series → factor tope = 2
-        factor_series <- if (!is.null(n_series_cruce) &&
-                             is.finite(n_series_cruce) &&
-                             n_series_cruce > 1) {
-
-          f <- 1 + 0.25 * (n_series_cruce - 1)
-          max(1, min(2, f))  # limitar entre 1x y 2x
-        } else {
-          1
-        }
-
-        height_in <- if (!is.null(alto_sugerido) && is.finite(alto_sugerido)) {
-          alto_sugerido * factor_series
-        } else {
-          # Fallback si por algún motivo no hay alto_sugerido
-          (9 / 2.54) * factor_series
-        }
-
         doc <- officer::body_add_gg(
           doc,
           value  = p_i,
           width  = width_in,
-          height = height_in,
+          height = alto_sugerido,
           style  = "Normal"
         )
 
