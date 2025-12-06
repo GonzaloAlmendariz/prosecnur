@@ -1296,7 +1296,24 @@ reporte_ppt <- function(
 
         p        <- plots_list[[i]]
         st       <- titulos_list[[i]]   %||% NULL
-        resumenN <- resumenN_list[[i]]  %||% NULL
+        # Recuperar N_total dinámico
+        n_total_plot <- resumenN_list[[i]] %||% NULL   # antes era el texto completo
+
+        # Construir texto para la fuente:
+        # Base: <N> + sufijo definido por el usuario (si existe en `fuente`)
+        texto_base <- NULL
+        if (!is.null(n_total_plot)) {
+          # extraer número desde "N = xx ..." en caso venga así
+          n_num <- gsub("[^0-9]", "", n_total_plot)
+          if (!nzchar(n_num)) n_num <- NA
+
+          # Construir “Base: <N> <fuente>”
+          if (!is.null(fuente) && nzchar(fuente)) {
+            texto_base <- sprintf("Base: %s %s", n_num, fuente)
+          } else {
+            texto_base <- sprintf("Base: %s", n_num)
+          }
+        }
 
         # Diapositiva de sección si cambia la sección (y hay layout Section Header)
         if (tiene_layout_section_header &&
@@ -1376,9 +1393,8 @@ reporte_ppt <- function(
           location = loc_pic
         )
 
-        # Escribir fuente en bloque de texto izquierdo (body id = 2) si corresponde
-        if (tiene_layout_graficos &&
-            !is.null(fuente) && nzchar(fuente)) {
+        # Escribir "Base: N ...fuente..." en bloque de texto izquierdo (body id = 2)
+        if (tiene_layout_graficos) {
 
           loc_fuente <- tryCatch(
             officer::ph_location_type(type = "body", id = 2),
@@ -1386,26 +1402,45 @@ reporte_ppt <- function(
           )
 
           if (!is.null(loc_fuente)) {
-            doc <- tryCatch(
-              officer::ph_with(
-                doc,
-                fuente,
-                location = loc_fuente
-              ),
-              error = function(e) {
-                if (mensajes_progreso) {
-                  message("No se pudo escribir la fuente en el bloque izquierdo: ", e$message)
+
+            base_texto <- NULL
+
+            # `n_total_plot` ya contiene "N = 52" u otro formato similar
+            if (!is.null(n_total_plot) && nzchar(n_total_plot)) {
+
+              # Extraer el número después de "N ="
+              n_part <- sub("^N\\s*=\\s*([^|]+).*", "\\1", n_total_plot)
+
+              # Mantener solo dígitos
+              n_digits <- gsub("[^0-9]", "", n_part)
+
+              if (nzchar(n_digits)) {
+                n_num <- suppressWarnings(as.numeric(n_digits))
+                if (is.finite(n_num)) {
+                  n_pretty <- format(n_num, big.mark = ",", scientific = FALSE)
+
+                  if (!is.null(fuente) && nzchar(fuente)) {
+                    base_texto <- paste0("Base: ", n_pretty, " ", fuente)
+                  } else {
+                    base_texto <- paste0("Base: ", n_pretty)
+                  }
                 }
-                doc
               }
+            }
+
+            if (is.null(base_texto)) {
+              base_texto <- fuente %||% ""
+            }
+
+            doc <- tryCatch(
+              officer::ph_with(doc, base_texto, location = loc_fuente),
+              error = function(e) { doc }
             )
           }
         }
 
-        # Escribir resumen N en bloque de texto derecho (body id = 3) si corresponde
-        if (tiene_layout_graficos &&
-            mostrar_resumen_n &&
-            !is.null(resumenN) && nzchar(resumenN)) {
+        # Escribir placeholder vacío en bloque derecho (body id = 3)
+        if (tiene_layout_graficos) {
 
           loc_resumen <- tryCatch(
             officer::ph_location_type(type = "body", id = 3),
@@ -1413,18 +1448,14 @@ reporte_ppt <- function(
           )
 
           if (!is.null(loc_resumen)) {
+            # Insertamos explícitamente un texto vacío (" ")
             doc <- tryCatch(
               officer::ph_with(
                 doc,
-                resumenN,
+                " ",   # ← mantiene el placeholder activo
                 location = loc_resumen
               ),
-              error = function(e) {
-                if (mensajes_progreso) {
-                  message("No se pudo escribir el resumen de N en el bloque derecho: ", e$message)
-                }
-                doc
-              }
+              error = function(e) doc
             )
           }
         }
