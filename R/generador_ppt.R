@@ -179,6 +179,9 @@ reporte_ppt <- function(
     incluir_titulo_var = TRUE,
     mensajes_progreso  = TRUE,
 
+    # Bloques de varias vars apiladas
+    bloques_multi_apiladas = NULL,
+
     # Sobrescritura por variable
     vars_dico             = NULL,
     vars_barras_apiladas  = NULL,
@@ -312,6 +315,15 @@ reporte_ppt <- function(
   }
 
   # ---------------------------------------------------------------------------
+  # (NUEVO) Precomputar variables incluidas en bloques multi-apilados
+  # ---------------------------------------------------------------------------
+  if (!is.null(bloques_multi_apiladas) && length(bloques_multi_apiladas) > 0) {
+    vars_multi_all <- unique(unlist(bloques_multi_apiladas))
+  } else {
+    vars_multi_all <- character(0)
+  }
+
+  # ---------------------------------------------------------------------------
   # 3. Helpers internos
   # ---------------------------------------------------------------------------
 
@@ -438,6 +450,91 @@ reporte_ppt <- function(
     )
   }
 
+  .build_tab_barras_apiladas_multi_vars <- function(
+    vars,
+    data,
+    survey,
+    orders_list,
+    sm_vars_force,
+    mostrar_todo,
+    wrap_y = 50
+  ) {
+
+    listas   <- list()
+    all_opts <- character(0)
+
+    for (v in vars) {
+
+      tab <- freq_table_spss(
+        data,
+        v,
+        survey        = survey,
+        sm_vars_force = sm_vars_force,
+        orders_list   = orders_list,
+        mostrar_todo  = mostrar_todo
+      )
+
+      tab <- tab |>
+        dplyr::filter(Opciones != "Total") |>
+        dplyr::filter(!is.na(n) & n > 0)
+
+      if (!nrow(tab)) next
+
+      # wrap del eje Y
+      label_v <- .titulo_var_safe(v)
+      if (requireNamespace("stringr", quietly = TRUE)) {
+        label_v <- stringr::str_wrap(label_v, width = wrap_y)
+      }
+
+      n_total <- sum(tab$n)
+
+      pct_int <- .pct_enteros_100(tab$n)
+
+      listas[[v]] <- list(
+        label     = label_v,
+        n_total   = n_total,
+        opciones  = tab$Opciones,
+        pct_int   = pct_int
+      )
+
+      # IMPORTANTE: union() conserva el orden de primera aparición
+      # según el instrumento / freq_table_spss. NO se usa sort().
+      all_opts <- union(all_opts, tab$Opciones)
+    }
+
+    if (!length(listas)) return(NULL)
+
+    # NO ORDENAR ALFABÉTICAMENTE:
+    # all_opts <- sort(all_opts)
+
+    df_wide <- tibble::tibble(
+      pregunta = vapply(listas, function(x) x$label, character(1)),
+      n_base   = vapply(listas, function(x) x$n_total, numeric(1))
+    )
+
+    cols_pct <- paste0("pct_", seq_along(all_opts))
+
+    for (i in seq_along(all_opts)) {
+      opt_i <- all_opts[i]
+      df_wide[[cols_pct[i]]] <- vapply(
+        listas,
+        function(x) {
+          idx <- which(x$opciones == opt_i)
+          if (length(idx)) x$pct_int[idx] / 100 else 0
+        },
+        numeric(1)
+      )
+    }
+
+    etiquetas_grupos <- stats::setNames(all_opts, cols_pct)
+
+    list(
+      data             = df_wide,
+      cols_porcentaje  = cols_pct,
+      etiquetas_grupos = etiquetas_grupos
+    )
+  }
+
   .build_tab_dico <- function(tab_freq, var, var_label, labels_dico) {
     if (length(labels_dico) < 2) return(NULL)
 
@@ -496,6 +593,207 @@ reporte_ppt <- function(
 
     for (v in vars_sec) {
 
+      # -----------------------------------------------------------------------
+      # (NUEVO) Multi-apiladas: si la variable pertenece a un bloque especial
+      # -----------------------------------------------------------------------
+      if (v %in% vars_multi_all) {
+
+        # 1. Identificar a qué bloque pertenece esta variable
+        bloque_id <- names(
+          Filter(function(x) v %in% x$vars, bloques_multi_apiladas)
+        )[1]
+
+        bloque_info   <- bloques_multi_apiladas[[bloque_id]]
+        vars_bloque   <- bloque_info$vars
+        titulo_bloque <- bloque_info$titulo %||% .titulo_var_safe(v)
+        wrap_y        <- bloque_info$wrap_y %||% 50
+
+        # grosor específico del bloque (si no, hereda del estilo general o usa 0.7)
+        grosor_barras_bloque <- bloque_info$grosor_barras %||%
+          estilos_barras_apiladas$grosor_barras %||% 0.7
+
+        # Ejecutar SOLO en la primera variable del bloque
+        if (v != vars_bloque[1]) {
+          next
+        }
+
+        # 2. Construir tabla multi-var
+        tab_multi <- .build_tab_barras_apiladas_multi_vars(
+          vars          = vars_bloque,
+          data          = data,
+          survey        = survey,
+          orders_list   = orders_list,
+          sm_vars_force = sm_vars_force,
+          mostrar_todo  = mostrar_todo,
+          wrap_y        = wrap_y
+        )
+
+        if (is.null(tab_multi)) next
+
+        # 3. Detectar list_name del bloque (usando la primera variable)
+        list_name_bloque <- NA_character_
+        if ("list_name" %in% names(survey)) {
+          tmp <- survey$list_name[survey$name %in% vars_bloque]
+          tmp <- tmp[!is.na(tmp) & tmp != ""]
+          if (length(tmp)) list_name_bloque <- tmp[1]
+        } else if ("list_norm" %in% names(survey)) {
+          tmp <- survey$list_norm[survey$name %in% vars_bloque]
+          tmp <- tmp[!is.na(tmp) & tmp != ""]
+          if (length(tmp)) list_name_bloque <- tmp[1]
+        }
+
+        # 4. Paleta y preset extra (TOP2, etc.) igual que en barras_apiladas simple
+        colores_grupos <- NULL
+        preset_extra   <- NULL
+
+        if (!is.na(list_name_bloque) &&
+            !is.null(colores_apiladas_por_listname[[list_name_bloque]])) {
+
+          obj_col <- colores_apiladas_por_listname[[list_name_bloque]]
+
+          if (is.list(obj_col)) {
+            if (!is.null(obj_col$colores)) {
+              colores_grupos <- obj_col$colores
+            }
+            if (!is.null(obj_col$preset_barra_extra)) {
+              preset_extra <- obj_col$preset_barra_extra
+            }
+          } else {
+            # Caso simple: vector nombrado de colores (paleta_p118, por ejemplo)
+            colores_grupos <- obj_col
+          }
+        }
+
+        # 5. Flags de inversión por list_name / variable (misma lógica que apiladas simple)
+        ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
+        ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
+
+        ln_inv_ley <- estilos_barras_apiladas$listnames_invertir_leyenda
+        ln_inv_ley <- if (is.null(ln_inv_ley)) character(0) else ln_inv_ley
+
+        vars_inv_seg <- estilos_barras_apiladas$vars_invertir_segmentos
+        vars_inv_seg <- if (is.null(vars_inv_seg)) character(0) else vars_inv_seg
+
+        vars_inv_ley <- estilos_barras_apiladas$vars_invertir_leyenda
+        vars_inv_ley <- if (is.null(vars_inv_ley)) character(0) else vars_inv_ley
+
+        # Para el bloque usamos la primera variable como referencia
+        v_ref <- vars_bloque[1]
+
+        invertir_segmentos_var <- (
+          v_ref %in% vars_inv_seg ||
+            (!is.na(list_name_bloque) && list_name_bloque %in% ln_inv_seg)
+        )
+
+        invertir_leyenda_var <- (
+          v_ref %in% vars_inv_ley ||
+            (!is.na(list_name_bloque) && list_name_bloque %in% ln_inv_ley)
+        )
+
+        # 6. Asegurar ORDEN consistente de segmentos y leyenda
+        niveles_originales <- unname(tab_multi$etiquetas_grupos)  # etiquetas tal como salen de la tabla
+
+        # Orden para las barras (apilado real)
+        niveles_plot <- niveles_originales
+        if (invertir_segmentos_var) {
+          niveles_plot <- rev(niveles_plot)
+        }
+
+        # Orden para la leyenda (puede o no coincidir con el de las barras)
+        niveles_leyenda <- niveles_plot
+        if (invertir_leyenda_var) {
+          niveles_leyenda <- rev(niveles_leyenda)
+        }
+
+        # Ajustar paleta al orden final de la leyenda
+        if (!is.null(colores_grupos)) {
+          # Reordenamos asegurando que las etiquetas existan en la paleta
+          colores_grupos <- colores_grupos[niveles_leyenda]
+        }
+
+        # Actualizar etiquetas_grupos al orden final de la leyenda
+        # (los nombres siguen siendo las columnas de porcentaje)
+        tab_multi$etiquetas_grupos <- stats::setNames(
+          niveles_leyenda,
+          tab_multi$cols_porcentaje
+        )
+
+        # 7. Limpiar claves "meta" que el graficador no conoce
+        estilos_apiladas_clean <- estilos_barras_apiladas
+        estilos_apiladas_clean$listnames_invertir_segmentos <- NULL
+        estilos_apiladas_clean$listnames_invertir_leyenda   <- NULL
+        estilos_apiladas_clean$vars_invertir_segmentos      <- NULL
+        estilos_apiladas_clean$vars_invertir_leyenda        <- NULL
+        estilos_apiladas_clean$grosor_barras                <- NULL
+
+        # 8. Construir gráfico multi-apilado usando el MISMO graficador
+        args_multi <- c(
+          list(
+            data                = tab_multi$data,
+            var_categoria       = "pregunta",
+            var_n               = "n_base",
+            cols_porcentaje     = tab_multi$cols_porcentaje,
+            etiquetas_grupos    = tab_multi$etiquetas_grupos,
+            escala_valor        = "proporcion_1",
+            colores_grupos      = colores_grupos,
+            mostrar_valores     = TRUE,
+            titulo              = NULL,
+            subtitulo           = NULL,
+            nota_pie            = NULL,
+
+            mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
+            barra_extra_preset  = preset_extra,
+            prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
+            titulo_barra_extra  = if (!is.null(preset_extra)) NULL else if (barra_extra == "total_n") "Total" else NULL,
+
+            invertir_segmentos  = invertir_segmentos_var,
+            invertir_leyenda    = invertir_leyenda_var,
+
+            grosor_barras       = grosor_barras_bloque,
+
+            exportar            = "rplot"
+          ),
+          estilos_apiladas_clean
+        )
+
+        p <- do.call(graficar_barras_apiladas, args_multi) +
+          ggplot2::theme(
+            axis.text.y = ggplot2::element_text(
+              hjust  = 1,
+              vjust  = 0.5,
+              margin = ggplot2::margin(r = 6)
+            ),
+            plot.margin = ggplot2::margin(l = 20, r = 10, t = 5, b = 5)
+          )
+
+        # 9. N del bloque: tomamos el máximo N_base (todas deberían compartirlo)
+        n_total_bloque <- max(tab_multi$data$n_base, na.rm = TRUE)
+
+        idx <- length(plots_list) + 1L
+        plots_list[[idx]]       <- p
+        titulos_list[[idx]]     <- titulo_bloque
+        resumenN_list[[idx]]    <- sprintf(
+          "N = %s",
+          format(n_total_bloque, big.mark = ",", scientific = FALSE)
+        )
+        seccion_por_plot[idx]   <- sec
+
+        # Registrar en el log que este bloque reemplaza varias vars
+        log_list[[length(log_list) + 1]] <- tibble::tibble(
+          seccion      = sec,
+          var          = paste(vars_bloque, collapse = ", "),
+          tipo_var     = "multi_apiladas",
+          list_name    = list_name_bloque,
+          override     = paste0("multi_apiladas=", bloque_id),
+          tipo_grafico = "barras_apiladas_multi"
+        )
+
+        next
+      }
+
+      # -----------------------------------------------------------------------
+      # Flujo normal
+      # -----------------------------------------------------------------------
       tipo_v <- tipo_pregunta_spss(v, survey, sm_vars_force)
       if (tipo_v == "so_or_open") tipo_v <- "so"
 
