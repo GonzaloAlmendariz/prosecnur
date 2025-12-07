@@ -737,6 +737,9 @@ reporte_ppt <- function(
         estilos_apiladas_clean$vars_invertir_segmentos      <- NULL
         estilos_apiladas_clean$vars_invertir_leyenda        <- NULL
         estilos_apiladas_clean$grosor_barras                <- NULL
+        estilos_apiladas_clean$prefijo_barra_extra          <- NULL
+        estilos_apiladas_clean$titulo_barra_extra           <- NULL
+        estilos_apiladas_clean$color_barra_extra            <- NULL
 
         # 8. Construir gráfico multi-apilado usando el MISMO graficador
         args_multi <- c(
@@ -954,10 +957,6 @@ reporte_ppt <- function(
             }
           }
 
-          # ------------------------------------------------------
-          # NUEVO: decidir inversión por variable / list_name
-          # usando SOLO la info de estilos_barras_apiladas
-          # ------------------------------------------------------
           ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
           ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
 
@@ -987,6 +986,11 @@ reporte_ppt <- function(
           estilos_apiladas_clean$vars_invertir_segmentos      <- NULL
           estilos_apiladas_clean$vars_invertir_leyenda        <- NULL
 
+          args_extra <- list()
+          if (!is.null(colores_grupos)) {
+            args_extra$colores_grupos <- colores_grupos
+          }
+
           args_apiladas <- c(
             list(
               data                = tab_apil$data,
@@ -995,7 +999,6 @@ reporte_ppt <- function(
               cols_porcentaje     = tab_apil$cols_porcentaje,
               etiquetas_grupos    = tab_apil$etiquetas_grupos,
               escala_valor        = "proporcion_1",
-              colores_grupos      = colores_grupos,
               mostrar_valores     = TRUE,
               titulo              = titulo_plot,
               subtitulo           = NULL,
@@ -1003,17 +1006,34 @@ reporte_ppt <- function(
 
               mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
               barra_extra_preset  = preset_extra,
-              prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
-              titulo_barra_extra  = if (!is.null(preset_extra)) NULL else if (barra_extra == "total_n") "Total" else NULL,
 
-              # flags que SÍ van al graficador
-              invertir_segmentos  = invertir_segmentos_var,
-              invertir_leyenda    = invertir_leyenda_var,
+              prefijo_barra_extra = if (!is.null(preset_extra)) {
+                ""
+              } else if (barra_extra == "total_n") {
+                "N = "
+              } else {
+                ""
+              },
 
-              exportar            = "rplot"
+              titulo_barra_extra = NULL,
+
+              color_barra_extra = if (!is.null(preset_extra)) {
+                NULL
+              } else {
+                "#092147"
+              },
+
+              exportar           = "rplot",
+              invertir_segmentos = invertir_segmentos_var,
+              invertir_leyenda   = invertir_leyenda_var
             ),
+            args_extra,
             estilos_apiladas_clean
           )
+
+          if (!is.null(names(args_apiladas))) {
+            args_apiladas <- args_apiladas[!duplicated(names(args_apiladas))]
+          }
 
           p <- do.call(graficar_barras_apiladas, args_apiladas)
 

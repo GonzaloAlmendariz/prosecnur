@@ -364,16 +364,9 @@ graficar_barras_apiladas <- function(
       ) |>
       dplyr::ungroup()
 
-    # Formato de porcentajes: enteros si lo son, con decimales si no
+    # Formato de porcentajes: siempre enteros (redondeados)
     pct_num <- df_lab$.valor_plot * 100
-    tol <- 10^(-(decimales + 1))
-    es_entero <- is.finite(pct_num) & (abs(pct_num - round(pct_num)) < tol)
-
-    lab <- character(nrow(df_lab))
-    fmt_no_entero <- paste0("%.", decimales, "f%%")
-
-    lab[es_entero]  <- sprintf("%d%%", round(pct_num[es_entero]))
-    lab[!es_entero] <- sprintf(fmt_no_entero, pct_num[!es_entero])
+    lab <- sprintf("%d%%", round(pct_num))
 
     df_lab$lab <- lab
 
@@ -536,6 +529,20 @@ graficar_barras_apiladas <- function(
   # ---------------------------------------------------------------------------
   if (mostrar_barra_extra) {
 
+    # Función auxiliar: 1 decimal como máximo, pero sin ".0"
+    .format_pct_clean <- function(x) {
+      x_round <- round(x, 1)  # seguimos con precisión 1 decimal
+      txt     <- format(
+        x_round,
+        nsmall    = 1,
+        trim      = TRUE,
+        scientific = FALSE
+      )
+      # quitar ".0" al final si corresponde
+      txt <- sub("\\.0$", "", txt)
+      txt
+    }
+
     df_extra <- df_sum |>
       dplyr::left_join(
         df_wide_extra |>
@@ -549,8 +556,13 @@ graficar_barras_apiladas <- function(
         xpos_text = xpos_col - max_suma * 0.015,
         lab_valor = dplyr::case_when(
           barra_extra_preset %in% c("top2box", "top3box", "bottom2box") ~
-            sprintf("%.1f%%", valor_extra),
-          TRUE ~ format(valor_extra, big.mark = ",", scientific = FALSE, trim = TRUE)
+            paste0(.format_pct_clean(valor_extra), "%"),
+          TRUE ~ format(
+            valor_extra,
+            big.mark   = ",",
+            scientific = FALSE,
+            trim       = TRUE
+          )
         ),
         lab_extra = paste0(prefijo_extra_int, lab_valor)
       )
@@ -574,12 +586,21 @@ graficar_barras_apiladas <- function(
     # Encabezado de la barra extra (Total / Top 2 Box / etc.)
     if (!is.null(titulo_extra_int) && nzchar(titulo_extra_int)) {
 
-      # y = categoría superior (después de invertir o no),
-      # x = centro global de la columna de barra extra,
-      # hjust = 0.5 para centrar sobre la columna,
-      # vjust más negativo para que quede claramente por encima de la primera barra
       lvls         <- levels(df_long[[var_categoria]])
       cat_superior <- tail(lvls, 1)
+
+      # nº de barras en el gráfico
+      n_categorias_header <- length(lvls)
+
+      # vjust dinámico:
+      # - 1–2 barras  → más arriba (más negativo)
+      # - 3 barras    → intermedio
+      # - 4+ barras   → como ahora (-6)
+      vjust_header <- dplyr::case_when(
+        n_categorias_header <= 2 ~ -8,
+        n_categorias_header == 3 ~ -7,
+        TRUE                     ~ -6
+      )
 
       df_header <- data.frame(
         var_cat     = cat_superior,
@@ -597,7 +618,7 @@ graficar_barras_apiladas <- function(
           label       = titulo_extra_int,
           inherit.aes = FALSE,
           hjust       = 0.5,
-          vjust       = -5,
+          vjust       = vjust_header,
           size        = size_barra_extra,
           color       = color_barra_extra_int,
           fontface    = fontface_barra_extra

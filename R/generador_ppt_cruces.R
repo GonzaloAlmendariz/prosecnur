@@ -1161,11 +1161,13 @@ reporte_ppt_cruces <- function(
                 (!is.na(list_name_v) && list_name_v %in% ln_inv_ley)
             )
 
+
             estilos_apiladas_clean <- estilos_barras_apiladas
             estilos_apiladas_clean$listnames_invertir_segmentos <- NULL
             estilos_apiladas_clean$listnames_invertir_leyenda   <- NULL
             estilos_apiladas_clean$vars_invertir_segmentos      <- NULL
             estilos_apiladas_clean$vars_invertir_leyenda        <- NULL
+            estilos_apiladas_clean$prefijo_barra_extra          <- NULL
 
             args_apiladas <- c(
               list(
@@ -1194,17 +1196,8 @@ reporte_ppt_cruces <- function(
                   ""
                 },
 
-                # Sin título excepto cuando tú lo definas
                 titulo_barra_extra = NULL,
-
-                # Color:
-                # - Si hay preset → dejar NULL (Top2Box verde)
-                # - Si NO hay preset → N= en azul (#092147)
-                color_barra_extra = if (!is.null(preset_extra)) {
-                  NULL
-                } else {
-                  "#092147"
-                },
+                color_barra_extra  = if (!is.null(preset_extra)) NULL else "#092147",
 
                 exportar           = "rplot",
                 invertir_segmentos = invertir_segmentos_var,
