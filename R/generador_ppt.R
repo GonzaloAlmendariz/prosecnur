@@ -182,6 +182,9 @@ reporte_ppt <- function(
     # Bloques de varias vars apiladas
     bloques_multi_apiladas = NULL,
 
+    # Pares de gráficos en una misma diapositiva
+    pares_diapositiva = NULL,
+
     # Sobrescritura por variable
     vars_dico             = NULL,
     vars_barras_apiladas  = NULL,
@@ -581,6 +584,7 @@ reporte_ppt <- function(
   resumenN_list    <- list()
   log_list         <- list()
   seccion_por_plot <- character(0)
+  vars_por_plot    <- character(0)
 
   total_casos <- nrow(data)
 
@@ -615,6 +619,14 @@ reporte_ppt <- function(
         # Ejecutar SOLO en la primera variable del bloque
         if (v != vars_bloque[1]) {
           next
+        }
+
+        if (mensajes_progreso) {
+          message(
+            "   - [multi_apiladas] ",
+            paste(vars_bloque, collapse = ", "),
+            " → barras_apiladas_multi (bloque = ", bloque_id, ")"
+          )
         }
 
         # 2. Construir tabla multi-var
@@ -777,6 +789,8 @@ reporte_ppt <- function(
           format(n_total_bloque, big.mark = ",", scientific = FALSE)
         )
         seccion_por_plot[idx]   <- sec
+
+        vars_por_plot[idx]      <- v
 
         # Registrar en el log que este bloque reemplaza varias vars
         log_list[[length(log_list) + 1]] <- tibble::tibble(
@@ -1121,10 +1135,47 @@ reporte_ppt <- function(
       titulos_list[[idx]]     <- titulo_slide
       resumenN_list[[idx]]    <- resumen_n_txt
       seccion_por_plot[idx]   <- sec
+      vars_por_plot[idx]      <- v
     }
   }
 
   log_decisiones <- dplyr::bind_rows(log_list)
+
+  # ---------------------------------------------------------------------------
+  # Construir pares de diapositiva → índices de plots
+  # ---------------------------------------------------------------------------
+
+  pares_indices <- list()
+
+  if (!is.null(pares_diapositiva) && length(pares_diapositiva) > 0) {
+    for (nm in names(pares_diapositiva)) {
+
+      vars_pair <- pares_diapositiva[[nm]]$vars
+      if (length(vars_pair) != 2) next
+
+      v1 <- vars_pair[1]
+      v2 <- vars_pair[2]
+
+      idx1 <- match(v1, vars_por_plot)
+      idx2 <- match(v2, vars_por_plot)
+
+      # ambos deben existir en la secuencia de plots
+      if (!is.na(idx1) && !is.na(idx2) && idx1 != idx2) {
+
+        idx_ordered <- sort(c(idx1, idx2))
+
+        pares_indices[[nm]] <- list(
+          idx1   = idx_ordered[1],   # primero
+          idx2   = idx_ordered[2],   # segundo
+          titulo = pares_diapositiva[[nm]]$titulo %||% NULL
+        )
+      }
+    }
+  }
+
+  # Prepara vectores de ayuda para detección rápida
+  indices_segundos_pares <- vapply(pares_indices, function(x) x$idx2, integer(1))
+  indices_primeros_pares <- vapply(pares_indices, function(x) x$idx1, integer(1))
 
   # ---------------------------------------------------------------------------
   # 6. PPT
@@ -1204,6 +1255,18 @@ reporte_ppt <- function(
       }
       if ("Section Header" %in% layout_info$layout) {
         tiene_layout_section_header <- TRUE
+      }
+    }
+
+    tiene_layout_doble <- FALSE
+    layout_doble <- NULL
+
+    if ("Graficos_2columnas" %in% layout_info$layout) {
+      tiene_layout_doble <- TRUE
+      layout_doble <- "Graficos_2columnas"
+
+      if (mensajes_progreso) {
+        message("Layout 'Graficos_2columnas' disponible para gráficos dobles.")
       }
     }
 
@@ -1294,26 +1357,119 @@ reporte_ppt <- function(
     if (length(plots_list)) {
       for (i in seq_along(plots_list)) {
 
-        p        <- plots_list[[i]]
-        st       <- titulos_list[[i]]   %||% NULL
-        # Recuperar N_total dinámico
-        n_total_plot <- resumenN_list[[i]] %||% NULL   # antes era el texto completo
-
-        # Construir texto para la fuente:
-        # Base: <N> + sufijo definido por el usuario (si existe en `fuente`)
-        texto_base <- NULL
-        if (!is.null(n_total_plot)) {
-          # extraer número desde "N = xx ..." en caso venga así
-          n_num <- gsub("[^0-9]", "", n_total_plot)
-          if (!nzchar(n_num)) n_num <- NA
-
-          # Construir “Base: <N> <fuente>”
-          if (!is.null(fuente) && nzchar(fuente)) {
-            texto_base <- sprintf("Base: %s %s", n_num, fuente)
-          } else {
-            texto_base <- sprintf("Base: %s", n_num)
-          }
+        # 1) Si este índice es segundo miembro de un par → saltarlo SIEMPRE
+        if (i %in% indices_segundos_pares) {
+          next
         }
+
+        # Información básica del plot i
+        p      <- plots_list[[i]]
+        st     <- titulos_list[[i]]   %||% NULL
+        n_info <- resumenN_list[[i]]  %||% NULL
+
+        # 2) Si este índice es primer miembro de un par y hay layout doble:
+        if (i %in% indices_primeros_pares && tiene_layout_doble) {
+
+          # Buscar info del par
+          par_nm   <- names(pares_indices)[which(indices_primeros_pares == i)]
+          info_par <- pares_indices[[par_nm]]
+          j        <- info_par$idx2  # segundo índice del par
+
+          p1 <- plots_list[[i]]
+          p2 <- plots_list[[j]]
+
+          t1 <- titulos_list[[i]] %||% ""
+          t2 <- titulos_list[[j]] %||% ""
+
+          titulo_final <- info_par$titulo %||% paste0(t1, " / ", t2)
+
+          base1 <- resumenN_list[[i]] %||% ""
+          base2 <- resumenN_list[[j]] %||% ""
+
+          # Mensaje de progreso
+          if (mensajes_progreso) {
+            message("   · [doble] ", vars_por_plot[i], " + ", vars_por_plot[j],
+                    " → layout doble ('", layout_doble, "')")
+          }
+
+          # Si hay Section Header y cambia la sección, lo agregamos antes del doble
+          if (tiene_layout_section_header &&
+              length(seccion_por_plot) >= i) {
+
+            sec_i <- seccion_por_plot[i]
+
+            if (!is.null(sec_i) && nzchar(sec_i) &&
+                (i == 1L || !identical(sec_i, seccion_por_plot[i - 1L]))) {
+
+              doc <- officer::add_slide(
+                doc,
+                layout = "Section Header",
+                master = "Office Theme"
+              )
+
+              loc_sec_title <- tryCatch(
+                officer::ph_location_type(type = "title"),
+                error = function(e) {
+                  tryCatch(
+                    officer::ph_location_type(type = "ctrTitle"),
+                    error = function(e2) NULL
+                  )
+                }
+              )
+
+              if (!is.null(loc_sec_title)) {
+                doc <- tryCatch(
+                  officer::ph_with(doc, sec_i, location = loc_sec_title),
+                  error = function(e) doc
+                )
+              }
+            }
+          }
+
+          # Ahora sí, crear la diapositiva doble
+          doc <- officer::add_slide(
+            doc,
+            layout = layout_doble,
+            master = "Office Theme"
+          )
+
+          # Título general
+          loc_title <- officer::ph_location_type(type = "title")
+          doc <- officer::ph_with(doc, titulo_final, location = loc_title)
+
+          # Gráfico izquierdo
+          doc <- officer::ph_with(
+            doc,
+            rvg::dml(ggobj = p1, bg = "transparent"),
+            location = officer::ph_location_type(type = "pic", id = 2)
+          )
+
+          # Gráfico derecho
+          doc <- officer::ph_with(
+            doc,
+            rvg::dml(ggobj = p2, bg = "transparent"),
+            location = officer::ph_location_type(type = "pic", id = 1)
+          )
+
+          # Base izquierda
+          doc <- officer::ph_with(
+            doc,
+            base1,
+            location = officer::ph_location_type(type = "body", id = 2)
+          )
+
+          # Base derecha
+          doc <- officer::ph_with(
+            doc,
+            base2,
+            location = officer::ph_location_type(type = "body", id = 3)
+          )
+
+          # Pasar al siguiente i (ya no generamos diapositivas simples para i ni para j)
+          next
+        }
+
+        # 3) Si NO es parte de un par → flujo normal (Section Header + diapositiva simple)
 
         # Diapositiva de sección si cambia la sección (y hay layout Section Header)
         if (tiene_layout_section_header &&
@@ -1349,14 +1505,14 @@ reporte_ppt <- function(
           }
         }
 
-        # Diapositiva de gráfico
+        # Diapositiva de gráfico simple
         doc <- officer::add_slide(
           doc,
           layout = layout_graficos,
           master = "Office Theme"
         )
 
-        # Escribir título de la diapositiva si hay y existe placeholder
+        # Escribir título de la diapositiva si hay
         if (!is.null(st) && nzchar(st)) {
           loc_gtitle <- tryCatch(
             officer::ph_location_type(type = "title"),
@@ -1380,7 +1536,7 @@ reporte_ppt <- function(
           }
         }
 
-        # Insertar gráfico en placeholder de imagen o a pantalla completa
+        # Insertar gráfico
         if (usar_pic_placeholder) {
           loc_pic <- officer::ph_location_type(type = "pic")
         } else {
@@ -1405,13 +1561,9 @@ reporte_ppt <- function(
 
             base_texto <- NULL
 
-            # `n_total_plot` ya contiene "N = 52" u otro formato similar
-            if (!is.null(n_total_plot) && nzchar(n_total_plot)) {
+            if (!is.null(n_info) && nzchar(n_info)) {
 
-              # Extraer el número después de "N ="
-              n_part <- sub("^N\\s*=\\s*([^|]+).*", "\\1", n_total_plot)
-
-              # Mantener solo dígitos
+              n_part   <- sub("^N\\s*=\\s*([^|]+).*", "\\1", n_info)
               n_digits <- gsub("[^0-9]", "", n_part)
 
               if (nzchar(n_digits)) {
@@ -1439,7 +1591,7 @@ reporte_ppt <- function(
           }
         }
 
-        # Escribir placeholder vacío en bloque derecho (body id = 3)
+        # Placeholder vacío en bloque derecho (body id = 3)
         if (tiene_layout_graficos) {
 
           loc_resumen <- tryCatch(
@@ -1448,11 +1600,10 @@ reporte_ppt <- function(
           )
 
           if (!is.null(loc_resumen)) {
-            # Insertamos explícitamente un texto vacío (" ")
             doc <- tryCatch(
               officer::ph_with(
                 doc,
-                " ",   # ← mantiene el placeholder activo
+                " ",
                 location = loc_resumen
               ),
               error = function(e) doc
@@ -1461,6 +1612,7 @@ reporte_ppt <- function(
         }
       }
     }
+
 
     # 6.5. Contraportada (si existe)
     if (tiene_layout_contraportada) {

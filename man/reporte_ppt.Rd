@@ -16,6 +16,7 @@ reporte_ppt(
   incluir_titulo_var = TRUE,
   mensajes_progreso = TRUE,
   bloques_multi_apiladas = NULL,
+  pares_diapositiva = NULL,
   vars_dico = NULL,
   vars_barras_apiladas = NULL,
   vars_barras_agrupadas = NULL,
