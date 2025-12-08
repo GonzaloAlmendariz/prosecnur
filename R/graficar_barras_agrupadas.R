@@ -75,6 +75,12 @@
 #'   \pkg{stringr}.
 #' @param mostrar_leyenda,invertir_leyenda,invertir_barras,invertir_series
 #'   Controles de leyenda y orden.
+#' @param orientacion Dirección de las barras: `"horizontal"` (por defecto,
+#'   categorías en el eje vertical y porcentajes en el eje horizontal mediante
+#'   \code{coord_flip()}) o `"vertical"` (categorías en el eje horizontal y
+#'   porcentajes en el eje vertical). No afecta el resto de argumentos ni el
+#'   cálculo de porcentajes, solo la orientación del gráfico y la lógica de
+#'   altura sugerida.
 #' @param textos_negrita Vector que puede incluir `"titulo"`, `"porcentajes"`,
 #'   `"leyenda"` y/o `"barra_extra"`.
 #' @param exportar `"rplot"`, `"png"`, `"ppt"` o `"word"`.
@@ -96,6 +102,7 @@ graficar_barras_agrupadas <- function(
     cols_porcentaje,
     etiquetas_series,
     escala_valor              = c("proporcion_1", "proporcion_100"),
+    orientacion               = c("horizontal", "vertical"),
     colores_series            = NULL,
     mostrar_valores           = TRUE,
     decimales                 = 1,
@@ -148,6 +155,7 @@ graficar_barras_agrupadas <- function(
   `%||%` <- function(x, y) if (!is.null(x)) x else y
 
   escala_valor <- match.arg(escala_valor)
+  orientacion  <- match.arg(orientacion)
   exportar     <- match.arg(exportar)
   pos_titulo   <- match.arg(pos_titulo)
   pos_nota_pie <- match.arg(pos_nota_pie)
@@ -307,7 +315,13 @@ graficar_barras_agrupadas <- function(
       umbral_posicion_eff <- 0.15
     }
 
-    offset_lab <- max_valor * 0.015
+    # Offset para etiquetas fuera de la barra:
+    # en vertical conviene un poco más de espacio
+    offset_lab <- if (orientacion == "vertical") {
+      max_valor * 0.03
+    } else {
+      max_valor * 0.015
+    }
 
     df_lab$inside <- df_lab$.valor_plot >= umbral_posicion_eff & df_lab$lab != ""
 
@@ -317,7 +331,12 @@ graficar_barras_agrupadas <- function(
     df_lab$valor_label[!df_lab$inside & df_lab$.valor_plot > 0] <-
       df_lab$.valor_plot[!df_lab$inside & df_lab$.valor_plot > 0] + offset_lab
 
+    # En horizontal: dentro centrado, fuera a la derecha.
+    # En vertical: SIEMPRE centrado sobre la barra.
     df_lab$hjust_label <- ifelse(df_lab$inside, 0.5, 0)
+    if (orientacion == "vertical") {
+      df_lab$hjust_label <- 0.5
+    }
     df_lab$col_label <- ifelse(
       df_lab$inside,
       color_texto_barras,
@@ -348,23 +367,45 @@ graficar_barras_agrupadas <- function(
   # ---------------------------------------------------------------------------
   # 4. Escala Y (proporción + espacio para barra extra)
   # ---------------------------------------------------------------------------
-  if (escala_valor %in% c("proporcion_1", "proporcion_100")) {
+  es_proporcion <- escala_valor %in% c("proporcion_1", "proporcion_100")
 
-    if (mostrar_barra_extra) {
-      y_lim   <- 1 + extra_derecha_rel
-      y_extra <- 1 + extra_derecha_rel * 0.5
+  if (es_proporcion) {
+
+    if (orientacion == "horizontal") {
+      # Mantener la lógica 0–100% fija para horizontales
+      if (mostrar_barra_extra) {
+        y_lim   <- 1 + extra_derecha_rel
+        y_extra <- 1 + extra_derecha_rel * 0.5
+      } else {
+        y_lim   <- 1
+        y_extra <- NA_real_
+      }
+
+      p <- p +
+        ggplot2::scale_y_continuous(
+          limits = c(0, y_lim),
+          breaks = seq(0.25, 1, by = 0.25),
+          labels = scales::percent_format(accuracy = 1),
+          expand = ggplot2::expansion(mult = c(0, 0.02))
+        )
+
     } else {
-      y_lim   <- 1
-      y_extra <- NA_real_
-    }
+      # VERTICAL: escala libre según los datos (pero manteniendo %)
+      if (mostrar_barra_extra) {
+        y_lim   <- max_valor * (1 + extra_derecha_rel)
+        y_extra <- max_valor * (1 + extra_derecha_rel * 0.95)
+      } else {
+        y_lim   <- max_valor * 1.05
+        y_extra <- NA_real_
+      }
 
-    p <- p +
-      ggplot2::scale_y_continuous(
-        limits = c(0, y_lim),
-        breaks = seq(0.25, 1, by = 0.25),
-        labels = scales::percent_format(accuracy = 1),
-        expand = ggplot2::expansion(mult = c(0, 0.02))
-      )
+      p <- p +
+        ggplot2::scale_y_continuous(
+          limits = c(0, y_lim),
+          labels = scales::percent_format(accuracy = 1),
+          expand = ggplot2::expansion(mult = c(0, 0.02))
+        )
+    }
 
   } else {
     y_lim   <- max_valor * (1 + extra_derecha_rel)
@@ -445,6 +486,8 @@ graficar_barras_agrupadas <- function(
       stop("Para usar `ancho_max_eje_y` se requiere el paquete 'stringr'.",
            call. = FALSE)
     }
+    # Las categorías están en el eje X en los datos; en horizontal se hace flip,
+    # pero el wrap se aplica igual sobre los niveles de la categoría.
     p <- p +
       ggplot2::scale_x_discrete(
         labels = function(x) stringr::str_wrap(x, width = ancho_max_eje_y)
@@ -468,16 +511,7 @@ graficar_barras_agrupadas <- function(
       panel.grid.major.x = ggplot2::element_blank(),
       axis.title.x       = ggplot2::element_blank(),
       axis.title.y       = ggplot2::element_blank(),
-      axis.text.y        = ggplot2::element_text(
-        color = color_ejes,
-        size  = size_ejes,
-        hjust = 1,
-        vjust = 0.5
-      ),
-      axis.line.y        = ggplot2::element_blank(),
-      axis.text.x        = ggplot2::element_blank(),
-      axis.ticks.x       = ggplot2::element_blank(),
-      axis.line.x        = ggplot2::element_blank(),
+      # Los ejes específicos (texto, ticks, líneas) se ajustan más abajo
       legend.title       = ggplot2::element_blank(),
       legend.position    = if (mostrar_leyenda) "bottom" else "none",
       legend.text        = ggplot2::element_text(
@@ -506,23 +540,69 @@ graficar_barras_agrupadas <- function(
       panel.background   = ggplot2::element_rect(fill = color_fondo, color = NA)
     )
 
+  # Eje de porcentajes (gris): depende de la orientación
   if (escala_valor %in% c("proporcion_1", "proporcion_100")) {
-    eje_theme <- ggplot2::theme(
-      axis.text.x  = ggplot2::element_text(
-        color = "#7F7F7F",
-        size  = size_ejes
-      ),
-      axis.ticks.x = ggplot2::element_line(
-        color     = "#7F7F7F",
-        linewidth = 0.3
-      ),
-      axis.line.x  = ggplot2::element_line(
-        color     = "#7F7F7F",
-        linewidth = 0.4
+
+    if (orientacion == "horizontal") {
+      # En horizontal, tras el coord_flip, los porcentajes terminan en el eje X.
+      eje_theme <- ggplot2::theme(
+        axis.text.x  = ggplot2::element_text(
+          color = "#7F7F7F",
+          size  = size_ejes
+        ),
+        axis.ticks.x = ggplot2::element_line(
+          color     = "#7F7F7F",
+          linewidth = 0.3
+        ),
+        axis.line.x  = ggplot2::element_line(
+          color     = "#7F7F7F",
+          linewidth = 0.4
+        )
       )
-    )
+    } else {
+      # En vertical, los porcentajes están en el eje Y.
+      eje_theme <- ggplot2::theme(
+        axis.text.y  = ggplot2::element_text(
+          color = "#7F7F7F",
+          size  = size_ejes
+        ),
+        axis.ticks.y = ggplot2::element_line(
+          color     = "#7F7F7F",
+          linewidth = 0.3
+        ),
+        axis.line.y  = ggplot2::element_line(
+          color     = "#7F7F7F",
+          linewidth = 0.4
+        )
+      )
+    }
+
   } else {
     eje_theme <- ggplot2::theme()
+  }
+
+  # Eje de categorías (color_ejes): también depende de la orientación
+  theme_orient <- if (orientacion == "horizontal") {
+    ggplot2::theme(
+      axis.text.y = ggplot2::element_text(
+        color = color_ejes,
+        size  = size_ejes,
+        hjust = 1,
+        vjust = 0.5
+      ),
+      axis.text.x  = ggplot2::element_blank(),
+      axis.ticks.x = ggplot2::element_blank(),
+      axis.line.x  = ggplot2::element_blank()
+    )
+  } else {
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(
+        color = color_ejes,
+        size  = size_ejes,
+        hjust = 0.5,
+        vjust = 1
+      )
+    )
   }
 
   # Número de ítems en la leyenda y filas necesarias (máx. 5 por fila)
@@ -540,10 +620,15 @@ graficar_barras_agrupadas <- function(
       )
   }
 
+  # Aplicar orientación (coord_flip solo en horizontal)
+  if (orientacion == "horizontal") {
+    p <- p + ggplot2::coord_flip()
+  }
+
   p <- p +
-    ggplot2::coord_flip() +
     base_theme +
     eje_theme +
+    theme_orient +
     ggplot2::labs(
       title    = titulo,
       subtitle = subtitulo,
@@ -551,7 +636,7 @@ graficar_barras_agrupadas <- function(
     )
 
   # ---------------------------------------------------------------------------
-  # 7. Exportación (altura total = panel + eje Y + leyenda + caption)
+  # 7. Exportación (altura total sugerida)
   # ---------------------------------------------------------------------------
 
   n_categorias <- length(unique(df_long[[var_categoria]]))
@@ -571,51 +656,84 @@ graficar_barras_agrupadas <- function(
 
   tiene_caption <- !is.null(caption_text) && nzchar(caption_text)
 
-  # 7.1 Alto del PANEL de barras (solo barras)
-  alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
+  if (orientacion == "horizontal") {
 
-  # 7.2 Alto de la LEYENDA
-  alto_leyenda <- if (mostrar_leyenda && n_items_leyenda > 0) {
-    n_filas_leyenda * alto_leyenda_row
-  } else {
-    0
-  }
+    # =================== BARRAS HORIZONTALES ==================
 
-  # 7.3 Alto del CAPTION interno (nota_pie)
-  alto_cap <- if (tiene_caption) alto_caption else 0
+    # 7.1 Alto del PANEL de barras (una barra por categoría)
+    alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
 
-  # 7.4 Alto extra por EJE Y (cuando las etiquetas tienen varias líneas)
-  max_lineas_eje <- 1L
-  if (!is.null(ancho_max_eje_y)) {
-    if (requireNamespace("stringr", quietly = TRUE)) {
-      # Tomamos las etiquetas tal como se mostrarán en el eje
-      etiq_orig <- levels(df_long[[var_categoria]])
-      if (length(etiq_orig) == 0L) {
-        etiq_orig <- unique(as.character(df_long[[var_categoria]]))
-      }
-      etiq_wrap <- stringr::str_wrap(etiq_orig, width = ancho_max_eje_y)
-      lineas    <- stringr::str_count(etiq_wrap, "\n") + 1L
-      max_lineas_eje <- max(1L, lineas, na.rm = TRUE)
+    # 7.2 Alto de la LEYENDA
+    alto_leyenda <- if (mostrar_leyenda && n_items_leyenda > 0) {
+      n_filas_leyenda * alto_leyenda_row
+    } else {
+      0
     }
-  }
 
-  # Cada línea adicional del eje Y suma un pequeño bloque de altura
-  alto_por_linea_eje <- 0.12  # puedes afinar este valor si lo ves muy grande/pequeño
-  alto_extra_eje_y <- if (max_lineas_eje > 1L) {
-    (max_lineas_eje - 1L) * alto_por_linea_eje
+    # 7.3 Alto del CAPTION interno (nota_pie)
+    alto_cap <- if (tiene_caption) alto_caption else 0
+
+    # 7.4 Alto extra por EJE de categorías (cuando las etiquetas tienen varias líneas)
+    max_lineas_eje <- 1L
+    if (!is.null(ancho_max_eje_y)) {
+      if (requireNamespace("stringr", quietly = TRUE)) {
+        # Tomamos las etiquetas tal como se mostrarán en el eje de categorías
+        etiq_orig <- levels(df_long[[var_categoria]])
+        if (length(etiq_orig) == 0L) {
+          etiq_orig <- unique(as.character(df_long[[var_categoria]]))
+        }
+        etiq_wrap <- stringr::str_wrap(etiq_orig, width = ancho_max_eje_y)
+        lineas    <- stringr::str_count(etiq_wrap, "\n") + 1L
+        max_lineas_eje <- max(1L, lineas, na.rm = TRUE)
+      }
+    }
+
+    # Cada línea adicional del eje Y suma un pequeño bloque de altura
+    alto_por_linea_eje <- 0.12
+    alto_extra_eje_y <- if (max_lineas_eje > 1L) {
+      (max_lineas_eje - 1L) * alto_por_linea_eje
+    } else {
+      0
+    }
+
+    # 7.5 Altura total sugerida (panel + eje Y + leyenda + caption)
+    alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap + alto_extra_eje_y
+
+    # Tope máximo
+    alto_total_sugerido <- min(alto_max_total, alto_total_sugerido)
+
+    # Mínimo "suave" dependiente del alto por categoría
+    alto_min_suave <- (alto_por_cat_eff * 1.2) + alto_leyenda + alto_cap
+    alto_total_sugerido <- max(alto_min_suave, alto_total_sugerido)
+
   } else {
-    0
+
+    # ==================== BARRAS VERTICALES ======================
+
+    # Aquí el alto ya no depende de cuántas categorías haya en el eje X.
+    # Se usa un panel base fijo, ajustado por leyenda y caption.
+    alto_panel_base <- if (!is.null(alto_por_categoria)) {
+      max(3.5, alto_por_categoria * 5)
+    } else {
+      4.5
+    }
+
+    alto_leyenda <- if (mostrar_leyenda && n_items_leyenda > 0) {
+      n_filas_leyenda * alto_leyenda_row
+    } else {
+      0
+    }
+
+    alto_cap <- if (tiene_caption) alto_caption else 0
+
+    alto_total_sugerido <- alto_panel_base + alto_leyenda + alto_cap
+
+    alto_total_sugerido <- min(alto_max_total, alto_total_sugerido)
+
+    # Mínimo razonable para que no quede enano
+    alto_min_vertical <- 3.5
+    alto_total_sugerido <- max(alto_min_vertical, alto_total_sugerido)
   }
-
-  # 7.5 Altura total sugerida (panel + eje Y + leyenda + caption)
-  alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap + alto_extra_eje_y
-
-  # Tope máximo
-  alto_total_sugerido <- min(alto_max_total, alto_total_sugerido)
-
-  # Mínimo "suave" dependiente del alto por categoría (para no tener gráficos enanos)
-  alto_min_suave <- (alto_por_cat_eff * 1.2) + alto_leyenda + alto_cap
-  alto_total_sugerido <- max(alto_min_suave, alto_total_sugerido)
 
   # Si solo queremos el ggplot, devolvemos p con el alto sugerido como atributo
   if (exportar == "rplot") {

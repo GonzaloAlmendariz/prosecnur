@@ -18,7 +18,7 @@ graficar_barras_apiladas(
   umbral_etiqueta_peq = NULL,
   mostrar_barra_extra = TRUE,
   barra_extra_preset = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
-  prefijo_barra_extra = "N=",
+  prefijo_barra_extra = NULL,
   titulo_barra_extra = NULL,
   titulo = NULL,
   subtitulo = NULL,

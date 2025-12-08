@@ -457,6 +457,7 @@ reporte_ppt <- function(
     vars,
     data,
     survey,
+    choices = NULL,
     orders_list,
     sm_vars_force,
     mostrar_todo,
@@ -500,15 +501,66 @@ reporte_ppt <- function(
         pct_int   = pct_int
       )
 
-      # IMPORTANTE: union() conserva el orden de primera aparición
+      # union() conserva el orden de primera aparición
       # según el instrumento / freq_table_spss. NO se usa sort().
       all_opts <- union(all_opts, tab$Opciones)
     }
 
     if (!length(listas)) return(NULL)
 
-    # NO ORDENAR ALFABÉTICAMENTE:
-    # all_opts <- sort(all_opts)
+    # ------------------------------------------------------------------
+    # Ordenar las opciones según el orden formal de la lista en CHOICES
+    # ------------------------------------------------------------------
+
+    list_name_block <- NA_character_
+
+    if ("list_name" %in% names(survey)) {
+      tmp <- survey$list_name[survey$name %in% vars]
+      tmp <- tmp[!is.na(tmp) & tmp != ""]
+      if (length(tmp)) list_name_block <- tmp[1]
+    } else if ("list_norm" %in% names(survey)) {
+      tmp <- survey$list_norm[survey$name %in% vars]
+      tmp <- tmp[!is.na(tmp) & tmp != ""]
+      if (length(tmp)) list_name_block <- tmp[1]
+    }
+
+    if (!is.na(list_name_block)) {
+
+      niveles_formales <- character(0)
+
+      ## 1) PRIORIDAD: orden de la PALETA por list_name
+      if (!is.null(colores_apiladas_por_listname[[list_name_block]])) {
+        pal <- colores_apiladas_por_listname[[list_name_block]]
+
+        # por si el objeto es lista con $colores
+        if (is.list(pal) && !is.null(pal$colores)) {
+          pal <- pal$colores
+        }
+
+        niveles_formales <- names(pal)
+      }
+
+      ## 2) Si no hay paleta o no tiene nombres, usar CHOICES como respaldo
+      if (!length(niveles_formales) &&
+          !is.null(choices) &&
+          "list_name" %in% names(choices) &&
+          "label" %in% names(choices)) {
+
+        niveles_formales <- as.character(
+          choices$label[choices$list_name == list_name_block]
+        )
+      }
+
+      niveles_formales <- niveles_formales[
+        !is.na(niveles_formales) & niveles_formales != ""
+      ]
+
+      if (length(niveles_formales)) {
+        # Mantiene el orden de la PALETA/choices,
+        # quedándonos solo con las opciones que realmente aparecen en las barras
+        all_opts <- intersect(niveles_formales, all_opts)
+      }
+    }
 
     df_wide <- tibble::tibble(
       pregunta = vapply(listas, function(x) x$label, character(1)),
@@ -616,6 +668,10 @@ reporte_ppt <- function(
         grosor_barras_bloque <- bloque_info$grosor_barras %||%
           estilos_barras_apiladas$grosor_barras %||% 0.7
 
+        # invertir_barras específico del bloque (si no, hereda del estilo general o FALSE)
+        invertir_barras_bloque <- bloque_info$invertir_barras %||%
+          estilos_barras_apiladas$invertir_barras %||% FALSE
+
         # Ejecutar SOLO en la primera variable del bloque
         if (v != vars_bloque[1]) {
           next
@@ -703,7 +759,7 @@ reporte_ppt <- function(
         )
 
         # 6. Asegurar ORDEN consistente de segmentos y leyenda
-        niveles_originales <- unname(tab_multi$etiquetas_grupos)  # etiquetas tal como salen de la tabla
+        niveles_originales <- unname(tab_multi$etiquetas_grupos)
 
         # Orden para las barras (apilado real)
         niveles_plot <- niveles_originales
@@ -740,6 +796,7 @@ reporte_ppt <- function(
         estilos_apiladas_clean$prefijo_barra_extra          <- NULL
         estilos_apiladas_clean$titulo_barra_extra           <- NULL
         estilos_apiladas_clean$color_barra_extra            <- NULL
+        estilos_apiladas_clean$invertir_barras              <- NULL
 
         # 8. Construir gráfico multi-apilado usando el MISMO graficador
         args_multi <- c(
@@ -756,13 +813,40 @@ reporte_ppt <- function(
             subtitulo           = NULL,
             nota_pie            = NULL,
 
-            mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
-            barra_extra_preset  = preset_extra,
-            prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
-            titulo_barra_extra  = if (!is.null(preset_extra)) NULL else if (barra_extra == "total_n") "Total" else NULL,
+            # ------------------------------------------------------------------
+            # LÓGICA DE BARRA EXTRA:
+            #  - Si hay preset (top2box / top3box / bottom2box):
+            #       * mostrar_barra_extra = TRUE
+            #       * SIN "N = " (prefijo vacío)
+            #  - Si NO hay preset y barra_extra == "total_n":
+            #       * mostrar_barra_extra = TRUE, con "N = "
+            #  - En cualquier otro caso: sin barra extra
+            # ------------------------------------------------------------------
+            mostrar_barra_extra = if (!is.null(preset_extra)) {
+              TRUE                          # top/bottom box
+            } else {
+              barra_extra == "total_n"
+            },
+
+            barra_extra_preset  = preset_extra %||% "ninguno",
+
+            prefijo_barra_extra = if (!is.null(preset_extra)) {
+              ""                            # porcentaje solo, sin "N ="
+            } else if (barra_extra == "total_n") {
+              "N = "                        # solo cuando se total_n
+            } else {
+              ""                            # sin barra extra, nada
+            },
+
+            titulo_barra_extra = if (!is.null(preset_extra) || barra_extra != "total_n") {
+              NULL                          # el preset ya pone su título ("TOP TWO BOX", etc.)
+            } else {
+              "Total"
+            },
 
             invertir_segmentos  = invertir_segmentos_var,
             invertir_leyenda    = invertir_leyenda_var,
+            invertir_barras     = invertir_barras_bloque,
 
             grosor_barras       = grosor_barras_bloque,
 
@@ -908,28 +992,95 @@ reporte_ppt <- function(
           colores_series <- estilos_barras_agrupadas$colores_series %||%
             c("Porcentaje" = "#004B8D")
 
+          # ------------------------------------------------------------
+          # Resolver orientación de forma segura (sin romper si no hay reglas)
+          # ------------------------------------------------------------
+
+          # 1. Orientación por variable (si existe lista y entrada)
+          ori_var <- NULL
+          if (exists("orientacion_por_var", inherits = TRUE)) {
+            ori_var <- orientacion_por_var[[v]]
+          }
+
+          # 2. Orientación por list_name
+          ori_list <- NULL
+          if (exists("orientacion_por_listname", inherits = TRUE) &&
+              !is.null(list_name_v) && !is.na(list_name_v) && nzchar(list_name_v) &&
+              list_name_v %in% names(orientacion_por_listname)) {
+            ori_list <- orientacion_por_listname[[list_name_v]]
+          }
+
+          # 3. Orientación default global (si no existe, asumir "horizontal")
+          ori_def <- "horizontal"
+          if (exists("orientacion_default", inherits = TRUE) &&
+              is.character(orientacion_default) && length(orientacion_default) >= 1L) {
+            ori_def <- orientacion_default[1]
+          }
+
+          # 4. Cadena de prioridad:
+          #    var → list_name → estilos_barras_agrupadas$orientacion → default
+          ori_final <- ori_var %||%
+            ori_list %||%
+            estilos_barras_agrupadas$orientacion %||%
+            ori_def
+
+          # ------------------------------------------------------------
+          # resolver ancho del wrap por list_name (independiente de la orientación)
+          # ------------------------------------------------------------
+          ancho_eje_v <- estilos_barras_agrupadas$ancho_max_eje_y %||% NULL
+
+          if (exists("ancho_eje_por_listname", inherits = TRUE) &&
+              !is.null(list_name_v) && !is.na(list_name_v) && nzchar(list_name_v) &&
+              list_name_v %in% names(ancho_eje_por_listname)) {
+
+            ancho_eje_v <- ancho_eje_por_listname[[list_name_v]]
+          }
+
+          # Limpiar estilos para que no pisen nuestro ancho_eje_v
+          estilos_agrupadas_clean <- estilos_barras_agrupadas
+          estilos_agrupadas_clean$ancho_max_eje_y <- NULL
+
+          # ------------------------------------------------------------
+          # Construir args_barras con orientación + wrap resuelto
+          # ------------------------------------------------------------
           args_barras <- c(
-            list(
-              data             = tab_agr,
-              var_categoria    = "categoria",
-              var_n            = "n_base",
-              cols_porcentaje  = cols_porcentaje,
-              etiquetas_series = etiquetas_series,
-              escala_valor     = "proporcion_1",
-              colores_series   = colores_series,
-              mostrar_valores  = TRUE,
-              titulo           = titulo_plot,
-              subtitulo        = NULL,
-              nota_pie         = nota_pie_plot,
-              mostrar_barra_extra = barra_extra == "total_n",
-              prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
-              titulo_barra_extra  = if (barra_extra == "total_n") "Total" else NULL,
-              exportar            = "rplot"
+            c(
+              list(
+                data             = tab_agr,
+                var_categoria    = "categoria",
+                var_n            = "n_base",
+                cols_porcentaje  = cols_porcentaje,
+                etiquetas_series = etiquetas_series,
+                escala_valor     = "proporcion_1",
+                colores_series   = colores_series,
+                mostrar_valores  = TRUE,
+                titulo           = titulo_plot,
+                subtitulo        = NULL,
+                nota_pie         = nota_pie_plot,
+                mostrar_barra_extra = barra_extra == "total_n",
+                prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
+                titulo_barra_extra  = if (barra_extra == "total_n") "Total" else NULL,
+                exportar            = "rplot",
+                orientacion         = ori_final
+              ),
+              # Solo paso ancho_max_eje_y si realmente tengo algo
+              if (!is.null(ancho_eje_v)) list(ancho_max_eje_y = ancho_eje_v) else list()
             ),
-            estilos_barras_agrupadas
+            estilos_agrupadas_clean
           )
 
           p <- do.call(graficar_barras_agrupadas, args_barras)
+
+          # --- remover eje Y para orientación vertical ---
+          if (ori_final == "vertical") {
+            p <- p +
+              ggplot2::theme(
+                axis.text.y  = ggplot2::element_blank(),
+                axis.title.y = ggplot2::element_blank(),
+                axis.ticks.y = ggplot2::element_blank(),
+                axis.line.y  = ggplot2::element_blank()
+              )
+          }
         }
 
         if (tipo_grafico == "barras_apiladas") {
@@ -1094,6 +1245,7 @@ reporte_ppt <- function(
             )
 
             p <- do.call(graficar_barras_agrupadas, args_barras)
+
 
           } else {
 
@@ -1403,8 +1555,31 @@ reporte_ppt <- function(
 
           titulo_final <- info_par$titulo %||% paste0(t1, " / ", t2)
 
-          base1 <- resumenN_list[[i]] %||% ""
-          base2 <- resumenN_list[[j]] %||% ""
+          extract_pretty_N <- function(n_txt) {
+            n_part   <- sub("^N\\s*=\\s*([^|]+).*", "\\1", n_txt)
+            n_digits <- gsub("[^0-9]", "", n_part)
+            if (!nzchar(n_digits)) return(NULL)
+            n_num <- suppressWarnings(as.numeric(n_digits))
+            if (!is.finite(n_num)) return(NULL)
+            format(n_num, big.mark = ",", scientific = FALSE)
+          }
+
+          N_pretty_i <- extract_pretty_N(resumenN_list[[i]])
+          N_pretty_j <- extract_pretty_N(resumenN_list[[j]])
+
+          # 2) Base izquierda → Base: N fuente
+          if (!is.null(N_pretty_i)) {
+            if (!is.null(fuente) && nzchar(fuente)) {
+              base1 <- paste0("Base: ", N_pretty_i, " ", fuente)
+            } else {
+              base1 <- paste0("Base: ", N_pretty_i)
+            }
+          } else {
+            base1 <- fuente %||% ""
+          }
+
+          # 3) Base derecha → siempre vacío como en diapositiva simple
+          base2 <- " "
 
           # Mensaje de progreso
           if (mensajes_progreso) {

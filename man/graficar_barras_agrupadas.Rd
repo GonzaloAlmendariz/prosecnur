@@ -11,6 +11,7 @@ graficar_barras_agrupadas(
   cols_porcentaje,
   etiquetas_series,
   escala_valor = c("proporcion_1", "proporcion_100"),
+  orientacion = c("horizontal", "vertical"),
   colores_series = NULL,
   mostrar_valores = TRUE,
   decimales = 1,
@@ -81,6 +82,13 @@ Los valores (etiquetas) se usan en la leyenda.}
 
 \item{escala_valor}{Escala de los porcentajes: \code{"proporcion_1"} si los
 valores están en 0–1, o \code{"proporcion_100"} si están en 0–100.}
+
+\item{orientacion}{Dirección de las barras: \code{"horizontal"} (por defecto,
+categorías en el eje vertical y porcentajes en el eje horizontal mediante
+\code{coord_flip()}) o \code{"vertical"} (categorías en el eje horizontal y
+porcentajes en el eje vertical). No afecta el resto de argumentos ni el
+cálculo de porcentajes, solo la orientación del gráfico y la lógica de
+altura sugerida.}
 
 \item{colores_series}{Vector de colores HEX con nombre (opcional) para las
 series, usando como nombres las etiquetas de \code{etiquetas_series}. Si

@@ -151,7 +151,7 @@ graficar_barras_apiladas <- function(
     umbral_etiqueta_peq   = NULL,
     mostrar_barra_extra   = TRUE,
     barra_extra_preset    = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
-    prefijo_barra_extra   = "N=",
+    prefijo_barra_extra   = NULL,
     titulo_barra_extra    = NULL,
     titulo                = NULL,
     subtitulo             = NULL,
@@ -452,25 +452,28 @@ graficar_barras_apiladas <- function(
       valor_extra = .data[[var_n]]
     )
 
-  prefijo_extra_int      <- prefijo_barra_extra
-  titulo_extra_int       <- titulo_barra_extra
-  color_barra_extra_int  <- color_barra_extra
-  fontface_barra_extra   <- if ("barra_extra" %in% textos_negrita) "bold" else "plain"
+  # Si no se pasa nada, el prefijo por defecto es vacío ("")
+  prefijo_extra_int     <- prefijo_barra_extra %||% ""
+  titulo_extra_int      <- titulo_barra_extra
+  color_barra_extra_int <- color_barra_extra
+  fontface_barra_extra  <- if ("barra_extra" %in% textos_negrita) "bold" else "plain"
 
   if (barra_extra_preset != "ninguno") {
 
     if (barra_extra_preset == "totales") {
 
-      if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
+      if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
         titulo_extra_int <- "Total"
       }
-      if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
-        prefijo_extra_int <- "N="
+
+      # Solo en el preset "totales" se impone por defecto "N="
+      if (is.null(prefijo_barra_extra)) {
+        prefijo_extra_int <- "N = "
       }
 
       # Para totales: respetar el color que venga del estilo, salvo que no se haya
       # pasado nada explícito.
-      if (missing(color_barra_extra) || is.null(color_barra_extra)) {
+      if (is.null(color_barra_extra)) {
         color_barra_extra_int <- pulso_azul
       }
 
@@ -487,31 +490,25 @@ graficar_barras_apiladas <- function(
 
       if (barra_extra_preset == "top2box") {
         df_wide_extra$valor_extra <- ordenado[, 1] + ordenado[, 2]
-        if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
+
+        if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
           titulo_extra_int <- "TOP TWO BOX"
-        }
-        if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
-          prefijo_extra_int <- ""
         }
 
       } else if (barra_extra_preset == "top3box") {
         df_wide_extra$valor_extra <- ordenado[, 1] + ordenado[, 2] + ordenado[, 3]
-        if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
+
+        if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
           titulo_extra_int <- "TOP THREE BOX"
-        }
-        if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
-          prefijo_extra_int <- ""
         }
 
       } else if (barra_extra_preset == "bottom2box") {
         ncol_mat <- ncol(ordenado)
         df_wide_extra$valor_extra <- ordenado[, ncol_mat] +
           ordenado[, ncol_mat - 1]
-        if (missing(titulo_barra_extra) || is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
+
+        if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) {
           titulo_extra_int <- "BOTTOM TWO BOX"
-        }
-        if (missing(prefijo_barra_extra) || is.null(prefijo_barra_extra)) {
-          prefijo_extra_int <- ""
         }
       }
 
