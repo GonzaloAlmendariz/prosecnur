@@ -732,6 +732,16 @@ reporte_ppt <- function(
           }
         }
 
+        # 4.b Centro de leyenda por list_name (cowplot) para multi-apiladas
+        centro_cowplot_ln <- NULL
+
+        if (exists("centro_leyenda_por_listname", inherits = TRUE) &&
+            !is.na(list_name_bloque) && nzchar(list_name_bloque) &&
+            list_name_bloque %in% names(centro_leyenda_por_listname)) {
+
+          centro_cowplot_ln <- centro_leyenda_por_listname[[list_name_bloque]]
+        }
+
         # 5. Flags de inversión por list_name / variable (misma lógica que apiladas simple)
         ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
         ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
@@ -799,6 +809,13 @@ reporte_ppt <- function(
         estilos_apiladas_clean$invertir_barras              <- NULL
 
         # 8. Construir gráfico multi-apilado usando el MISMO graficador
+        #    (centro_cowplot solo se pasa si NO es NULL)
+        extra_centro <- if (!is.null(centro_cowplot_ln)) {
+          list(centro_cowplot = centro_cowplot_ln)
+        } else {
+          list()
+        }
+
         args_multi <- c(
           list(
             data                = tab_multi$data,
@@ -814,16 +831,10 @@ reporte_ppt <- function(
             nota_pie            = NULL,
 
             # ------------------------------------------------------------------
-            # LÓGICA DE BARRA EXTRA:
-            #  - Si hay preset (top2box / top3box / bottom2box):
-            #       * mostrar_barra_extra = TRUE
-            #       * SIN "N = " (prefijo vacío)
-            #  - Si NO hay preset y barra_extra == "total_n":
-            #       * mostrar_barra_extra = TRUE, con "N = "
-            #  - En cualquier otro caso: sin barra extra
+            # LÓGICA DE BARRA EXTRA
             # ------------------------------------------------------------------
             mostrar_barra_extra = if (!is.null(preset_extra)) {
-              TRUE                          # top/bottom box
+              TRUE
             } else {
               barra_extra == "total_n"
             },
@@ -831,15 +842,15 @@ reporte_ppt <- function(
             barra_extra_preset  = preset_extra %||% "ninguno",
 
             prefijo_barra_extra = if (!is.null(preset_extra)) {
-              ""                            # porcentaje solo, sin "N ="
+              ""
             } else if (barra_extra == "total_n") {
-              "N = "                        # solo cuando se total_n
+              "N = "
             } else {
-              ""                            # sin barra extra, nada
+              ""
             },
 
             titulo_barra_extra = if (!is.null(preset_extra) || barra_extra != "total_n") {
-              NULL                          # el preset ya pone su título ("TOP TWO BOX", etc.)
+              NULL
             } else {
               "Total"
             },
@@ -852,6 +863,7 @@ reporte_ppt <- function(
 
             exportar            = "rplot"
           ),
+          extra_centro,              # <- aquí inyectamos centro_cowplot SOLO si existe
           estilos_apiladas_clean
         )
 
@@ -1108,6 +1120,18 @@ reporte_ppt <- function(
             }
           }
 
+          # --------------------------------------------
+          # Centro de leyenda por list_name (cowplot)
+          # --------------------------------------------
+          centro_cowplot_ln <- NULL
+
+          if (exists("centro_leyenda_por_listname", inherits = TRUE) &&
+              !is.null(list_name_v) && !is.na(list_name_v) && nzchar(list_name_v) &&
+              list_name_v %in% names(centro_leyenda_por_listname)) {
+
+            centro_cowplot_ln <- centro_leyenda_por_listname[[list_name_v]]
+          }
+
           ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
           ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
 
@@ -1142,43 +1166,51 @@ reporte_ppt <- function(
             args_extra$colores_grupos <- colores_grupos
           }
 
+          args_centro <- list()
+          if (!is.null(centro_cowplot_ln)) {
+            args_centro$centro_cowplot <- centro_cowplot_ln
+          }
+
           args_apiladas <- c(
-            list(
-              data                = tab_apil$data,
-              var_categoria       = "categoria",
-              var_n               = "n_base",
-              cols_porcentaje     = tab_apil$cols_porcentaje,
-              etiquetas_grupos    = tab_apil$etiquetas_grupos,
-              escala_valor        = "proporcion_1",
-              mostrar_valores     = TRUE,
-              titulo              = titulo_plot,
-              subtitulo           = NULL,
-              nota_pie            = nota_pie_plot,
+            c(
+              list(
+                data                = tab_apil$data,
+                var_categoria       = "categoria",
+                var_n               = "n_base",
+                cols_porcentaje     = tab_apil$cols_porcentaje,
+                etiquetas_grupos    = tab_apil$etiquetas_grupos,
+                escala_valor        = "proporcion_1",
+                mostrar_valores     = TRUE,
+                titulo              = titulo_plot,
+                subtitulo           = NULL,
+                nota_pie            = nota_pie_plot,
 
-              mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
-              barra_extra_preset  = preset_extra,
+                mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
+                barra_extra_preset  = preset_extra,
 
-              prefijo_barra_extra = if (!is.null(preset_extra)) {
-                ""
-              } else if (barra_extra == "total_n") {
-                "N = "
-              } else {
-                ""
-              },
+                prefijo_barra_extra = if (!is.null(preset_extra)) {
+                  ""
+                } else if (barra_extra == "total_n") {
+                  "N = "
+                } else {
+                  ""
+                },
 
-              titulo_barra_extra = NULL,
+                titulo_barra_extra = NULL,
 
-              color_barra_extra = if (!is.null(preset_extra)) {
-                NULL
-              } else {
-                "#092147"
-              },
+                color_barra_extra = if (!is.null(preset_extra)) {
+                  NULL
+                } else {
+                  "#092147"
+                },
 
-              exportar           = "rplot",
-              invertir_segmentos = invertir_segmentos_var,
-              invertir_leyenda   = invertir_leyenda_var
+                exportar           = "rplot",
+                invertir_segmentos = invertir_segmentos_var,
+                invertir_leyenda   = invertir_leyenda_var
+              ),
+              args_centro,   # <-- aquí se mezcla centro_cowplot si existe
+              args_extra     # <-- y la paleta, si la hay
             ),
-            args_extra,
             estilos_apiladas_clean
           )
 

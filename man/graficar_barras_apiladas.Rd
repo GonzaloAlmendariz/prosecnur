@@ -27,6 +27,7 @@ graficar_barras_apiladas(
   nota_pie_derecha = NULL,
   pos_titulo = c("centro", "izquierda", "derecha"),
   pos_nota_pie = c("derecha", "izquierda", "centro"),
+  centro_cowplot = NA_real_,
   color_titulo = "#000000",
   size_titulo = 11,
   color_subtitulo = "#000000",
@@ -135,6 +136,14 @@ Ambos se muestran en una única línea de caption.}
 
 \item{pos_nota_pie}{Alineación horizontal de la nota al pie (caption). Puede ser
 \code{"derecha"}, \code{"izquierda"} o \code{"centro"}.}
+
+\item{centro_cowplot}{Posición horizontal de la leyenda cuando se use un
+lienzo compuesto con \pkg{cowplot}. Debe ser un número entre 0 y 1 que
+se interpreta como la coordenada \code{x} de la leyenda en
+\code{draw_grob()} (\code{0} = totalmente a la izquierda,
+\code{1} = totalmente a la derecha). Si se deja como \code{NA},
+la función puede calcular una posición automática en función del número
+de categorías de la leyenda.}
 
 \item{color_titulo}{Color del título.}
 
