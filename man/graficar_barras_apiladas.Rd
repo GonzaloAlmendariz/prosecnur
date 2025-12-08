@@ -48,6 +48,7 @@ graficar_barras_apiladas(
   espacio_izquierda_rel = 0,
   ancho_max_eje_y = NULL,
   mostrar_leyenda = TRUE,
+  usar_leyenda_cowplot = FALSE,
   invertir_leyenda = FALSE,
   invertir_barras = FALSE,
   invertir_segmentos = FALSE,
@@ -186,6 +187,11 @@ etiquetas del eje Y. Si no es \code{NULL}, se insertan saltos de línea
 automáticos entre palabras usando \pkg{stringr}.}
 
 \item{mostrar_leyenda}{Lógico; si \code{FALSE}, oculta la leyenda.}
+
+\item{usar_leyenda_cowplot}{Lógico; si \code{TRUE}, recompone el gráfico
+usando \pkg{cowplot} para colocar la leyenda en un bloque inferior que
+ocupa ~5\\% del alto total, manteniendo las barras en ~95\\%. Requiere
+tener instalado el paquete \pkg{cowplot}.}
 
 \item{invertir_leyenda}{Lógico; si \code{TRUE}, invierte el orden de los
 ítems de la leyenda sin alterar el orden de las barras ni de los segmentos.}

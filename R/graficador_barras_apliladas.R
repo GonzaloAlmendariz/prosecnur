@@ -69,7 +69,13 @@
 #'   \code{"centro"}, \code{"izquierda"} o \code{"derecha"}.
 #' @param pos_nota_pie Alineación horizontal de la nota al pie (caption). Puede ser
 #'   \code{"derecha"}, \code{"izquierda"} o \code{"centro"}.
-#'
+#' @param centro_cowplot Posición horizontal de la leyenda cuando se use un
+#'   lienzo compuesto con \pkg{cowplot}. Debe ser un número entre 0 y 1 que
+#'   se interpreta como la coordenada \code{x} de la leyenda en
+#'   \code{draw_grob()} (\code{0} = totalmente a la izquierda,
+#'   \code{1} = totalmente a la derecha). Si se deja como \code{NA},
+#'   la función puede calcular una posición automática en función del número
+#'   de categorías de la leyenda.
 #' @param color_titulo Color del título.
 #' @param size_titulo Tamaño del título.
 #' @param color_subtitulo Color del subtítulo.
@@ -103,6 +109,10 @@
 #'   automáticos entre palabras usando \pkg{stringr}.
 #'
 #' @param mostrar_leyenda Lógico; si \code{FALSE}, oculta la leyenda.
+#' @param usar_leyenda_cowplot Lógico; si \code{TRUE}, recompone el gráfico
+#'   usando \pkg{cowplot} para colocar la leyenda en un bloque inferior que
+#'   ocupa ~5\% del alto total, manteniendo las barras en ~95\%. Requiere
+#'   tener instalado el paquete \pkg{cowplot}.
 #' @param invertir_leyenda Lógico; si \code{TRUE}, invierte el orden de los
 #'   ítems de la leyenda sin alterar el orden de las barras ni de los segmentos.
 #' @param invertir_barras Lógico; si \code{TRUE}, invierte el orden en que las
@@ -160,6 +170,7 @@ graficar_barras_apiladas <- function(
     nota_pie_derecha      = NULL,
     pos_titulo            = c("centro", "izquierda", "derecha"),
     pos_nota_pie          = c("derecha", "izquierda", "centro"),
+    centro_cowplot        = NA_real_,
     # Estilo de texto y layout
     color_titulo          = "#000000",
     size_titulo           = 11,
@@ -182,6 +193,7 @@ graficar_barras_apiladas <- function(
     espacio_izquierda_rel = 0,
     ancho_max_eje_y       = NULL,
     mostrar_leyenda       = TRUE,
+    usar_leyenda_cowplot  = FALSE,
     invertir_leyenda      = FALSE,
     invertir_barras       = FALSE,
     invertir_segmentos    = FALSE,
@@ -598,15 +610,15 @@ graficar_barras_apiladas <- function(
         vjust_header <- barra_extra_vjust
       } else {
 
-      # vjust dinámico:
-      # - 1–2 barras  → más arriba (más negativo)
-      # - 3 barras    → intermedio
-      # - 4+ barras   → como ahora (-6)
-      vjust_header <- dplyr::case_when(
-        n_categorias_header <= 2 ~ -8,
-        n_categorias_header == 3 ~ -7,
-        TRUE                     ~ -6
-      )
+        # vjust dinámico:
+        # - 1–2 barras  → más arriba (más negativo)
+        # - 3 barras    → intermedio
+        # - 4+ barras   → como ahora (-6)
+        vjust_header <- dplyr::case_when(
+          n_categorias_header <= 2 ~ -8,
+          n_categorias_header == 3 ~ -7,
+          TRUE                     ~ -6
+        )
       }
 
       # Altura extra aproximada necesaria para que el título no se corte
@@ -644,13 +656,10 @@ graficar_barras_apiladas <- function(
   # 6. Colores, caption, leyenda y wrap automático de etiquetas largas
   # ---------------------------------------------------------------------------
 
-  # ---------------------------------------------------------------------------
   # LEYENDA — Wrap automático de etiquetas + tamaño fijo del rectángulo
-  # ---------------------------------------------------------------------------
-
-  # Función de wrap (~40 caracteres por línea) solo si stringr está disponible
   wrap_fun <- NULL
   if (requireNamespace("stringr", quietly = TRUE)) {
+    # si quieres, aquí puedes cambiar a width = 60
     wrap_fun <- function(x) stringr::str_wrap(x, width = 40)
   }
 
@@ -675,8 +684,8 @@ graficar_barras_apiladas <- function(
   # Mantener el mismo tamaño de “swatch” aunque el texto tenga 1 o 2 líneas
   p <- p +
     ggplot2::theme(
-      legend.key.width  = grid::unit(0.4, "cm"),
-      legend.key.height = grid::unit(0.4, "cm")
+      legend.key.width  = grid::unit(0.3, "cm"),
+      legend.key.height = grid::unit(0.3, "cm")
     )
 
   caption_text <- NULL
@@ -691,7 +700,7 @@ graficar_barras_apiladas <- function(
 
   # Número de ítems en la leyenda y filas necesarias (máx. 5 por fila)
   n_items_leyenda <- length(levels(df_long$.grupo))
-  n_por_fila      <- 5L
+  n_por_fila      <- 6L
   n_filas_leyenda <- max(1L, ceiling(n_items_leyenda / n_por_fila))
 
   # Leyenda centrada con filas dinámicas
@@ -761,6 +770,80 @@ graficar_barras_apiladas <- function(
     )
 
   # ---------------------------------------------------------------------------
+  # 6.bis. Recomposición con cowplot (95% barras / 5% leyenda)
+  # ---------------------------------------------------------------------------
+  if (mostrar_leyenda && usar_leyenda_cowplot) {
+
+    if (!requireNamespace("cowplot", quietly = TRUE)) {
+      stop(
+        "Para usar `usar_leyenda_cowplot = TRUE` se requiere el paquete 'cowplot'.",
+        call. = FALSE
+      )
+    }
+
+    # Plot base sin leyenda y con margen inferior casi nulo
+    p_base_sin_leyenda <- p +
+      ggplot2::theme(
+        legend.position = "none",
+        plot.margin     = ggplot2::margin(t = 10, r = 10, b = 5, l = 10)
+      )
+
+    # Leyenda extraída tal cual se ve en `p`
+    leg <- cowplot::get_legend(
+      p +
+        ggplot2::theme(
+          legend.position      = "bottom",
+          legend.direction     = "horizontal",
+          legend.box           = "horizontal",
+          legend.justification = "left",
+          legend.box.just      = "left",
+          legend.margin        = ggplot2::margin(),
+          legend.box.margin    = ggplot2::margin()
+        )
+    )
+
+    # n_items_leyenda ya lo tienes calculado
+    n_items_leyenda <- length(levels(df_long$.grupo))
+
+    # Ancho efectivo por fila (máx 6 por fila)
+    ancho_fila <- if (n_items_leyenda <= 6) {
+      n_items_leyenda
+    } else {
+      ceiling(n_items_leyenda / 2)
+    }
+
+    # POSICIÓN HORIZONTAL DINÁMICA DE LA LEYENDA
+    pos_leyenda_x <- dplyr::case_when(
+      ancho_fila <= 2 ~ 0.45,  # 1–2 ítems: bastante centrado
+      ancho_fila == 3 ~ 0.38,  # 3 ítems
+      ancho_fila == 4 ~ 0.32,  # 4 ítems
+      ancho_fila == 5 ~ 0.28,  # 5 ítems
+      TRUE           ~ 0.18    # 6 ítems (fila llena)
+    )
+    # OVERRIDE MANUAL (centro_cowplot)
+    if (!is.na(centro_cowplot) && is.finite(centro_cowplot)) {
+      pos_leyenda_x <- centro_cowplot
+    }
+
+    # Composición 95% / 5%
+    p <- cowplot::ggdraw() +
+      cowplot::draw_plot(
+        p_base_sin_leyenda,
+        x      = 0,
+        y      = 0.05,  # empieza justo encima de la franja de leyenda
+        width  = 1,
+        height = 0.95   # 95% del alto para barras + título + caption
+      ) +
+      cowplot::draw_grob(
+        leg,
+        x      = pos_leyenda_x,  # mueve la leyenda hacia centro/izquierda
+        y      = 0.035,  # pegada a la parte baja, pero tocando el plot
+        width  = 1,
+        height = 0.05   # 5% del alto total
+      )
+  }
+
+  # ---------------------------------------------------------------------------
   # 7. Exportación (altura total = panel + leyenda + caption)
   # ---------------------------------------------------------------------------
   n_categorias <- length(unique(df_long[[var_categoria]]))
@@ -769,18 +852,11 @@ graficar_barras_apiladas <- function(
   alto_max_total <- 9.0     # tope máximo global
   alto_caption   <- 0.25    # bloque adicional si hay caption
 
-  # -------------------------------------------
   # Cálculo de alto sugerido para Word/PNG/PPT
-  # -------------------------------------------
-
-  # Alto "por barra" efectivo (si no se pasa, usamos un default razonable)
   alto_por_cat_eff <- alto_por_categoria %||% 0.35
 
-  # Panel de barras (solo zona de categorías)
-  # En apiladas típicamente hay 1 categoría, pero lo dejamos general
   alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
 
-  # Aprox. espacio para leyenda (si la hay)
   n_items_leyenda <- length(levels(df_long$.grupo))
   alto_leyenda <- if (mostrar_leyenda && n_items_leyenda > 0) {
     if (n_items_leyenda <= 5)       0.5
@@ -790,21 +866,15 @@ graficar_barras_apiladas <- function(
     0
   }
 
-  # Aprox. espacio para caption interno (nota_pie / nota_pie_derecha)
   tiene_caption <- !is.null(caption_text) && nzchar(caption_text)
   alto_cap      <- if (tiene_caption) alto_caption else 0
 
-  # Altura total sugerida (antes de topes)
   alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap + alto_extra_header
-
-  # Tope máximo absoluto
   alto_total_sugerido <- min(alto_max_total, alto_total_sugerido)
 
-  # Mínimo "suave" dependiente del grosor de barra + leyenda + caption
   alto_min_suave <- (alto_por_cat_eff * 1.2) + alto_leyenda + alto_cap + alto_extra_header
   alto_total_sugerido <- max(alto_min_suave, alto_total_sugerido)
 
-  # Si solo queremos el ggplot, devolvemos p pero con el alto sugerido como atributo
   if (exportar == "rplot") {
     attr(p, "alto_word_sugerido") <- alto_total_sugerido
     return(p)
@@ -814,7 +884,6 @@ graficar_barras_apiladas <- function(
     stop("Debe especificar `path_salida` cuando `exportar` no es 'rplot'.", call. = FALSE)
   }
 
-  # Altura efectiva común para PNG / PPT / WORD
   height_plot <- if (!missing(alto) && !is.null(alto)) {
     alto
   } else {
