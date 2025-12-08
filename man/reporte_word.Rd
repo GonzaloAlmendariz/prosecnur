@@ -16,6 +16,7 @@ reporte_word(
   incluir_titulo_var = TRUE,
   mensajes_progreso = TRUE,
   template_docx = NULL,
+  bloques_multi_apiladas = NULL,
   vars_dico = NULL,
   vars_barras_apiladas = NULL,
   vars_barras_agrupadas = NULL,
@@ -50,8 +51,9 @@ se intentará inferir desde una columna \code{section} o \code{seccion} del
 
 \item{path_word}{Ruta del archivo DOCX a generar cuando \code{solo_lista = FALSE}.}
 
-\item{fuente}{Texto de fuente que se mostrará en gris debajo de cada gráfico
-en el documento Word (por ejemplo, \code{"Fuente: Pulso PUCP 2025"}).}
+\item{fuente}{Texto de fuente que se mostrará debajo de cada gráfico
+en el documento Word (por ejemplo, \code{" estudiantes. Fuente: Pulso PUCP 2025."},
+que se concatenará luego de \code{"N = <N> "}).}
 
 \item{sm_vars_force}{Vector opcional de nombres de variables que deben tratarse
 como \code{select_multiple} aunque el instrumento no las marque como tales.}
@@ -71,6 +73,15 @@ layout de PowerPoint). Los gráficos en sí se generan sin título.}
 
 \item{mensajes_progreso}{Lógico; si \code{TRUE}, muestra mensajes por sección
 y por variable indicando qué tipo de gráfico se está usando y por qué.}
+
+\item{template_docx}{Ruta a una plantilla DOCX. Si es \code{NULL}, se intenta
+usar una plantilla interna \code{"plantillas/plantilla_pulso.docx"} y, si
+no existe, se usa la plantilla por defecto de Word.}
+
+\item{bloques_multi_apiladas}{Lista nombrada de bloques especiales para
+multi-apiladas. Cada elemento debe ser una lista con al menos
+\code{vars = c("p101","p102",...)} y opcionalmente:
+\code{titulo}, \code{wrap_y}, \code{grosor_barras}, \code{invertir_barras}.}
 
 \item{vars_dico}{Vector de nombres de variables que se deben graficar como
 dicotómicas mediante \code{graficar_dico()}, siempre que exista una pareja
@@ -139,7 +150,7 @@ o \code{invertir_segmentos}, que llegarán solo al graficador.}
 \value{
 Una lista con:
 \describe{
-\item{plots}{Lista de objetos \code{ggplot} generados (uno por variable).}
+\item{plots}{Lista de objetos \code{ggplot} generados (uno por variable o bloque).}
 \item{log_decisiones}{Tibble con información sobre cada variable procesada.}
 }
 }
@@ -148,9 +159,9 @@ Una lista con:
 \code{reporte_frecuencias()}), el instrumento y una definición de secciones, y
 genera:
 \itemize{
-\item Una lista de gráficos \code{ggplot} (uno por variable válida).
+\item Una lista de gráficos \code{ggplot} (uno por variable válida o bloque).
 \item Opcionalmente, un archivo Word donde cada gráfico ocupa un bloque:
-título externo + gráfico centrado + pie gris de fuente.
+título externo + gráfico centrado + pie azul con fuente.
 }
 }
 \details{
@@ -160,10 +171,12 @@ El tipo de gráfico para cada variable se decide igual que en \code{reporte_ppt(
 \itemize{
 \item \code{vars_dico}: variables que deben usarse como dicotómicas
 con \code{graficar_dico()}.
-\item \code{vars_barras_apiladas}: variables para \code{graficar_barras_apiladas()}.
-\item \code{vars_barras_agrupadas}: variables para \code{graficar_barras_agrupadas()}.
-\item \code{vars_radar}: reservado para futuros usos (por ahora no se
-construye tabla radar automáticamente).
+\item \code{vars_barras_apiladas}: variables para
+\code{graficar_barras_apiladas()}.
+\item \code{vars_barras_agrupadas}: variables para
+\code{graficar_barras_agrupadas()}.
+\item \code{vars_radar}: reservado para futuros usos (no se construye
+tabla radar automáticamente).
 }
 \item Decisión por \code{list_name} de la pregunta en el instrumento:
 \itemize{
@@ -175,7 +188,8 @@ esté aquí tienden a graficarse como barras apiladas.
 \item Defaults por tipo de pregunta:
 \itemize{
 \item \code{default_so}: tipo de gráfico por defecto para \code{select_one}.
-\item \code{default_sm}: tipo de gráfico por defecto para \code{select_multiple}.
+\item \code{default_sm}: tipo de gráfico por defecto para
+\code{select_multiple}.
 }
 }
 
@@ -187,13 +201,13 @@ barras agrupadas por defecto.
 En el documento Word:
 \itemize{
 \item El título del gráfico se escribe \emph{fuera} del gráfico, como
-\code{"Gráfico X: "} (en negrita) seguido del label de la variable
-(en cursiva), todo en color azul Pulso.
+\code{"Gráfico Nº X: "} (en negrita y cursiva) seguido del label de la
+variable, todo en color azul Pulso.
 \item El gráfico se inserta centrado, sin título interno.
-\item Debajo del gráfico se escribe un pie de fuente en gris (argumento
-\code{fuente}).
-\item Dentro del gráfico, en el caption, se escribe \code{"N = ..."} a la
-derecha, usando los argumentos \code{nota_pie} / \code{nota_pie_derecha}
+\item Debajo del gráfico se escribe un pie centrado en azul con el texto
+\code{"N = ..."} seguido de \code{fuente} cuando se indique.
+\item Dentro del gráfico, en el caption derecho, se escribe el \code{N}
+usando los argumentos \code{nota_pie_derecha} y \code{pos_nota_pie}
 de los graficadores.
 }
 }

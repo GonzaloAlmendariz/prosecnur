@@ -11,9 +11,9 @@
 #' `reporte_frecuencias()`), el instrumento y una definición de secciones, y
 #' genera:
 #' \itemize{
-#'   \item Una lista de gráficos \code{ggplot} (uno por variable válida).
+#'   \item Una lista de gráficos \code{ggplot} (uno por variable válida o bloque).
 #'   \item Opcionalmente, un archivo Word donde cada gráfico ocupa un bloque:
-#'         título externo + gráfico centrado + pie gris de fuente.
+#'         título externo + gráfico centrado + pie azul con fuente.
 #' }
 #'
 #' El tipo de gráfico para cada variable se decide igual que en `reporte_ppt()`:
@@ -22,10 +22,12 @@
 #'     \itemize{
 #'       \item \code{vars_dico}: variables que deben usarse como dicotómicas
 #'             con \code{graficar_dico()}.
-#'       \item \code{vars_barras_apiladas}: variables para \code{graficar_barras_apiladas()}.
-#'       \item \code{vars_barras_agrupadas}: variables para \code{graficar_barras_agrupadas()}.
-#'       \item \code{vars_radar}: reservado para futuros usos (por ahora no se
-#'             construye tabla radar automáticamente).
+#'       \item \code{vars_barras_apiladas}: variables para
+#'             \code{graficar_barras_apiladas()}.
+#'       \item \code{vars_barras_agrupadas}: variables para
+#'             \code{graficar_barras_agrupadas()}.
+#'       \item \code{vars_radar}: reservado para futuros usos (no se construye
+#'             tabla radar automáticamente).
 #'     }
 #'   \item Decisión por \code{list_name} de la pregunta en el instrumento:
 #'     \itemize{
@@ -37,7 +39,8 @@
 #'   \item Defaults por tipo de pregunta:
 #'     \itemize{
 #'       \item \code{default_so}: tipo de gráfico por defecto para \code{select_one}.
-#'       \item \code{default_sm}: tipo de gráfico por defecto para \code{select_multiple}.
+#'       \item \code{default_sm}: tipo de gráfico por defecto para
+#'             \code{select_multiple}.
 #'     }
 #' }
 #'
@@ -49,24 +52,32 @@
 #' En el documento Word:
 #' \itemize{
 #'   \item El título del gráfico se escribe \emph{fuera} del gráfico, como
-#'         \code{"Gráfico X: "} (en negrita) seguido del label de la variable
-#'         (en cursiva), todo en color azul Pulso.
+#'         \code{"Gráfico Nº X: "} (en negrita y cursiva) seguido del label de la
+#'         variable, todo en color azul Pulso.
 #'   \item El gráfico se inserta centrado, sin título interno.
-#'   \item Debajo del gráfico se escribe un pie de fuente en gris (argumento
-#'         \code{fuente}).
-#'   \item Dentro del gráfico, en el caption, se escribe \code{"N = ..."} a la
-#'         derecha, usando los argumentos \code{nota_pie} / \code{nota_pie_derecha}
+#'   \item Debajo del gráfico se escribe un pie centrado en azul con el texto
+#'         \code{"N = ..."} seguido de \code{fuente} cuando se indique.
+#'   \item Dentro del gráfico, en el caption derecho, se escribe el \code{N}
+#'         usando los argumentos \code{nota_pie_derecha} y \code{pos_nota_pie}
 #'         de los graficadores.
 #' }
 #'
 #' @inheritParams reporte_ppt
 #' @param path_word Ruta del archivo DOCX a generar cuando \code{solo_lista = FALSE}.
-#' @param fuente Texto de fuente que se mostrará en gris debajo de cada gráfico
-#'   en el documento Word (por ejemplo, `"Fuente: Pulso PUCP 2025"`).
+#' @param fuente Texto de fuente que se mostrará debajo de cada gráfico
+#'   en el documento Word (por ejemplo, `" estudiantes. Fuente: Pulso PUCP 2025."`,
+#'   que se concatenará luego de `"N = <N> "`).
+#' @param template_docx Ruta a una plantilla DOCX. Si es \code{NULL}, se intenta
+#'   usar una plantilla interna \code{"plantillas/plantilla_pulso.docx"} y, si
+#'   no existe, se usa la plantilla por defecto de Word.
+#' @param bloques_multi_apiladas Lista nombrada de bloques especiales para
+#'   multi-apiladas. Cada elemento debe ser una lista con al menos
+#'   \code{vars = c("p101","p102",...)} y opcionalmente:
+#'   \code{titulo}, \code{wrap_y}, \code{grosor_barras}, \code{invertir_barras}.
 #'
 #' @return Una lista con:
 #' \describe{
-#'   \item{plots}{Lista de objetos \code{ggplot} generados (uno por variable).}
+#'   \item{plots}{Lista de objetos \code{ggplot} generados (uno por variable o bloque).}
 #'   \item{log_decisiones}{Tibble con información sobre cada variable procesada.}
 #' }
 #'
@@ -82,7 +93,10 @@ reporte_word <- function(
     solo_lista       = FALSE,
     incluir_titulo_var = TRUE,
     mensajes_progreso  = TRUE,
-    template_docx = NULL,
+    template_docx      = NULL,
+
+    # Bloques de varias vars apiladas en una misma barra
+    bloques_multi_apiladas = NULL,
 
     # Sobrescritura por variable
     vars_dico             = NULL,
@@ -206,7 +220,16 @@ reporte_word <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 3. Helpers internos (mismos que reporte_ppt, con pequeño ajuste en N)
+  # (NUEVO) Precomputar variables incluidas en bloques multi-apilados
+  # ---------------------------------------------------------------------------
+  if (!is.null(bloques_multi_apiladas) && length(bloques_multi_apiladas) > 0) {
+    vars_multi_all <- unique(unlist(lapply(bloques_multi_apiladas, `[[`, "vars")))
+  } else {
+    vars_multi_all <- character(0)
+  }
+
+  # ---------------------------------------------------------------------------
+  # 3. Helpers internos
   # ---------------------------------------------------------------------------
 
   .titulo_var_safe <- function(var) {
@@ -237,7 +260,7 @@ reporte_word <- function(
   }
 
   # Helper: dado un vector de frecuencias n, devuelve porcentajes ENTEROS
-  # que suman exactamente 100 (pensado para barras apiladas).
+  # que suman exactamente 100 (pensado para barras apiladas / dico).
   .pct_enteros_100 <- function(n) {
     n <- as.numeric(n)
     if (!length(n) || all(is.na(n))) {
@@ -276,10 +299,21 @@ reporte_word <- function(
     floor_pct
   }
 
+  .extraer_N_total <- function(tab_freq) {
+    if ("N" %in% names(tab_freq)) {
+      N_vals <- suppressWarnings(as.numeric(unique(tab_freq$N)))
+      N_vals <- N_vals[is.finite(N_vals)]
+      if (length(N_vals)) {
+        return(max(N_vals))
+      }
+    }
+    sum(tab_freq$n, na.rm = TRUE)
+  }
+
   .build_tab_barras_agrupadas <- function(tab_freq, var_label) {
     if (!nrow(tab_freq)) return(NULL)
 
-    n_total <- sum(tab_freq$n, na.rm = TRUE)
+    n_total <- .extraer_N_total(tab_freq)
 
     pct_raw <- tab_freq$pct
     if (all(is.na(pct_raw))) return(NULL)
@@ -292,7 +326,7 @@ reporte_word <- function(
       pct_0_100 <- pct_raw
     }
 
-    # Convertir a enteros (no imponemos suma 100, por SM puede ser > 100)
+    # Convertir a enteros (no imponemos suma 100; en SM puede ser > 100)
     pct_int   <- round(pct_0_100)
     pct_prop  <- pct_int / 100
 
@@ -306,13 +340,13 @@ reporte_word <- function(
   .build_tab_barras_apiladas <- function(tab_freq, var_label) {
     if (!nrow(tab_freq)) return(NULL)
 
-    n_total <- sum(tab_freq$n, na.rm = TRUE)
+    n_total <- .extraer_N_total(tab_freq)
     if (!is.finite(n_total) || n_total <= 0) return(NULL)
 
     n_cat <- nrow(tab_freq)
 
     # 1) Porcentajes enteros que suman 100 a partir de los conteos n
-    pct_int  <- .pct_enteros_100(tab_freq$n)  # p.ej. 23, 17, 60
+    pct_int  <- .pct_enteros_100(tab_freq$n)
     # 2) Proporciones 0–1 para graficar con escala_valor = "proporcion_1"
     pct_prop <- pct_int / 100
 
@@ -327,6 +361,138 @@ reporte_word <- function(
     }
 
     etiquetas_grupos <- stats::setNames(as.character(tab_freq$Opciones), cols_pct)
+
+    list(
+      data             = df_wide,
+      cols_porcentaje  = cols_pct,
+      etiquetas_grupos = etiquetas_grupos
+    )
+  }
+
+  .build_tab_barras_apiladas_multi_vars <- function(
+    vars,
+    data,
+    survey,
+    choices = NULL,
+    orders_list,
+    sm_vars_force,
+    mostrar_todo,
+    wrap_y = 50
+  ) {
+
+    listas   <- list()
+    all_opts <- character(0)
+
+    for (v in vars) {
+
+      tab <- freq_table_spss(
+        data,
+        v,
+        survey        = survey,
+        sm_vars_force = sm_vars_force,
+        orders_list   = orders_list,
+        mostrar_todo  = mostrar_todo
+      )
+
+      tab <- tab |>
+        dplyr::filter(Opciones != "Total") |>
+        dplyr::filter(!is.na(n) & n > 0)
+
+      if (!nrow(tab)) next
+
+      # wrap del eje Y
+      label_v <- .titulo_var_safe(v)
+      if (requireNamespace("stringr", quietly = TRUE)) {
+        label_v <- stringr::str_wrap(label_v, width = wrap_y)
+      }
+
+      n_total <- .extraer_N_total(tab)
+      pct_int <- .pct_enteros_100(tab$n)
+
+      listas[[v]] <- list(
+        label     = label_v,
+        n_total   = n_total,
+        opciones  = tab$Opciones,
+        pct_int   = pct_int
+      )
+
+      # union() conserva el orden de primera aparición
+      all_opts <- union(all_opts, tab$Opciones)
+    }
+
+    if (!length(listas)) return(NULL)
+
+    # ------------------------------------------------------------------
+    # Ordenar las opciones según el orden formal de la lista en CHOICES
+    # ------------------------------------------------------------------
+    list_name_block <- NA_character_
+
+    if ("list_name" %in% names(survey)) {
+      tmp <- survey$list_name[survey$name %in% vars]
+      tmp <- tmp[!is.na(tmp) & tmp != ""]
+      if (length(tmp)) list_name_block <- tmp[1]
+    } else if ("list_norm" %in% names(survey)) {
+      tmp <- survey$list_norm[survey$name %in% vars]
+      tmp <- tmp[!is.na(tmp) & tmp != ""]
+      if (length(tmp)) list_name_block <- tmp[1]
+    }
+
+    if (!is.na(list_name_block)) {
+
+      niveles_formales <- character(0)
+
+      ## 1) PRIORIDAD: orden de la PALETA por list_name
+      if (!is.null(colores_apiladas_por_listname[[list_name_block]])) {
+        pal <- colores_apiladas_por_listname[[list_name_block]]
+
+        # por si el objeto es lista con $colores
+        if (is.list(pal) && !is.null(pal$colores)) {
+          pal <- pal$colores
+        }
+
+        niveles_formales <- names(pal)
+      }
+
+      ## 2) Si no hay paleta o no tiene nombres, usar CHOICES como respaldo
+      if (!length(niveles_formales) &&
+          !is.null(choices) &&
+          "list_name" %in% names(choices) &&
+          "label" %in% names(choices)) {
+
+        niveles_formales <- as.character(
+          choices$label[choices$list_name == list_name_block]
+        )
+      }
+
+      niveles_formales <- niveles_formales[
+        !is.na(niveles_formales) & niveles_formales != ""
+      ]
+
+      if (length(niveles_formales)) {
+        all_opts <- intersect(niveles_formales, all_opts)
+      }
+    }
+
+    df_wide <- tibble::tibble(
+      pregunta = vapply(listas, function(x) x$label, character(1)),
+      n_base   = vapply(listas, function(x) x$n_total, numeric(1))
+    )
+
+    cols_pct <- paste0("pct_", seq_along(all_opts))
+
+    for (i in seq_along(all_opts)) {
+      opt_i <- all_opts[i]
+      df_wide[[cols_pct[i]]] <- vapply(
+        listas,
+        function(x) {
+          idx <- which(x$opciones == opt_i)
+          if (length(idx)) x$pct_int[idx] / 100 else 0
+        },
+        numeric(1)
+      )
+    }
+
+    etiquetas_grupos <- stats::setNames(all_opts, cols_pct)
 
     list(
       data             = df_wide,
@@ -363,19 +529,19 @@ reporte_word <- function(
     pct_int <- .pct_enteros_100(n_vec)
 
     # Valor que usará el graficador (solo el % "sí")
-    pct_si  <- pct_int[1]   # ya entero y corregido
+    pct_si  <- pct_int[1]   # entero 0–100
 
     indicador_val <- if (incluir_titulo_var) "" else (var_label %||% var)
 
     tibble::tibble(
       indicador = indicador_val,
-      pct_si    = pct_si,        # entero 0–100
+      pct_si    = pct_si,
       n_total   = sum(n_vec)
     )
   }
 
   # ---------------------------------------------------------------------------
-  # 4. Recorrido por secciones y variables (igual que en PPT)
+  # 4. Recorrido por secciones y variables
   # ---------------------------------------------------------------------------
   plots_list       <- list()
   titulos_list     <- list()
@@ -394,6 +560,248 @@ reporte_word <- function(
 
     for (v in vars_sec) {
 
+      # -----------------------------------------------------------------------
+      # (NUEVO) Multi-apiladas: si la variable pertenece a un bloque especial
+      # -----------------------------------------------------------------------
+      if (v %in% vars_multi_all) {
+
+        bloque_id <- names(
+          Filter(function(x) v %in% x$vars, bloques_multi_apiladas)
+        )[1]
+
+        bloque_info   <- bloques_multi_apiladas[[bloque_id]]
+        vars_bloque   <- bloque_info$vars
+        titulo_bloque <- bloque_info$titulo %||% .titulo_var_safe(v)
+        wrap_y        <- bloque_info$wrap_y %||% 50
+
+        grosor_barras_bloque <- bloque_info$grosor_barras %||%
+          estilos_barras_apiladas$grosor_barras %||% 0.7
+
+        invertir_barras_bloque <- bloque_info$invertir_barras %||%
+          estilos_barras_apiladas$invertir_barras %||% FALSE
+
+        # Ejecutar SOLO en la primera variable del bloque
+        if (v != vars_bloque[1]) {
+          next
+        }
+
+        if (mensajes_progreso) {
+          message(
+            "   - [multi_apiladas] ",
+            paste(vars_bloque, collapse = ", "),
+            " → barras_apiladas_multi (bloque = ", bloque_id, ")"
+          )
+        }
+
+        # 2. Construir tabla multi-var
+        tab_multi <- .build_tab_barras_apiladas_multi_vars(
+          vars          = vars_bloque,
+          data          = data,
+          survey        = survey,
+          choices       = choices,
+          orders_list   = orders_list,
+          sm_vars_force = sm_vars_force,
+          mostrar_todo  = mostrar_todo,
+          wrap_y        = wrap_y
+        )
+
+        if (is.null(tab_multi)) next
+
+        # 3. Detectar list_name del bloque (usando la primera variable)
+        list_name_bloque <- NA_character_
+        if ("list_name" %in% names(survey)) {
+          tmp <- survey$list_name[survey$name %in% vars_bloque]
+          tmp <- tmp[!is.na(tmp) & tmp != ""]
+          if (length(tmp)) list_name_bloque <- tmp[1]
+        } else if ("list_norm" %in% names(survey)) {
+          tmp <- survey$list_norm[survey$name %in% vars_bloque]
+          tmp <- tmp[!is.na(tmp) & tmp != ""]
+          if (length(tmp)) list_name_bloque <- tmp[1]
+        }
+
+        # 4. Paleta y preset extra (TOP2, etc.) igual que en barras_apiladas simple
+        colores_grupos <- NULL
+        preset_extra   <- NULL
+
+        if (!is.na(list_name_bloque) &&
+            !is.null(colores_apiladas_por_listname[[list_name_bloque]])) {
+
+          obj_col <- colores_apiladas_por_listname[[list_name_bloque]]
+
+          if (is.list(obj_col)) {
+            if (!is.null(obj_col$colores)) {
+              colores_grupos <- obj_col$colores
+            }
+            if (!is.null(obj_col$preset_barra_extra)) {
+              preset_extra <- obj_col$preset_barra_extra
+            }
+          } else {
+            colores_grupos <- obj_col
+          }
+        }
+
+        # 5. Flags de inversión por list_name / variable (misma lógica que apiladas simple)
+        ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
+        ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
+
+        ln_inv_ley <- estilos_barras_apiladas$listnames_invertir_leyenda
+        ln_inv_ley <- if (is.null(ln_inv_ley)) character(0) else ln_inv_ley
+
+        vars_inv_seg <- estilos_barras_apiladas$vars_invertir_segmentos
+        vars_inv_seg <- if (is.null(vars_inv_seg)) character(0) else vars_inv_seg
+
+        vars_inv_ley <- estilos_barras_apiladas$vars_invertir_leyenda
+        vars_inv_ley <- if (is.null(vars_inv_ley)) character(0) else vars_inv_ley
+
+        v_ref <- vars_bloque[1]
+
+        invertir_segmentos_var <- (
+          v_ref %in% vars_inv_seg ||
+            (!is.na(list_name_bloque) && list_name_bloque %in% ln_inv_seg)
+        )
+
+        invertir_leyenda_var <- (
+          v_ref %in% vars_inv_ley ||
+            (!is.na(list_name_bloque) && list_name_bloque %in% ln_inv_ley)
+        )
+
+        # 6. Asegurar ORDEN consistente de segmentos y leyenda
+        niveles_originales <- unname(tab_multi$etiquetas_grupos)
+
+        niveles_plot <- niveles_originales
+        if (invertir_segmentos_var) {
+          niveles_plot <- rev(niveles_plot)
+        }
+
+        niveles_leyenda <- niveles_plot
+        if (invertir_leyenda_var) {
+          niveles_leyenda <- rev(niveles_leyenda)
+        }
+
+        if (!is.null(colores_grupos)) {
+          colores_grupos <- colores_grupos[niveles_leyenda]
+        }
+
+        tab_multi$etiquetas_grupos <- stats::setNames(
+          niveles_leyenda,
+          tab_multi$cols_porcentaje
+        )
+
+        # 7. Limpiar claves "meta" que el graficador no conoce
+        estilos_apiladas_clean <- estilos_barras_apiladas
+        estilos_apiladas_clean$nota_pie         <- NULL
+        estilos_apiladas_clean$nota_pie_derecha <- NULL
+        estilos_apiladas_clean$pos_nota_pie     <- NULL
+        estilos_apiladas_clean$listnames_invertir_segmentos <- NULL
+        estilos_apiladas_clean$listnames_invertir_leyenda   <- NULL
+        estilos_apiladas_clean$vars_invertir_segmentos      <- NULL
+        estilos_apiladas_clean$vars_invertir_leyenda        <- NULL
+        estilos_apiladas_clean$grosor_barras                <- NULL
+        estilos_apiladas_clean$prefijo_barra_extra          <- NULL
+        estilos_apiladas_clean$titulo_barra_extra           <- NULL
+        estilos_apiladas_clean$color_barra_extra            <- NULL
+        estilos_apiladas_clean$invertir_barras              <- NULL
+        estilos_apiladas_clean$barra_extra_vjust <- NULL
+
+        # N del bloque (base de personas, no suma de marcas)
+        n_total_bloque <- max(tab_multi$data$n_base, na.rm = TRUE)
+        N_texto <- if (is.finite(n_total_bloque) && n_total_bloque >= 0) {
+          sprintf("%s", format(n_total_bloque, big.mark = ",", scientific = FALSE))
+        } else {
+          NULL
+        }
+
+        # 8. Construir gráfico multi-apilado
+        # vjust global para barra extra, si existe en estilos
+        barra_extra_vjust_global <- estilos_barras_apiladas$barra_extra_vjust %||% NULL
+
+        args_multi_core <- list(
+          data                = tab_multi$data,
+          var_categoria       = "pregunta",
+          var_n               = "n_base",
+          cols_porcentaje     = tab_multi$cols_porcentaje,
+          etiquetas_grupos    = tab_multi$etiquetas_grupos,
+          escala_valor        = "proporcion_1",
+          colores_grupos      = colores_grupos,
+          mostrar_valores     = TRUE,
+          titulo              = NULL,
+          subtitulo           = NULL,
+          nota_pie            = NULL,
+          nota_pie_derecha    = NULL,
+          pos_nota_pie        = NULL,
+
+          mostrar_barra_extra = if (!is.null(preset_extra)) {
+            TRUE
+          } else {
+            barra_extra == "total_n"
+          },
+
+          barra_extra_preset  = preset_extra %||% "ninguno",
+
+          prefijo_barra_extra = if (!is.null(preset_extra)) {
+            ""
+          } else if (barra_extra == "total_n") {
+            "N = "
+          } else {
+            ""
+          },
+
+          titulo_barra_extra = if (!is.null(preset_extra) || barra_extra != "total_n") {
+            NULL
+          } else {
+            "Total"
+          },
+
+          invertir_segmentos  = invertir_segmentos_var,
+          invertir_leyenda    = invertir_leyenda_var,
+          invertir_barras     = invertir_barras_bloque,
+
+          grosor_barras       = grosor_barras_bloque,
+
+          exportar            = "rplot"
+        )
+
+        # Si hay vjust global, pasarlo al graficador
+        if (!is.null(barra_extra_vjust_global)) {
+          args_multi_core$barra_extra_vjust <- barra_extra_vjust_global
+        }
+
+        args_multi <- c(
+          args_multi_core,
+          estilos_apiladas_clean
+        )
+
+        p <- do.call(graficar_barras_apiladas, args_multi) +
+          ggplot2::theme(
+            axis.text.y = ggplot2::element_text(
+              hjust  = 1,
+              vjust  = 0.5,
+              margin = ggplot2::margin(r = 6)
+            ),
+            plot.margin = ggplot2::margin(l = 20, r = 10, t = 5, b = 5)
+          )
+
+        idx <- length(plots_list) + 1L
+        plots_list[[idx]]       <- p
+        titulos_list[[idx]]     <- titulo_bloque
+        N_texto_list[[idx]]     <- N_texto
+        seccion_por_plot[idx]   <- sec
+
+        log_list[[length(log_list) + 1]] <- tibble::tibble(
+          seccion      = sec,
+          var          = paste(vars_bloque, collapse = ", "),
+          tipo_var     = "multi_apiladas",
+          list_name    = list_name_bloque,
+          override     = paste0("multi_apiladas=", bloque_id),
+          tipo_grafico = "barras_apiladas_multi"
+        )
+
+        next
+      }
+
+      # -----------------------------------------------------------------------
+      # Flujo normal
+      # -----------------------------------------------------------------------
       tipo_v <- tipo_pregunta_spss(v, survey, sm_vars_force)
       if (tipo_v == "so_or_open") tipo_v <- "so"
 
@@ -450,12 +858,8 @@ reporte_word <- function(
         next
       }
 
-      # --- N de la pregunta (para N = ... dentro del gráfico) ---
-      if ("N" %in% names(tab_freq)) {
-        n_var <- unique(tab_freq$N)[1]
-      } else {
-        n_var <- sum(tab_freq$n, na.rm = TRUE)
-      }
+      # --- N de la pregunta (base por persona, no por alternativas) ---
+      n_var <- .extraer_N_total(tab_freq)
 
       N_texto <- NULL
       if (is.finite(n_var) && n_var >= 0) {
@@ -466,10 +870,10 @@ reporte_word <- function(
       titulo_plot  <- NULL   # siempre sin título interno
       titulo_slide <- if (incluir_titulo_var) var_label else v
 
-      # pie interno del gráfico: queremos que sea el N
+      # No queremos N dentro del gráfico, solo fuera en el Word
       nota_pie_plot      <- NULL
-      nota_pie_derecha   <- N_texto
-      pos_nota_pie_plot  <- "derecha"
+      nota_pie_derecha   <- NULL
+      pos_nota_pie_plot  <- NULL
 
       if (mensajes_progreso) {
         message("   - ", v, " → ", tipo_grafico,
@@ -492,32 +896,83 @@ reporte_word <- function(
           colores_series <- estilos_barras_agrupadas$colores_series %||%
             c("Porcentaje" = "#1B679D")
 
+          # ------------------------------------------------------------
+          # Orientación segura (var → list_name → estilo global → default)
+          # ------------------------------------------------------------
+          ori_var <- NULL
+          if (exists("orientacion_por_var", inherits = TRUE)) {
+            ori_var <- orientacion_por_var[[v]]
+          }
+
+          ori_list <- NULL
+          if (exists("orientacion_por_listname", inherits = TRUE) &&
+              !is.null(list_name_v) && !is.na(list_name_v) && nzchar(list_name_v) &&
+              list_name_v %in% names(orientacion_por_listname)) {
+            ori_list <- orientacion_por_listname[[list_name_v]]
+          }
+
+          ori_def <- "horizontal"
+          if (exists("orientacion_default", inherits = TRUE) &&
+              is.character(orientacion_default) && length(orientacion_default) >= 1L) {
+            ori_def <- orientacion_default[1]
+          }
+
+          ori_final <- ori_var %||%
+            ori_list %||%
+            estilos_barras_agrupadas$orientacion %||%
+            ori_def
+
+          # ancho máximo del eje Y según list_name
+          ancho_eje_v <- estilos_barras_agrupadas$ancho_max_eje_y %||% NULL
+
+          if (exists("ancho_eje_por_listname", inherits = TRUE) &&
+              !is.null(list_name_v) && !is.na(list_name_v) && nzchar(list_name_v) &&
+              list_name_v %in% names(ancho_eje_por_listname)) {
+
+            ancho_eje_v <- ancho_eje_por_listname[[list_name_v]]
+          }
+
+          estilos_agrupadas_clean <- estilos_barras_agrupadas
+          estilos_agrupadas_clean$ancho_max_eje_y <- NULL
+
           args_barras <- c(
-            list(
-              data               = tab_agr,
-              var_categoria      = "categoria",
-              var_n              = "n_base",
-              cols_porcentaje    = cols_porcentaje,
-              etiquetas_series   = etiquetas_series,
-              escala_valor       = "proporcion_1",
-              colores_series     = colores_series,
-              mostrar_valores    = TRUE,
-              titulo             = titulo_plot,
-              subtitulo          = NULL,
-              nota_pie           = nota_pie_plot,
-              nota_pie_derecha   = nota_pie_derecha,
-              pos_nota_pie       = pos_nota_pie_plot,
-              mostrar_barra_extra = barra_extra == "total_n",
-              prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
-              titulo_barra_extra  = if (barra_extra == "total_n") "Total" else NULL,
-              exportar            = "rplot"
+            c(
+              list(
+                data               = tab_agr,
+                var_categoria      = "categoria",
+                var_n              = "n_base",
+                cols_porcentaje    = cols_porcentaje,
+                etiquetas_series   = etiquetas_series,
+                escala_valor       = "proporcion_1",
+                colores_series     = colores_series,
+                mostrar_valores    = TRUE,
+                titulo             = titulo_plot,
+                subtitulo          = NULL,
+                nota_pie           = NULL,
+                nota_pie_derecha   = NULL,
+                pos_nota_pie       = NULL,
+                mostrar_barra_extra = barra_extra == "total_n",
+                prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "",
+                titulo_barra_extra  = if (barra_extra == "total_n") "Total" else NULL,
+                exportar            = "rplot",
+                orientacion         = ori_final
+              ),
+              if (!is.null(ancho_eje_v)) list(ancho_max_eje_y = ancho_eje_v) else list()
             ),
-            estilos_barras_agrupadas
+            estilos_agrupadas_clean
           )
 
           p <- do.call(graficar_barras_agrupadas, args_barras)
 
-
+          if (ori_final == "vertical") {
+            p <- p +
+              ggplot2::theme(
+                axis.text.y  = ggplot2::element_blank(),
+                axis.title.y = ggplot2::element_blank(),
+                axis.ticks.y = ggplot2::element_blank(),
+                axis.line.y  = ggplot2::element_blank()
+              )
+          }
         }
 
         if (tipo_grafico == "barras_apiladas") {
@@ -545,7 +1000,6 @@ reporte_word <- function(
             }
           }
 
-          # inversión de segmentos / leyenda según estilos_barras_apiladas
           ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
           ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
 
@@ -573,32 +1027,73 @@ reporte_word <- function(
           estilos_apiladas_clean$listnames_invertir_leyenda   <- NULL
           estilos_apiladas_clean$vars_invertir_segmentos      <- NULL
           estilos_apiladas_clean$vars_invertir_leyenda        <- NULL
+          estilos_apiladas_clean$barra_extra_vjust <- NULL
+
+
+          args_extra <- list()
+          if (!is.null(colores_grupos)) {
+            args_extra$colores_grupos <- colores_grupos
+          }
+
+          # vjust global para barra extra, si existe en estilos
+          barra_extra_vjust_global <- estilos_barras_apiladas$barra_extra_vjust %||% NULL
+
+          args_core <- list(
+            data                = tab_apil$data,
+            var_categoria       = "categoria",
+            var_n               = "n_base",
+            cols_porcentaje     = tab_apil$cols_porcentaje,
+            etiquetas_grupos    = tab_apil$etiquetas_grupos,
+            escala_valor        = "proporcion_1",
+            mostrar_valores     = TRUE,
+            titulo              = titulo_plot,
+            subtitulo           = NULL,
+            nota_pie            = nota_pie_plot,
+            nota_pie_derecha    = nota_pie_derecha,
+            pos_nota_pie        = pos_nota_pie_plot,
+
+            mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
+            barra_extra_preset  = preset_extra,
+
+            prefijo_barra_extra = if (!is.null(preset_extra)) {
+              ""
+            } else if (barra_extra == "total_n") {
+              "N = "
+            } else {
+              ""
+            },
+
+            titulo_barra_extra = if (!is.null(preset_extra) || barra_extra != "total_n") {
+              NULL
+            } else {
+              "Total"
+            },
+
+            color_barra_extra = if (!is.null(preset_extra)) {
+              NULL
+            } else {
+              "#092147"
+            },
+
+            exportar           = "rplot",
+            invertir_segmentos = invertir_segmentos_var,
+            invertir_leyenda   = invertir_leyenda_var
+          )
+
+          # Si hay vjust global, pasarlo
+          if (!is.null(barra_extra_vjust_global)) {
+            args_core$barra_extra_vjust <- barra_extra_vjust_global
+          }
 
           args_apiladas <- c(
-            list(
-              data                = tab_apil$data,
-              var_categoria       = "categoria",
-              var_n               = "n_base",
-              cols_porcentaje     = tab_apil$cols_porcentaje,
-              etiquetas_grupos    = tab_apil$etiquetas_grupos,
-              escala_valor        = "proporcion_1",
-              colores_grupos      = colores_grupos,
-              mostrar_valores     = TRUE,
-              titulo              = titulo_plot,
-              subtitulo           = NULL,
-              nota_pie            = nota_pie_plot,
-              nota_pie_derecha    = nota_pie_derecha,
-              pos_nota_pie        = pos_nota_pie_plot,
-              mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
-              barra_extra_preset  = preset_extra,
-              prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
-              titulo_barra_extra  = if (!is.null(preset_extra)) NULL else if (barra_extra == "total_n") "Total" else NULL,
-              invertir_segmentos  = invertir_segmentos_var,
-              invertir_leyenda    = invertir_leyenda_var,
-              exportar            = "rplot"
-            ),
+            args_core,
+            args_extra,
             estilos_apiladas_clean
           )
+
+          if (!is.null(names(args_apiladas))) {
+            args_apiladas <- args_apiladas[!duplicated(names(args_apiladas))]
+          }
 
           p <- do.call(graficar_barras_apiladas, args_apiladas)
 
@@ -649,11 +1144,11 @@ reporte_word <- function(
                 mostrar_valores    = TRUE,
                 titulo             = titulo_plot,
                 subtitulo          = NULL,
-                nota_pie           = nota_pie_plot,
-                nota_pie_derecha   = nota_pie_derecha,
-                pos_nota_pie       = pos_nota_pie_plot,
+                nota_pie            = NULL,
+                nota_pie_derecha    = NULL,
+                pos_nota_pie        = NULL,
                 mostrar_barra_extra = barra_extra == "total_n",
-                prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
+                prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "",
                 titulo_barra_extra  = if (barra_extra == "total_n") "Total" else NULL,
                 exportar            = "rplot"
               ),
@@ -678,7 +1173,7 @@ reporte_word <- function(
                 etiqueta_no       = labels_dico[2],
                 titulo            = titulo_plot,
                 subtitulo         = NULL,
-                nota_pie          = N_texto,  # N = ... como caption del pie
+                nota_pie          = N_texto,
                 incluir_n_en_titulo = FALSE,
                 exportar          = "rplot"
               ),
@@ -741,10 +1236,9 @@ reporte_word <- function(
     pulso_azul <- "#1B679D"
 
     # -------------------------------------------------------------------------
-    # 5.1. Leer plantilla Word (análogo al PPT, con logos en encabezado)
+    # 5.1. Leer plantilla Word
     # -------------------------------------------------------------------------
     if (is.null(template_docx)) {
-      # Buscar plantilla interna del paquete
       template_interno <- system.file(
         "plantillas/plantilla_pulso.docx",
         package = "prosecnur"
@@ -766,7 +1260,6 @@ reporte_word <- function(
       }
 
     } else {
-      # Plantilla pasada explícitamente por el usuario
       if (!file.exists(template_docx)) {
         stop(
           "No se encontró el archivo de plantilla especificado en `template_docx`: ",
@@ -781,11 +1274,10 @@ reporte_word <- function(
     }
 
     # -------------------------------------------------------------------------
-    # 5.2. Primera página: índice de gráficas por sección
+    # 5.2. Primera página: índice de gráficos por sección
     # -------------------------------------------------------------------------
     if (length(plots_list)) {
 
-      # Título del índice
       indice_titulo <- officer::fpar(
         officer::ftext(
           "ÍNDICE DE GRÁFICOS",
@@ -801,16 +1293,13 @@ reporte_word <- function(
       doc <- officer::body_add_fpar(doc, indice_titulo, style = "Normal")
       doc <- officer::body_add_par(doc, "", style = "Normal")
 
-      # Agrupar por sección (si existe `seccion_por_plot`)
-      if (exists("seccion_por_plot") &&
-          length(seccion_por_plot) == length(plots_list)) {
+      if (length(seccion_por_plot) == length(plots_list)) {
 
         secciones_unicas <- unique(seccion_por_plot)
 
         for (sec in secciones_unicas) {
           if (is.na(sec) || !nzchar(sec)) next
 
-          # Nombre de sección
           sec_fpar <- officer::fpar(
             officer::ftext(
               sec,
@@ -830,7 +1319,6 @@ reporte_word <- function(
           for (i in idx_sec) {
             titulo_i <- titulos_list[[i]] %||% ""
 
-            # Entrada índice: "Gráfica Nro. i. " (azul) + título (negro, cursiva)
             entrada_indice <- officer::fpar(
               officer::ftext(
                 sprintf("Gráfico Nº %d. ", i),
@@ -852,18 +1340,15 @@ reporte_word <- function(
                   font.family = "Arial"
                 )
               )
-              # Aquí podrías luego agregar tabs y número de página manualmente
             )
 
             doc <- officer::body_add_fpar(doc, entrada_indice, style = "Normal")
           }
 
-          # Línea en blanco entre secciones
           doc <- officer::body_add_par(doc, "", style = "Normal")
         }
 
       } else {
-        # Fallback: índice lineal sin secciones
         for (i in seq_along(plots_list)) {
           titulo_i <- titulos_list[[i]] %||% ""
 
@@ -894,7 +1379,6 @@ reporte_word <- function(
         }
       }
 
-      # Salto de página después del índice
       doc <- officer::body_add_break(doc)
 
       # -----------------------------------------------------------------------
@@ -907,7 +1391,6 @@ reporte_word <- function(
         N_i      <- N_texto_list[[i]] %||% NA
 
         # ---------------- TÍTULO CENTRADO ----------------
-        # "Gráfico Nº i: <título_i>" todo en azul pulso
         titulo_full <- sprintf("Gráfico Nº %d: %s", i, titulo_i)
 
         titulo_word <- officer::fpar(
@@ -927,13 +1410,13 @@ reporte_word <- function(
         doc <- officer::body_add_fpar(doc, titulo_word, style = "Normal")
 
         # ---------------- GRÁFICO ----------------
-        width_word <-  17 / 2.54
+        width_word <- 17 / 2.54
 
         alto_sugerido <- attr(p, "alto_word_sugerido", exact = TRUE)
         height_word <- if (!is.null(alto_sugerido) && is.finite(alto_sugerido)) {
           alto_sugerido
         } else {
-          3.5  # fallback por si algún gráfico no trae atributo
+          3.5
         }
 
         doc <- officer::body_add_gg(
@@ -944,12 +1427,9 @@ reporte_word <- function(
         )
 
         # ---------------- PIE CENTRADO ----------------
-        # Si viene N_i y fuente, construimos:
-        # "N = <N_i><fuente>"
         pie_full <- NULL
 
         if (!is.null(fuente) && nzchar(fuente) && !is.na(N_i)) {
-          # Ejemplo: fuente = " estudiantes. Fuente: PULSO PUCP 2025."
           pie_full <- paste0("N = ", N_i, fuente)
         } else if (!is.null(fuente) && nzchar(fuente)) {
           pie_full <- fuente
@@ -975,7 +1455,6 @@ reporte_word <- function(
           doc <- officer::body_add_fpar(doc, pie_word, style = "Normal")
         }
 
-        # Espacio entre gráficas
         doc <- officer::body_add_par(doc, "", style = "Normal")
       }
     }

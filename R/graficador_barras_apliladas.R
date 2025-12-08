@@ -153,6 +153,7 @@ graficar_barras_apiladas <- function(
     barra_extra_preset    = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
     prefijo_barra_extra   = NULL,
     titulo_barra_extra    = NULL,
+    barra_extra_vjust     = NULL,
     titulo                = NULL,
     subtitulo             = NULL,
     nota_pie              = NULL,
@@ -178,7 +179,7 @@ graficar_barras_apiladas <- function(
     color_fondo           = NA,
     grosor_barras         = 0.7,
     extra_derecha_rel     = 0.10,
-    espacio_izquierda_rel = 0.05,
+    espacio_izquierda_rel = 0,
     ancho_max_eje_y       = NULL,
     mostrar_leyenda       = TRUE,
     invertir_leyenda      = FALSE,
@@ -234,6 +235,8 @@ graficar_barras_apiladas <- function(
   pulso_verde <- "#5BAF31"
 
   textos_negrita <- textos_negrita %||% character(0)
+
+  alto_extra_header <- 0
 
   # ---------------------------------------------------------------------------
   # 0. Validaciones
@@ -428,7 +431,7 @@ graficar_barras_apiladas <- function(
   p <- p +
     ggplot2::scale_x_continuous(
       limits = c(0, x_max),
-      expand = ggplot2::expansion(mult = c(espacio_izquierda_rel, 0))
+      expand = ggplot2::expansion(mult = c(espacio_izquierda_rel, 0.05))
     ) +
     ggplot2::coord_cartesian(clip = "off")
 
@@ -589,6 +592,12 @@ graficar_barras_apiladas <- function(
       # nº de barras en el gráfico
       n_categorias_header <- length(lvls)
 
+
+      # vjust definido por el usuario → tiene prioridad absoluta
+      if (!is.null(barra_extra_vjust)) {
+        vjust_header <- barra_extra_vjust
+      } else {
+
       # vjust dinámico:
       # - 1–2 barras  → más arriba (más negativo)
       # - 3 barras    → intermedio
@@ -597,6 +606,14 @@ graficar_barras_apiladas <- function(
         n_categorias_header <= 2 ~ -8,
         n_categorias_header == 3 ~ -7,
         TRUE                     ~ -6
+      )
+      }
+
+      # Altura extra aproximada necesaria para que el título no se corte
+      alto_extra_header <- dplyr::case_when(
+        n_categorias_header <= 2 ~ 1.1,
+        n_categorias_header == 3 ~ 0.8,
+        TRUE                     ~ 0.6
       )
 
       df_header <- data.frame(
@@ -778,13 +795,13 @@ graficar_barras_apiladas <- function(
   alto_cap      <- if (tiene_caption) alto_caption else 0
 
   # Altura total sugerida (antes de topes)
-  alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap
+  alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap + alto_extra_header
 
   # Tope máximo absoluto
   alto_total_sugerido <- min(alto_max_total, alto_total_sugerido)
 
   # Mínimo "suave" dependiente del grosor de barra + leyenda + caption
-  alto_min_suave <- (alto_por_cat_eff * 1.2) + alto_leyenda + alto_cap
+  alto_min_suave <- (alto_por_cat_eff * 1.2) + alto_leyenda + alto_cap + alto_extra_header
   alto_total_sugerido <- max(alto_min_suave, alto_total_sugerido)
 
   # Si solo queremos el ggplot, devolvemos p pero con el alto sugerido como atributo
