@@ -609,6 +609,7 @@ reporte_word <- function(
 
         # 3. Detectar list_name del bloque (usando la primera variable)
         list_name_bloque <- NA_character_
+
         if ("list_name" %in% names(survey)) {
           tmp <- survey$list_name[survey$name %in% vars_bloque]
           tmp <- tmp[!is.na(tmp) & tmp != ""]
@@ -618,6 +619,28 @@ reporte_word <- function(
           tmp <- tmp[!is.na(tmp) & tmp != ""]
           if (length(tmp)) list_name_bloque <- tmp[1]
         }
+
+        # 3.b Centro de leyenda:
+        #    1) por bloque (centro_leyenda_por_bloque[[bloque_id]])
+        #    2) por list_name (centro_leyenda_por_listname[[list_name_bloque]])
+        #    3) si ninguno existe → NA (auto-centrado interno)
+        centro_cowplot_bloque <- NULL
+        if (exists("centro_leyenda_por_bloque", inherits = TRUE) &&
+            !is.null(bloque_id) &&
+            bloque_id %in% names(centro_leyenda_por_bloque)) {
+
+          centro_cowplot_bloque <- centro_leyenda_por_bloque[[bloque_id]]
+        }
+
+        centro_cowplot_ln <- NULL
+        if (exists("centro_leyenda_por_listname", inherits = TRUE) &&
+            !is.na(list_name_bloque) && nzchar(list_name_bloque) &&
+            list_name_bloque %in% names(centro_leyenda_por_listname)) {
+
+          centro_cowplot_ln <- centro_leyenda_por_listname[[list_name_bloque]]
+        }
+
+        centro_cowplot_final <- centro_cowplot_bloque %||% centro_cowplot_ln
 
         # 4. Paleta y preset extra (TOP2, etc.) igual que en barras_apiladas simple
         colores_grupos <- NULL
@@ -757,7 +780,6 @@ reporte_word <- function(
           invertir_barras     = invertir_barras_bloque,
 
           grosor_barras       = grosor_barras_bloque,
-
           exportar            = "rplot"
         )
 
@@ -766,8 +788,16 @@ reporte_word <- function(
           args_multi_core$barra_extra_vjust <- barra_extra_vjust_global
         }
 
+
+        extra_centro <- if (!is.null(centro_cowplot_final)) {
+          list(centro_cowplot = centro_cowplot_final)
+        } else {
+          list()
+        }
+
         args_multi <- c(
           args_multi_core,
+          extra_centro,
           estilos_apiladas_clean
         )
 
@@ -778,7 +808,7 @@ reporte_word <- function(
               vjust  = 0.5,
               margin = ggplot2::margin(r = 6)
             ),
-            plot.margin = ggplot2::margin(l = 20, r = 10, t = 5, b = 5)
+            plot.margin = ggplot2::margin(l = 20, r = 10, t = 5, b = 6)
           )
 
         idx <- length(plots_list) + 1L
@@ -983,6 +1013,7 @@ reporte_word <- function(
           colores_grupos <- NULL
           preset_extra   <- NULL
 
+          # Paleta / preset por list_name (igual que antes)
           if (!is.na(list_name_v) &&
               !is.null(colores_apiladas_por_listname[[list_name_v]])) {
 
@@ -998,6 +1029,26 @@ reporte_word <- function(
             } else {
               colores_grupos <- obj_col
             }
+          }
+
+          # Centro de leyenda:
+          #   1) por variable (centro_leyenda_por_var[[v]])
+          #   2) por list_name (centro_leyenda_por_listname[[list_name_v]])
+          #   3) si ninguno → NA (auto-centrado interno)
+          centro_cowplot <- NULL
+
+          if (exists("centro_leyenda_por_var", inherits = TRUE) &&
+              v %in% names(centro_leyenda_por_var)) {
+
+            centro_cowplot <- centro_leyenda_por_var[[v]]
+          }
+
+          if (is.null(centro_cowplot) &&
+              exists("centro_leyenda_por_listname", inherits = TRUE) &&
+              !is.na(list_name_v) && nzchar(list_name_v) &&
+              list_name_v %in% names(centro_leyenda_por_listname)) {
+
+            centro_cowplot <- centro_leyenda_por_listname[[list_name_v]]
           }
 
           ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
@@ -1085,9 +1136,17 @@ reporte_word <- function(
             args_core$barra_extra_vjust <- barra_extra_vjust_global
           }
 
+          # NUEVO: centro de leyenda solo si NO es NULL
+          extra_centro <- if (!is.null(centro_cowplot)) {
+            list(centro_cowplot = centro_cowplot)
+          } else {
+            list()
+          }
+
           args_apiladas <- c(
             args_core,
             args_extra,
+            extra_centro,
             estilos_apiladas_clean
           )
 

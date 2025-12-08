@@ -770,6 +770,26 @@ graficar_barras_apiladas <- function(
     )
 
   # ---------------------------------------------------------------------------
+  # 6.1. Ocultar texto del eje Y cuando solo hay una categoría
+  # ---------------------------------------------------------------------------
+  n_categorias <- length(unique(df_long[[var_categoria]]))
+
+  if (n_categorias == 1L) {
+    niveles_y <- levels(df_long[[var_categoria]])
+
+    p <- p +
+      ggplot2::scale_y_discrete(
+        breaks = niveles_y,
+        labels = rep("", length(niveles_y))
+      ) +
+      ggplot2::theme(
+        axis.text.y  = ggplot2::element_blank(),
+        axis.ticks.y = ggplot2::element_blank(),
+        axis.line.y  = ggplot2::element_blank()
+      )
+  }
+
+  # ---------------------------------------------------------------------------
   # 6.bis. Recomposición con cowplot (95% barras / 5% leyenda)
   # ---------------------------------------------------------------------------
   if (mostrar_leyenda && usar_leyenda_cowplot) {
@@ -785,7 +805,7 @@ graficar_barras_apiladas <- function(
     p_base_sin_leyenda <- p +
       ggplot2::theme(
         legend.position = "none",
-        plot.margin     = ggplot2::margin(t = 10, r = 10, b = 5, l = 10)
+        plot.margin     = ggplot2::margin(t = 10, r = 10, b = 6, l = 10)
       )
 
     # Leyenda extraída tal cual se ve en `p`
@@ -814,11 +834,11 @@ graficar_barras_apiladas <- function(
 
     # POSICIÓN HORIZONTAL DINÁMICA DE LA LEYENDA
     pos_leyenda_x <- dplyr::case_when(
-      ancho_fila <= 2 ~ 0.45,  # 1–2 ítems: bastante centrado
-      ancho_fila == 3 ~ 0.38,  # 3 ítems
-      ancho_fila == 4 ~ 0.32,  # 4 ítems
-      ancho_fila == 5 ~ 0.28,  # 5 ítems
-      TRUE           ~ 0.18    # 6 ítems (fila llena)
+      ancho_fila <= 2 ~ 0.48,  # 1–2 ítems: bastante centrado
+      ancho_fila == 3 ~ 0.42,  # 3 ítems
+      ancho_fila == 4 ~ 0.35,  # 4 ítems
+      ancho_fila == 5 ~ 0.30,  # 5 ítems
+      TRUE           ~ 0.22    # 6 ítems (fila llena)
     )
     # OVERRIDE MANUAL (centro_cowplot)
     if (!is.na(centro_cowplot) && is.finite(centro_cowplot)) {

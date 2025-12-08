@@ -318,10 +318,10 @@ reporte_ppt <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # (NUEVO) Precomputar variables incluidas en bloques multi-apilados
+  # Precomputar variables incluidas en bloques multi-apilados
   # ---------------------------------------------------------------------------
   if (!is.null(bloques_multi_apiladas) && length(bloques_multi_apiladas) > 0) {
-    vars_multi_all <- unique(unlist(bloques_multi_apiladas))
+    vars_multi_all <- unique(unlist(lapply(bloques_multi_apiladas, `[[`, "vars")))
   } else {
     vars_multi_all <- character(0)
   }
@@ -732,15 +732,28 @@ reporte_ppt <- function(
           }
         }
 
-        # 4.b Centro de leyenda por list_name (cowplot) para multi-apiladas
-        centro_cowplot_ln <- NULL
+        # 4.b Centro de leyenda:
+        #     1) por bloque (centro_leyenda_por_bloque[[bloque_id]])
+        #     2) por list_name del bloque
+        #     3) si ninguno → auto-centrado interno
+        centro_cowplot_bloque <- NULL
+        if (exists("centro_leyenda_por_bloque", inherits = TRUE) &&
+            !is.null(bloque_id) &&
+            bloque_id %in% names(centro_leyenda_por_bloque)) {
 
+          centro_cowplot_bloque <- centro_leyenda_por_bloque[[bloque_id]]
+        }
+
+        centro_cowplot_ln <- NULL
         if (exists("centro_leyenda_por_listname", inherits = TRUE) &&
             !is.na(list_name_bloque) && nzchar(list_name_bloque) &&
             list_name_bloque %in% names(centro_leyenda_por_listname)) {
 
           centro_cowplot_ln <- centro_leyenda_por_listname[[list_name_bloque]]
         }
+
+        centro_cowplot_final <- centro_cowplot_bloque %||% centro_cowplot_ln
+
 
         # 5. Flags de inversión por list_name / variable (misma lógica que apiladas simple)
         ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
@@ -810,8 +823,8 @@ reporte_ppt <- function(
 
         # 8. Construir gráfico multi-apilado usando el MISMO graficador
         #    (centro_cowplot solo se pasa si NO es NULL)
-        extra_centro <- if (!is.null(centro_cowplot_ln)) {
-          list(centro_cowplot = centro_cowplot_ln)
+        extra_centro <- if (!is.null(centro_cowplot_final)) {
+          list(centro_cowplot = centro_cowplot_final)
         } else {
           list()
         }
@@ -863,7 +876,7 @@ reporte_ppt <- function(
 
             exportar            = "rplot"
           ),
-          extra_centro,              # <- aquí inyectamos centro_cowplot SOLO si existe
+          extra_centro,
           estilos_apiladas_clean
         )
 
@@ -1103,6 +1116,7 @@ reporte_ppt <- function(
           colores_grupos <- NULL
           preset_extra   <- NULL
 
+          # Paleta / preset por list_name (igual que antes)
           if (!is.na(list_name_v) &&
               !is.null(colores_apiladas_por_listname[[list_name_v]])) {
 
@@ -1121,15 +1135,27 @@ reporte_ppt <- function(
           }
 
           # --------------------------------------------
-          # Centro de leyenda por list_name (cowplot)
+          # Centro de leyenda:
+          #    1) por variable
+          #    2) por list_name
+          #    3) si ninguno → auto-centrado interno
           # --------------------------------------------
-          centro_cowplot_ln <- NULL
+          centro_cowplot <- NULL
 
-          if (exists("centro_leyenda_por_listname", inherits = TRUE) &&
+          # 1) override puntual por variable
+          if (exists("centro_leyenda_por_var", inherits = TRUE) &&
+              v %in% names(centro_leyenda_por_var)) {
+
+            centro_cowplot <- centro_leyenda_por_var[[v]]
+          }
+
+          # 2) si no hay override por var, usar listname
+          if (is.null(centro_cowplot) &&
+              exists("centro_leyenda_por_listname", inherits = TRUE) &&
               !is.null(list_name_v) && !is.na(list_name_v) && nzchar(list_name_v) &&
               list_name_v %in% names(centro_leyenda_por_listname)) {
 
-            centro_cowplot_ln <- centro_leyenda_por_listname[[list_name_v]]
+            centro_cowplot <- centro_leyenda_por_listname[[list_name_v]]
           }
 
           ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
@@ -1167,8 +1193,8 @@ reporte_ppt <- function(
           }
 
           args_centro <- list()
-          if (!is.null(centro_cowplot_ln)) {
-            args_centro$centro_cowplot <- centro_cowplot_ln
+          if (!is.null(centro_cowplot)) {
+            args_centro$centro_cowplot <- centro_cowplot
           }
 
           args_apiladas <- c(
@@ -1208,8 +1234,8 @@ reporte_ppt <- function(
                 invertir_segmentos = invertir_segmentos_var,
                 invertir_leyenda   = invertir_leyenda_var
               ),
-              args_centro,   # <-- aquí se mezcla centro_cowplot si existe
-              args_extra     # <-- y la paleta, si la hay
+              args_centro,
+              args_extra
             ),
             estilos_apiladas_clean
           )
