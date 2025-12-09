@@ -511,7 +511,6 @@ graficar_barras_agrupadas <- function(
       panel.grid.major.x = ggplot2::element_blank(),
       axis.title.x       = ggplot2::element_blank(),
       axis.title.y       = ggplot2::element_blank(),
-      # Los ejes específicos (texto, ticks, líneas) se ajustan más abajo
       legend.title       = ggplot2::element_blank(),
       legend.position    = if (mostrar_leyenda) "bottom" else "none",
       legend.text        = ggplot2::element_text(
@@ -519,7 +518,12 @@ graficar_barras_agrupadas <- function(
         size  = size_leyenda,
         face  = if ("leyenda" %in% textos_negrita) "bold" else "plain"
       ),
-      plot.margin        = ggplot2::margin(t = 15, r = 80, b = 15, l = 5),
+      # margen condicionado a la orientación
+      plot.margin        = if (orientacion == "horizontal") {
+        ggplot2::margin(t = 15, r = 80, b = 15, l = 5)
+      } else {
+        ggplot2::margin(t = 15, r = 10, b = 15, l = 10)
+      },
       plot.title         = ggplot2::element_text(
         hjust = hjust_titulo,
         color = color_titulo,

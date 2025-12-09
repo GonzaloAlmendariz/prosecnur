@@ -1407,6 +1407,25 @@ reporte_ppt <- function(
   indices_segundos_pares <- vapply(pares_indices, function(x) x$idx2, integer(1))
   indices_primeros_pares <- vapply(pares_indices, function(x) x$idx1, integer(1))
 
+  .usar_layout_unabarra <- function(p, var_i) {
+    if (!tiene_layout_unabarra || is.null(layout_unabarra)) return(FALSE)
+
+    tipo_i <- NA_character_
+    if (!is.null(log_decisiones) && nrow(log_decisiones)) {
+      fila_i <- which(log_decisiones$var == var_i)
+      if (length(fila_i)) {
+        tipo_i <- log_decisiones$tipo_grafico[fila_i[1]]
+      }
+    }
+
+    # Solo barras_apiladas simples
+    if (is.na(tipo_i) || tipo_i != "barras_apiladas") {
+      return(FALSE)
+    }
+
+    TRUE
+  }
+
   # ---------------------------------------------------------------------------
   # 6. PPT
   # ---------------------------------------------------------------------------
@@ -1464,6 +1483,10 @@ reporte_ppt <- function(
     tiene_layout_contraportada   <- FALSE
     tiene_layout_section_header  <- FALSE
 
+    # layout especial para 1 sola barra
+    tiene_layout_unabarra <- FALSE
+    layout_unabarra       <- NULL
+
     if (!is.null(layout_info)) {
 
       # Prioridad: Graficos2 > Graficos > Blank
@@ -1475,6 +1498,15 @@ reporte_ppt <- function(
         tiene_layout_graficos <- TRUE
         layout_graficos       <- "Graficos"
         usar_pic_placeholder  <- TRUE
+      }
+
+      # registrar layout para una sola barra
+      if ("Graficos_unabarra" %in% layout_info$layout) {
+        tiene_layout_unabarra <- TRUE
+        layout_unabarra       <- "Graficos_unabarra"
+        if (mensajes_progreso) {
+          message("Layout 'Graficos_unabarra' disponible para gráficos de una sola barra.")
+        }
       }
 
       if ("Title Slide" %in% layout_info$layout) {
@@ -1758,10 +1790,20 @@ reporte_ppt <- function(
           }
         }
 
+        # Elegir layout según si es una sola barra APILADA o no
+        layout_i <- layout_graficos
+        if (.usar_layout_unabarra(p, vars_por_plot[i])) {
+          layout_i <- layout_unabarra
+          if (mensajes_progreso) {
+            message("   · Usando layout '", layout_i,
+                    "' para gráfico de una sola barra (", vars_por_plot[i], ").")
+          }
+        }
+
         # Diapositiva de gráfico simple
         doc <- officer::add_slide(
           doc,
-          layout = layout_graficos,
+          layout = layout_i,
           master = "Office Theme"
         )
 
