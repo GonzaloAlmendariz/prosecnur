@@ -25,7 +25,7 @@
 #' que cada usuario pueda adaptarlo a su propio cuestionario y base de datos.
 #'
 #' @param path Ruta del archivo YAML a generar. Por defecto
-#'   \code{"indicadores_ejemplo.yaml"}.
+#'   \code{"indicadores.yaml"}.
 #' @param overwrite Lógico. Si es \code{FALSE} (por defecto) y el archivo ya
 #'   existe, la función lanza un error y no sobreescribe el archivo.
 #'
@@ -40,7 +40,7 @@
 #' # Generar en otra ruta, sobreescribiendo si ya existe
 #' reporte_yaml("config_indicadores.yaml", overwrite = TRUE)
 #' }
-indicadores_yaml <- function(path = "indicadores_ejemplo.yaml",
+indicadores_yaml <- function(path = "indicadores.yaml",
                          overwrite = FALSE) {
 
   if (file.exists(path) && !isTRUE(overwrite)) {

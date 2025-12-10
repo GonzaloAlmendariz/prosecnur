@@ -4,11 +4,11 @@
 \alias{indicadores_yaml}
 \title{Genera un YAML de ejemplo para declarar indicadores}
 \usage{
-indicadores_yaml(path = "indicadores_ejemplo.yaml", overwrite = FALSE)
+indicadores_yaml(path = "indicadores.yaml", overwrite = FALSE)
 }
 \arguments{
 \item{path}{Ruta del archivo YAML a generar. Por defecto
-\code{"indicadores_ejemplo.yaml"}.}
+\code{"indicadores.yaml"}.}
 
 \item{overwrite}{Lógico. Si es \code{FALSE} (por defecto) y el archivo ya
 existe, la función lanza un error y no sobreescribe el archivo.}

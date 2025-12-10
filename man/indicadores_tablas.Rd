@@ -9,24 +9,30 @@ indicadores_tablas(
   config,
   output_xlsx = NULL,
   hoja = "Indicadores",
-  estilos = NULL
+  estilos = NULL,
+  fuente = NULL
 )
 }
 \arguments{
 \item{rp_data}{Data frame (o tibble) con la base ya limpia/recodificada.}
 
-\item{config}{Ruta al archivo YAML de indicadores (character) o lista ya leída
-con \code{yaml::read_yaml()}.}
+\item{config}{Ruta al archivo YAML de indicadores (character) o lista ya
+leída con \code{yaml::read_yaml()}.}
 
-\item{output_xlsx}{Ruta del archivo Excel a generar. Si es \code{NULL} (por defecto),
-no se exporta a Excel y la función solo devuelve las tablas en una lista.}
+\item{output_xlsx}{Ruta del archivo Excel a generar. Si es \code{NULL}
+(por defecto), no se exporta a Excel y la función solo devuelve las tablas
+en una lista.}
 
 \item{hoja}{Nombre de la hoja donde se escribirán las tablas. Por defecto
-\code{\"Indicadores\"}.}
+\code{"Indicadores"}.}
 
-\item{estilos}{Opcional: lista de estilos de \pkg{openxlsx}. Puede ser la salida
-de una función tipo \code{mk_styles_cruces()}. Si es \code{NULL}, se usan
-estilos simples por defecto.}
+\item{estilos}{Opcional: lista de estilos de \pkg{openxlsx}. Puede ser la
+salida de una función tipo \code{mk_styles_spss()} o similar. Si es
+\code{NULL}, se usan estilos simples por defecto.}
+
+\item{fuente}{Texto de la fuente a mostrar debajo de cada tabla (por ejemplo,
+"Pulso PUCP 2025"). Si es \code{NULL}, se escribe una fila vacía
+pero con la línea de cierre de tabla.}
 }
 \value{
 Una lista nombrada, donde cada elemento corresponde a un indicador y
@@ -34,6 +40,8 @@ contiene:
 \itemize{
 \item \code{id}, \code{titulo}, \code{tipo}, \code{grafico}, \code{notas}
 \item \code{tabla}: data.frame con los resultados.
+\item \code{tablas_por_variable} (opcional, en tipo freq_multiple con
+modo = "por_variable"): lista de tablas de frecuencias simples.
 }
 
 Si \code{output_xlsx} no es \code{NULL}, también genera un archivo Excel.
@@ -41,53 +49,9 @@ Si \code{output_xlsx} no es \code{NULL}, también genera un archivo Excel.
 \description{
 Esta función:
 \enumerate{
-\item Lee un archivo de configuración YAML de indicadores (como \code{OPS_EESS_indicadores}).
+\item Lee un archivo de configuración YAML de indicadores.
 \item Calcula las tablas para cada indicador según su \code{tipo}
 (\code{tabla_conceptos}, \code{tabla_compuesta}, \code{freq_multiple}).
-\item Opcionalmente, exporta todas las tablas a un archivo Excel con formato
-similar al usado en las tablas de frecuencias/cruces.
-}
-}
-\details{
-El YAML debe tener la estructura general:
-\preformatted{
-version: 1
-nombre: "OPS_EESS_indicadores"
-peso: "peso"
-indicadores:
-  - id: IND1
-    tipo: tabla_conceptos
-    ...
-  - id: IND2
-    tipo: tabla_compuesta
-    ...
-  - id: IND3
-    tipo: freq_multiple
-    ...
-}
-
-Tipos de indicador soportados:
-\itemize{
-\item \code{tabla_conceptos}: filas definidas por \code{filas}/\code{grupos},
-columnas definidas por operaciones (\code{suma}, \code{conteo_cond}, \code{proporcion_cond},
-\code{media}, \code{mediana}, \code{minimo}, \code{maximo}, \code{proporcion_rel}).
-\item \code{tabla_compuesta}: cada fila es una condición sobre \code{rp_data} y las columnas suelen
-ser \code{conteo_cond_fila} y \code{proporcion_sobre_total}.
-\item \code{freq_multiple}: select_multiple ya dummificada en \code{rp_data}, con 0/1 y labels.
-}
-}
-\examples{
-\dontrun{
-# Calcular indicadores sin exportar a Excel
-res <- indicadores_tablas(rp_data, "OPS_EESS_indicadores.yaml")
-
-# Calcular y exportar a Excel
-indicadores_tablas(
-  rp_data      = rp_data,
-  config       = "OPS_EESS_indicadores.yaml",
-  output_xlsx  = "indicadores_ops_eess.xlsx",
-  hoja         = "Indicadores",
-  estilos      = mk_styles_cruces()  # si ya tienes esta función
-)
+\item Opcionalmente, exporta todas las tablas a un archivo Excel con formato.
 }
 }
