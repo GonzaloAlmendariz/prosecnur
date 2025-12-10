@@ -1,28 +1,51 @@
 #' Genera un YAML de ejemplo para declarar indicadores
 #'
-#' Esta función crea un archivo YAML de ejemplo que actúa como guía/tutorial
-#' para declarar indicadores a partir de una base de datos en formato similar
-#' a \code{rp_data}. El archivo incluye:
+#' Esta función crea un archivo YAML de ejemplo que sirve como **guía práctica**
+#' para declarar indicadores que luego serán procesados por
+#' \code{indicadores_tablas()}.
 #'
-#' - Encabezado general (\code{version}, \code{nombre}, \code{peso}).
-#' - Ejemplos de indicadores de tipo:
-#'   - \code{tabla_conceptos}
-#'   - \code{tabla_compuesta}
-#'   - \code{freq_multiple}
-#' - Ejemplos de columnas con distintos tipos de cálculo:
-#'   - \code{suma}
-#'   - \code{conteo_cond}, \code{proporcion_cond}
-#'   - \code{proporcion_rel}
-#'   - \code{media}, \code{mediana}, \code{minimo}, \code{maximo}
-#'   - \code{conteo_cond_fila}, \code{proporcion_sobre_total}
-#' - Uso de:
-#'   - \code{filas}/\code{grupos} con atajos tipo \code{@total}, \code{@evento}, etc.
-#'   - Indicadores compuestos basados en expresiones lógicas (\code{tabla_compuesta}).
-#'   - Preguntas de respuesta múltiple dummificadas (\code{freq_multiple} con \code{usar_labels}).
-#'   - Banderas precomputadas en \code{rp_data} (e.g. \code{flag_condicion_a}).
+#' El archivo YAML generado está fuertemente comentado (con \code{#}) y está
+#' pensado para leerse “como un tutorial”. La idea es:
 #'
-#' El objetivo es que el archivo generado sirva como plantilla comentada para
-#' que cada usuario pueda adaptarlo a su propio cuestionario y base de datos.
+#' \enumerate{
+#'   \item Generar este archivo con \code{indicadores_yaml()}.
+#'   \item Abrirlo en un editor de texto (RStudio, VS Code, etc.).
+#'   \item Leer los comentarios y adaptar los bloques a la estructura real de
+#'         la base \code{rp_data} (nombres de variables, filtros, etiquetas).
+#'   \item Guardar una versión ajustada (por ejemplo, \code{config_indicadores.yaml}).
+#'   \item Usar ese YAML con \code{indicadores_tablas(rp_data, "config_indicadores.yaml")}.
+#' }
+#'
+#' El YAML incluye:
+#' \itemize{
+#'   \item Un encabezado general:
+#'     \itemize{
+#'       \item \code{version}: número de versión de la configuración.
+#'       \item \code{nombre}: nombre del proyecto o del set de indicadores.
+#'       \item \code{peso}: (opcional) nombre de la variable de ponderación en \code{rp_data}.
+#'     }
+#'   \item Varios ejemplos de indicadores:
+#'     \item \code{tabla_conceptos}: filas = conceptos, columnas = cálculos sobre grupos de variables.
+#'     \item \code{tabla_compuesta}: filas = condiciones lógicas evaluadas sobre \code{rp_data}.
+#'     \item \code{freq_multiple}:
+#'       \item modo \code{"dummy"}: para preguntas \code{select_multiple} ya dummificadas (0/1).
+#'       \item modo \code{"por_variable"}: para generar tablas de frecuencia simple de varias \code{select_one}.
+#'   \item Ejemplos de tipos de columna:
+#'     \item \code{suma}
+#'     \item \code{conteo_cond}, \code{proporcion_cond}
+#'     \item \code{proporcion_rel}
+#'     \item \code{media}, \code{mediana}, \code{minimo}, \code{maximo}
+#'     \item \code{conteo_cond_fila}, \code{proporcion_sobre_total}
+#'   \item Ejemplos de uso de:
+#'     \item \code{filas}/\code{grupos} con referencias tipo \code{@total}, \code{@evento}.
+#'     \item Condiciones lógicas sobre variables de \code{rp_data}.
+#'     \item Preguntas de respuesta múltiple dummificadas.
+#'     \item Banderas lógicas precomputadas en \code{rp_data} (por ejemplo \code{flag_condicion_a}).
+#' }
+#'
+#' El objetivo es que el archivo generado funcione como **plantilla comentada**
+#' que puede copiarse, renombrarse y adaptar al cuestionario y a la base de
+#' datos reales.
 #'
 #' @param path Ruta del archivo YAML a generar. Por defecto
 #'   \code{"indicadores.yaml"}.
@@ -34,14 +57,17 @@
 #'
 #' @examples
 #' \dontrun{
-#' # Generar un YAML de ejemplo en el directorio de trabajo
-#' reporte_yaml()
+#' # 1. Generar un YAML de ejemplo en el directorio de trabajo
+#' indicadores_yaml()
 #'
-#' # Generar en otra ruta, sobreescribiendo si ya existe
-#' reporte_yaml("config_indicadores.yaml", overwrite = TRUE)
+#' # 2. Generar en otra ruta, sobreescribiendo si ya existe
+#' indicadores_yaml("config_indicadores.yaml", overwrite = TRUE)
+#'
+#' # 3. Luego, usarlo con:
+#' #    res <- indicadores_tablas(rp_data, "config_indicadores.yaml")
 #' }
 indicadores_yaml <- function(path = "indicadores.yaml",
-                         overwrite = FALSE) {
+                             overwrite = FALSE) {
 
   if (file.exists(path) && !isTRUE(overwrite)) {
     stop(
@@ -53,47 +79,94 @@ indicadores_yaml <- function(path = "indicadores.yaml",
 
   lines <- c(
     "# ===============================================================",
-    "# Guía YAML para declarar indicadores a partir de una base de datos",
+    "# PLANTILLA / GUÍA YAML PARA INDICADORES",
     "#",
-    "# Este archivo es solo un EJEMPLO. La idea es que se copie, renombre",
-    "# y adapte a la estructura real de la base (nombres de variables,",
-    "# tipos de indicadores, etc.).",
+    "# ¿Qué es este archivo?",
+    "# ---------------------",
+    "# Este archivo YAML es un EJEMPLO COMPLETO de cómo declarar indicadores",
+    "# para la función `indicadores_tablas()` de prosecnur.",
     "#",
-    "# Convenciones generales:",
-    "# - Se asume que la base principal se llama rp_data.",
-    "# - Si existe una variable de pesos (por ejemplo 'peso'), puede",
-    "#   declararse en el encabezado. Si no, se ignora.",
-    "# - Los comentarios que comienzan con '#' son ignorados por YAML y",
-    "#   se usan aquí como documentación.",
+    "# No está pensado para usarse tal cual en producción, sino como:",
+    "#   - una guía comentada, y",
+    "#   - una plantilla para copiar, adaptar y renombrar.",
+    "#",
+    "# ¿Qué se asume sobre la base de datos?",
+    "# ------------------------------------",
+    "# - La base principal se llama `rp_data` (data.frame o tibble).",
+    "# - Cada fila suele ser una unidad de análisis (p.ej. un EESS, una persona, etc.).",
+    "# - Cada columna es una variable del cuestionario (p.ej. p001, p002, region, etc.).",
+    "# - Opcionalmente, puede existir una variable de pesos (por ejemplo `peso`).",
+    "#",
+    "# ¿Cómo se usa este archivo paso a paso?",
+    "# --------------------------------------",
+    "# 1) Ejecutar en R: indicadores_yaml(\"indicadores.yaml\").",
+    "# 2) Abrir `indicadores.yaml` en un editor de texto.",
+    "# 3) Leer los comentarios y adaptar:",
+    "#      - nombres de variables (p001, p002, ingreso, etc.),",
+    "#      - textos de títulos, y",
+    "#      - condiciones lógicas (var_a == 1, var_b %in% c(1,2), etc.).",
+    "# 4) Guardar la versión adaptada con otro nombre (p.ej. `config_indicadores.yaml`).",
+    "# 5) En R, llamar:",
+    "#        res <- indicadores_tablas(rp_data, \"config_indicadores.yaml\")",
+    "#    para obtener las tablas de cada indicador y, opcionalmente, exportar a Excel.",
+    "#",
+    "# Notas sobre la sintaxis YAML:",
+    "# -----------------------------",
+    "# - La indentación es MUY importante en YAML (espacios al inicio de línea).",
+    "# - Los comentarios comienzan con `#` y son ignorados al leer el YAML.",
+    "# - Los textos con espacios suelen ir entre comillas, por ejemplo \"Ejemplo\".",
+    "#",
+    "# En este ejemplo se muestran tres tipos de indicador:",
+    "#   - tipo: `tabla_conceptos`",
+    "#   - tipo: `tabla_compuesta`",
+    "#   - tipo: `freq_multiple` (con dos modos: `dummy` y `por_variable`)",
+    "#",
     "# ===============================================================",
     "---",
-    "version: 1",
-    "nombre: \"NOMBRE_DEL_PROYECTO\"   # Nombre libre del set de indicadores",
-    "peso: \"peso\"                    # Opcional: nombre de la variable de ponderación en rp_data",
+    "version: 1            # Versión del esquema de este YAML (puede usarse para control interno)",
+    "nombre: \"NOMBRE_DEL_PROYECTO\"   # Nombre libre del set de indicadores (p.ej. \"OPS_EESS_2025\")",
+    "peso: \"peso\"        # Opcional: nombre de la variable de ponderación en rp_data (o dejar en blanco si no se usa)",
     "",
     "indicadores:",
     "",
-    "  # ------------------------------------------------------------",
-    "  # EJEMPLO 1: tabla_conceptos con conceptos en filas y columnas derivadas",
-    "  # ------------------------------------------------------------",
+    "  # ===========================================================",
+    "  # EJEMPLO 1: tabla_conceptos con conceptos en filas",
+    "  #              y columnas derivadas a partir de grupos",
+    "  # ===========================================================",
+    "  #",
+    "  # CUÁNDO USAR ESTE TIPO:",
+    "  # - Cuando se tiene un conjunto de \"conceptos\" (p.ej. servicios, programas, etc.)",
+    "  #   y para cada concepto se desea calcular totales o proporciones de diferentes",
+    "  #   \"eventos\" asociados.",
+    "  #",
+    "  # IDEA GENERAL:",
+    "  # - Cada fila del indicador representa un concepto (Concepto A, Concepto B...).",
+    "  # - Para cada fila se definen uno o más `grupos` de variables.",
+    "  #   Por ejemplo, un grupo `total` y un grupo `evento`.",
+    "  # - Las columnas referencian esos grupos con la sintaxis `\"@nombre_grupo\"`.",
+    "  #   Ejemplo: `\"@total\"`, `\"@evento\"`.",
+    "  #",
     "  - id: IND1",
     "    nombre_corto: \"ejemplo_conceptos\"",
     "    titulo: \"Ejemplo de tabla de conceptos\"",
-    "    subtitulo: \"Cada fila es un concepto; las columnas combinan N y %\"",
+    "    subtitulo: \"Cada fila es un concepto; las columnas combinan conteos y proporciones\"",
     "    tipo: tabla_conceptos",
-    "    grafico: barras_agrupadas  # opciones: barras_agrupadas, barras_apiladas, barras_horizontales, barras_medias, ninguno",
+    "    grafico: barras_agrupadas    # (solo informativo para la fase de reporte/gráfico)",
     "    notas:",
     "      - \"Comentario opcional que aparecerá como nota de tabla.\"",
-    "      - \"Se pueden agregar varias notas.\"",
+    "      - \"Aquí se podría indicar fuente, aclaraciones metodológicas, etc.\"",
     "",
     "    filas:",
-    "      # Cada fila define un 'concepto' y agrupa una o más variables como grupos lógicos.",
-    "      # Los nombres de grupo (total, evento, etc.) pueden luego referenciarse como '@total', '@evento' en las columnas.",
+    "      # Cada entrada en `filas` representa un concepto o categoría de análisis.",
+    "      #",
+    "      # La clave `grupos` permite agrupar una o más variables bajo un nombre",
+    "      # que luego será referenciado como `@total`, `@evento`, etc. en las columnas.",
+    "      #",
     "      - id: concepto_a",
     "        label: \"Concepto A\"",
     "        grupos:",
-    "          total:  { vars: [var_a_total] }        # suma simple (p.ej. total de personal)",
-    "          evento: { vars: [var_a_evento] }       # variable dicotómica 0/1 (p.ej. capacitados)",
+    "          total:  { vars: [var_a_total] }    # p.ej. número total de personas/servicios en A",
+    "          evento: { vars: [var_a_evento] }   # p.ej. número de personas con cierta característica",
     "",
     "      - id: concepto_b",
     "        label: \"Concepto B\"",
@@ -102,7 +175,15 @@ indicadores_yaml <- function(path = "indicadores.yaml",
     "          evento: { vars: [var_b_evento] }",
     "",
     "    columnas:",
-    "      # Ejemplo: total n, n con evento y % con evento",
+    "      # En `columnas` se especifica QUÉ se quiere calcular por cada fila.",
+    "      #",
+    "      # TIPOS MÁS FRECUENTES EN tabla_conceptos:",
+    "      # - suma             : suma ponderada (si hay pesos) de un grupo/variable.",
+    "      # - conteo_cond      : conteo ponderado de casos que cumplen una condición.",
+    "      # - proporcion_cond  : proporción (0–1) respecto al total con dato.",
+    "      # - proporcion_rel   : num/den a partir de otras columnas del mismo indicador.",
+    "      # - media, mediana, minimo, maximo: medidas numéricas clásicas.",
+    "      #",
     "      - id: total_n",
     "        label: \"Total - n\"",
     "        tipo: suma",
@@ -116,13 +197,24 @@ indicadores_yaml <- function(path = "indicadores.yaml",
     "      - id: evento_pct",
     "        label: \"Evento - %\"",
     "        tipo: proporcion_rel",
-    "        numerador: evento_n",
-    "        denominador: total_n",
+    "        numerador: evento_n      # usa el valor ya calculado en la columna `evento_n`",
+    "        denominador: total_n     # y lo divide entre `total_n`",
     "",
     "",
-    "  # ------------------------------------------------------------",
+    "  # ===========================================================",
     "  # EJEMPLO 2: tabla_conceptos con condiciones sobre códigos",
-    "  # ------------------------------------------------------------",
+    "  #              de preguntas select_one",
+    "  # ===========================================================",
+    "  #",
+    "  # CUÁNDO USAR ESTE TIPO:",
+    "  # - Cuando se tiene una variable de respuesta única (select_one) donde",
+    "  #   los códigos (1, 2, 3, 4, ...) representan categorías de respuesta.",
+    "  #",
+    "  # IDEA GENERAL:",
+    "  # - Cada fila usa un grupo `resp` que contiene la variable con códigos.",
+    "  # - Cada columna aplica una `condicion` sobre ese grupo (== 1, == 2, etc.).",
+    "  # - Se pueden calcular `n` y `%` para cada código dentro de cada fila.",
+    "  #",
     "  - id: IND2",
     "    nombre_corto: \"ejemplo_condiciones\"",
     "    titulo: \"Ejemplo con condiciones sobre códigos de respuesta\"",
@@ -135,14 +227,17 @@ indicadores_yaml <- function(path = "indicadores.yaml",
     "      - id: serv_x",
     "        label: \"Servicio X\"",
     "        grupos:",
-    "          resp: { vars: [p001] }   # select_one codificada 1,2,3,4...",
+    "          resp: { vars: [p001] }   # variable con códigos 1,2,3,4,...",
     "      - id: serv_y",
     "        label: \"Servicio Y\"",
     "        grupos:",
     "          resp: { vars: [p002] }",
     "",
     "    columnas:",
-    "      # Cada columna aplica una condición distinta sobre la misma variable del grupo '@resp'",
+    "      # Cada columna aplica una condición diferente sobre el mismo grupo `@resp`.",
+    "      # La condición se interpreta como una expresión sobre `x`, donde `x` es el valor",
+    "      # del grupo/variable para cada fila de rp_data.",
+    "",
     "      - id: n_cod_1",
     "        label: \"Código 1 - n\"",
     "        tipo: conteo_cond",
@@ -168,9 +263,26 @@ indicadores_yaml <- function(path = "indicadores.yaml",
     "        condicion: \"== 2\"",
     "",
     "",
-    "  # ------------------------------------------------------------",
+    "  # ===========================================================",
     "  # EJEMPLO 3: tabla_compuesta (cada fila es una condición distinta)",
-    "  # ------------------------------------------------------------",
+    "  # ===========================================================",
+    "  #",
+    "  # CUÁNDO USAR ESTE TIPO:",
+    "  # - Cuando se quieren definir filas a partir de expresiones lógicas",
+    "  #   directamente sobre las variables de rp_data (sin grupos).",
+    "  # - Por ejemplo: EESS que cumplen una combinación de condiciones.",
+    "  #",
+    "  # IDEA GENERAL:",
+    "  # - Cada fila define una `condicion` como una expresión de R sobre las",
+    "  #   variables de rp_data (var_a, var_b, region, etc.).",
+    "  # - La columna `conteo_cond_fila` cuenta cuántos registros cumplen esa condición.",
+    "  # - La columna `proporcion_sobre_total` calcula la proporción respecto a una",
+    "  #   fila que se define como `total`.",
+    "  #",
+    "  # HELPER DISPONIBLE EN `condicion` (a nivel de fila):",
+    "  # - valid(...) o valido(...): TRUE si al menos una de las variables tiene dato no NA.",
+    "  #   Ejemplo: valid(var_a, var_b)",
+    "  #",
     "  - id: IND3",
     "    nombre_corto: \"ejemplo_compuesto\"",
     "    titulo: \"Ejemplo de indicador compuesto a partir de varias condiciones\"",
@@ -181,7 +293,6 @@ indicadores_yaml <- function(path = "indicadores.yaml",
     "      - \"La fila 'total' suele definir el denominador común (p.ej. todos los EESS válidos).\"",
     "",
     "    filas:",
-    "      # Cada fila define una condición en términos de variables de rp_data",
     "      - id: cond_a",
     "        label: \"Caso A (var_a == 1)\"",
     "        condicion: \"var_a == 1\"",
@@ -201,21 +312,33 @@ indicadores_yaml <- function(path = "indicadores.yaml",
     "    columnas:",
     "      - id: n",
     "        label: \"n\"",
-    "        tipo: conteo_cond_fila    # cuenta ponderada de registros que cumplen la condición de la fila",
+    "        tipo: conteo_cond_fila    # cuenta ponderada de registros que cumplen la condición de cada fila",
     "",
     "      - id: pct",
     "        label: \"%\"",
     "        tipo: proporcion_sobre_total",
-    "        referencia_total_fila: \"total\"  # la fila 'total' es el denominador común",
+    "        referencia_total_fila: \"total\"  # la fila 'total' se usa como denominador común",
     "",
     "",
-    "  # ------------------------------------------------------------",
-    "  # EJEMPLO 4: freq_multiple para select_multiple ya dummificada",
-    "  # ------------------------------------------------------------",
+    "  # ===========================================================",
+    "  # EJEMPLO 4: freq_multiple (modo = \"dummy\")",
+    "  #             para preguntas select_multiple ya dummificadas",
+    "  # ===========================================================",
+    "  #",
+    "  # CUÁNDO USAR ESTE TIPO:",
+    "  # - Cuando una pregunta de respuesta múltiple (select_multiple) ya",
+    "  #   se ha convertido en una serie de variables dummy 0/1 (p.ej. p200.1, p200.2...).",
+    "  #",
+    "  # IDEA GENERAL:",
+    "  # - Cada variable dummy indica si se marcó (1) o no (0) una opción.",
+    "  # - Cada fila de la tabla será una opción de respuesta.",
+    "  # - Se calcula `n` (casos que tienen 1) y `%` (respecto a quienes tienen dato válido).",
+    "  #",
     "  - id: IND4",
     "    nombre_corto: \"ejemplo_multi\"",
     "    titulo: \"Ejemplo de frecuencias para una pregunta de respuesta múltiple\"",
     "    tipo: freq_multiple",
+    "    modo: dummy         # modo \"dummy\": filas = variables dummificadas",
     "    grafico: barras_horizontales",
     "    notas:",
     "      - \"Se asume que cada dummy es 0/1 y tiene attr(label) con el texto de la opción.\"",
@@ -227,19 +350,32 @@ indicadores_yaml <- function(path = "indicadores.yaml",
     "      - \"p200.3\"    # Opción 3",
     "      - \"p200.70\"   # Opción 'Otros' (convención frecuente para 'Otros')",
     "",
-    "    usar_labels: true        # lee attr(label) para el nombre de fila",
-    "    valor_si: 1              # qué valor se interpreta como \"marcado\"",
-    "    incluir_total: true",
+    "    usar_labels: true        # usa attr(label) de cada variable como texto de fila",
+    "    valor_si: 1              # valor que se interpreta como \"marcado\"",
+    "    incluir_total: true      # agrega una fila Total al final",
     "    total_label: \"Total\"",
     "",
     "",
-    "  # ------------------------------------------------------------",
-    "  # EJEMPLO 5: freq_multiple de varias select_one en bloque",
-    "  # ------------------------------------------------------------",
+    "  # ===========================================================",
+    "  # EJEMPLO 5: freq_multiple (modo = \"por_variable\")",
+    "  #             para varias select_one en bloque",
+    "  # ===========================================================",
+    "  #",
+    "  # CUÁNDO USAR ESTE TIPO:",
+    "  # - Cuando se desea agrupar varias tablas de frecuencia simple",
+    "  #   (p.ej. varias preguntas select_one) dentro de un mismo indicador.",
+    "  #",
+    "  # IDEA GENERAL:",
+    "  # - Cada entrada en `vars` define una pregunta distinta (p010, p011, p012...).",
+    "  # - Para cada una, la función genera una tabla de frecuencias independientes.",
+    "  # - El resultado de `indicadores_tablas()` incluirá `tablas_por_variable`",
+    "  #   dentro del bloque correspondiente a este indicador.",
+    "  #",
     "  - id: IND5",
     "    nombre_corto: \"frecuencias_varias\"",
     "    titulo: \"Frecuencias simples de varias preguntas\"",
     "    tipo: freq_multiple",
+    "    modo: por_variable    # modo \"por_variable\": una tabla por pregunta",
     "    grafico: ninguno",
     "    notas:",
     "      - \"Útil para agrupar varias tablas de frecuencia simples bajo un mismo indicador.\"",
@@ -260,9 +396,19 @@ indicadores_yaml <- function(path = "indicadores.yaml",
     "      total_label: \"Total\"",
     "",
     "",
-    "  # ------------------------------------------------------------",
+    "  # ===========================================================",
     "  # EJEMPLO 6: tabla_conceptos con medidas numéricas (media, mediana...)",
-    "  # ------------------------------------------------------------",
+    "  # ===========================================================",
+    "  #",
+    "  # CUÁNDO USAR ESTE TIPO:",
+    "  # - Cuando se tienen variables numéricas (montos, tiempos, edades, etc.)",
+    "  #   y se quieren calcular medidas como media, mediana, mínimo, máximo, etc.",
+    "  #",
+    "  # IDEA GENERAL:",
+    "  # - Cada fila representa un grupo o categoría.",
+    "  # - El grupo `valor` contiene la(s) variable(s) numérica(s) a resumir.",
+    "  # - Las columnas calculan diferentes medidas a partir de `@valor`.",
+    "  #",
     "  - id: IND6",
     "    nombre_corto: \"medidas_numericas\"",
     "    titulo: \"Ejemplo de promedios, medianas, mínimos y máximos\"",
@@ -322,9 +468,19 @@ indicadores_yaml <- function(path = "indicadores.yaml",
     "        denominador: n_dato",
     "",
     "",
-    "  # ------------------------------------------------------------",
-    "  # EJEMPLO 7: indicador que usa banderas precomputadas en rp_data",
-    "  # ------------------------------------------------------------",
+    "  # ===========================================================",
+    "  # EJEMPLO 7: tabla_compuesta usando banderas precomputadas",
+    "  #             (flags lógicos calculados previamente en R)",
+    "  # ===========================================================",
+    "  #",
+    "  # CUÁNDO USAR ESTE TIPO:",
+    "  # - Cuando ya se han creado variables bandera en R (TRUE/FALSE o 0/1)",
+    "  #   que resumen condiciones complejas.",
+    "  #",
+    "  # IDEA GENERAL:",
+    "  # - rp_data ya contiene variables como `flag_condicion_a`, `flag_condicion_b`, etc.",
+    "  # - Aquí solo se hace referencia a esas banderas dentro de `condicion`.",
+    "  #",
     "  - id: IND7",
     "    nombre_corto: \"banderas_precomputadas\"",
     "    titulo: \"Ejemplo de uso de variables bandera calculadas en R\"",
@@ -364,8 +520,15 @@ indicadores_yaml <- function(path = "indicadores.yaml",
     "",
     "# ===============================================================",
     "# Fin de la plantilla de ejemplo",
+    "#",
     "# A partir de aquí se pueden agregar más indicadores adaptados",
     "# al proyecto real, copiando y modificando los bloques previos.",
+    "#",
+    "# Sugerencia práctica:",
+    "# - Comenzar copiando solo 1 o 2 bloques que se parezcan mucho a lo",
+    "#   que se necesita en el proyecto real.",
+    "# - Probar rápidamente con `indicadores_tablas()` y revisar las tablas",
+    "#   resultantes antes de construir un esquema más grande.",
     "# ==============================================================="
   )
 

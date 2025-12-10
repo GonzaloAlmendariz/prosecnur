@@ -17,45 +17,63 @@ existe, la función lanza un error y no sobreescribe el archivo.}
 Invisiblemente, la ruta del archivo generado.
 }
 \description{
-Esta función crea un archivo YAML de ejemplo que actúa como guía/tutorial
-para declarar indicadores a partir de una base de datos en formato similar
-a \code{rp_data}. El archivo incluye:
+Esta función crea un archivo YAML de ejemplo que sirve como \strong{guía práctica}
+para declarar indicadores que luego serán procesados por
+\code{indicadores_tablas()}.
 }
 \details{
-\itemize{
-\item Encabezado general (\code{version}, \code{nombre}, \code{peso}).
-\item Ejemplos de indicadores de tipo:
-\itemize{
-\item \code{tabla_conceptos}
-\item \code{tabla_compuesta}
-\item \code{freq_multiple}
+El archivo YAML generado está fuertemente comentado (con \code{#}) y está
+pensado para leerse “como un tutorial”. La idea es:
+
+\enumerate{
+\item Generar este archivo con \code{indicadores_yaml()}.
+\item Abrirlo en un editor de texto (RStudio, VS Code, etc.).
+\item Leer los comentarios y adaptar los bloques a la estructura real de
+la base \code{rp_data} (nombres de variables, filtros, etiquetas).
+\item Guardar una versión ajustada (por ejemplo, \code{config_indicadores.yaml}).
+\item Usar ese YAML con \code{indicadores_tablas(rp_data, "config_indicadores.yaml")}.
 }
-\item Ejemplos de columnas con distintos tipos de cálculo:
+
+El YAML incluye:
 \itemize{
+\item Un encabezado general:
+\itemize{
+\item \code{version}: número de versión de la configuración.
+\item \code{nombre}: nombre del proyecto o del set de indicadores.
+\item \code{peso}: (opcional) nombre de la variable de ponderación en \code{rp_data}.
+}
+\item Varios ejemplos de indicadores:
+\item \code{tabla_conceptos}: filas = conceptos, columnas = cálculos sobre grupos de variables.
+\item \code{tabla_compuesta}: filas = condiciones lógicas evaluadas sobre \code{rp_data}.
+\item \code{freq_multiple}:
+\item modo \code{"dummy"}: para preguntas \code{select_multiple} ya dummificadas (0/1).
+\item modo \code{"por_variable"}: para generar tablas de frecuencia simple de varias \code{select_one}.
+\item Ejemplos de tipos de columna:
 \item \code{suma}
 \item \code{conteo_cond}, \code{proporcion_cond}
 \item \code{proporcion_rel}
 \item \code{media}, \code{mediana}, \code{minimo}, \code{maximo}
 \item \code{conteo_cond_fila}, \code{proporcion_sobre_total}
-}
-\item Uso de:
-\itemize{
-\item \code{filas}/\code{grupos} con atajos tipo \code{@total}, \code{@evento}, etc.
-\item Indicadores compuestos basados en expresiones lógicas (\code{tabla_compuesta}).
-\item Preguntas de respuesta múltiple dummificadas (\code{freq_multiple} con \code{usar_labels}).
-\item Banderas precomputadas en \code{rp_data} (e.g. \code{flag_condicion_a}).
-}
+\item Ejemplos de uso de:
+\item \code{filas}/\code{grupos} con referencias tipo \code{@total}, \code{@evento}.
+\item Condiciones lógicas sobre variables de \code{rp_data}.
+\item Preguntas de respuesta múltiple dummificadas.
+\item Banderas lógicas precomputadas en \code{rp_data} (por ejemplo \code{flag_condicion_a}).
 }
 
-El objetivo es que el archivo generado sirva como plantilla comentada para
-que cada usuario pueda adaptarlo a su propio cuestionario y base de datos.
+El objetivo es que el archivo generado funcione como \strong{plantilla comentada}
+que puede copiarse, renombrarse y adaptar al cuestionario y a la base de
+datos reales.
 }
 \examples{
 \dontrun{
-# Generar un YAML de ejemplo en el directorio de trabajo
-reporte_yaml()
+# 1. Generar un YAML de ejemplo en el directorio de trabajo
+indicadores_yaml()
 
-# Generar en otra ruta, sobreescribiendo si ya existe
-reporte_yaml("config_indicadores.yaml", overwrite = TRUE)
+# 2. Generar en otra ruta, sobreescribiendo si ya existe
+indicadores_yaml("config_indicadores.yaml", overwrite = TRUE)
+
+# 3. Luego, usarlo con:
+#    res <- indicadores_tablas(rp_data, "config_indicadores.yaml")
 }
 }
