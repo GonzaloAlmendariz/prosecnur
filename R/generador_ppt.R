@@ -352,9 +352,41 @@ reporte_ppt <- function(
 
     if (!nrow(tab)) return(tab)
 
-    tab |>
+    # Extraer N correcto desde la fila "Total"
+    N_total <- NA_real_
+    if ("Opciones" %in% names(tab) && "n" %in% names(tab)) {
+      idx_tot <- which(tab$Opciones == "Total")
+      if (length(idx_tot)) {
+        N_total <- suppressWarnings(as.numeric(tab$n[idx_tot[1]]))
+      }
+    }
+
+    tab2 <- tab |>
       dplyr::filter(.data$Opciones != "Total") |>
-      dplyr::filter(is.na(.data$n) == FALSE & .data$n > 0)
+      dplyr::filter(!is.na(.data$n) & .data$n > 0)
+
+    if (is.finite(N_total)) {
+      attr(tab2, "N_total") <- N_total
+    }
+
+    tab2
+  }
+
+  .N_total_from_tab <- function(tab, total_casos = NULL) {
+    N <- attr(tab, "N_total", exact = TRUE)
+
+    if (is.null(N) || !is.finite(N)) {
+      N <- sum(tab$n, na.rm = TRUE)
+    }
+
+    # Por seguridad: nunca dejar que N supere el total de casos de la base
+    if (!is.null(total_casos) &&
+        is.finite(total_casos) && total_casos > 0 &&
+        is.finite(N) && N > total_casos) {
+      N <- total_casos
+    }
+
+    N
   }
 
   # Helper: dado un vector de frecuencias n, devuelve porcentajes ENTEROS
@@ -400,7 +432,7 @@ reporte_ppt <- function(
   .build_tab_barras_agrupadas <- function(tab_freq, var_label) {
     if (!nrow(tab_freq)) return(NULL)
 
-    n_total <- sum(tab_freq$n, na.rm = TRUE)
+    n_total <- .N_total_from_tab(tab_freq, total_casos)
 
     pct_raw <- tab_freq$pct
     if (all(is.na(pct_raw))) return(NULL)
@@ -427,7 +459,7 @@ reporte_ppt <- function(
   .build_tab_barras_apiladas <- function(tab_freq, var_label) {
     if (!nrow(tab_freq)) return(NULL)
 
-    n_total <- sum(tab_freq$n, na.rm = TRUE)
+    n_total <- .N_total_from_tab(tab_freq, total_casos)
     n_cat   <- nrow(tab_freq)
 
     # Distribución de porcentajes ENTEROS que suman 100
@@ -478,6 +510,17 @@ reporte_ppt <- function(
         mostrar_todo  = mostrar_todo
       )
 
+      if (!nrow(tab)) next
+
+      # N correcto = fila "Total"
+      N_total_v <- NA_real_
+      if ("Opciones" %in% names(tab) && "n" %in% names(tab)) {
+        idx_tot <- which(tab$Opciones == "Total")
+        if (length(idx_tot)) {
+          N_total_v <- suppressWarnings(as.numeric(tab$n[idx_tot[1]]))
+        }
+      }
+
       tab <- tab |>
         dplyr::filter(Opciones != "Total") |>
         dplyr::filter(!is.na(n) & n > 0)
@@ -490,7 +533,7 @@ reporte_ppt <- function(
         label_v <- stringr::str_wrap(label_v, width = wrap_y)
       }
 
-      n_total <- sum(tab$n)
+      n_total <- if (is.finite(N_total_v)) N_total_v else sum(tab$n, na.rm = TRUE)
 
       pct_int <- .pct_enteros_100(tab$n)
 
@@ -507,6 +550,7 @@ reporte_ppt <- function(
     }
 
     if (!length(listas)) return(NULL)
+
 
     # ------------------------------------------------------------------
     # Ordenar las opciones según el orden formal de la lista en CHOICES
@@ -977,15 +1021,20 @@ reporte_ppt <- function(
       }
 
       # --- resumen N y ratio de respuestas para esta variable ---
-      n_var <- sum(tab_freq$n, na.rm = TRUE)
+      n_var <- .N_total_from_tab(tab_freq, total_casos)
+
       if (is.finite(n_var) && n_var >= 0 && total_casos > 0) {
         ratio <- n_var / total_casos * 100
-        resumen_n_txt <- sprintf("N = %s | Ratio de respuestas: %.1f%%",
-                                 format(n_var, big.mark = ",", scientific = FALSE),
-                                 ratio)
+        resumen_n_txt <- sprintf(
+          "N = %s | Ratio de respuestas: %.1f%%",
+          format(n_var, big.mark = ",", scientific = FALSE),
+          ratio
+        )
       } else if (is.finite(n_var)) {
-        resumen_n_txt <- sprintf("N = %s",
-                                 format(n_var, big.mark = ",", scientific = FALSE))
+        resumen_n_txt <- sprintf(
+          "N = %s",
+          format(n_var, big.mark = ",", scientific = FALSE)
+        )
       } else {
         resumen_n_txt <- NULL
       }

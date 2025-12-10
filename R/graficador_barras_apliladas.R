@@ -785,7 +785,7 @@ graficar_barras_apiladas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 6.bis. Recomposición con cowplot (95% barras / 5% leyenda fija)
+  # 6.bis. Recomposición con cowplot (barras arriba / leyenda abajo SIN solaparse)
   # ---------------------------------------------------------------------------
   if (mostrar_leyenda && usar_leyenda_cowplot) {
 
@@ -796,12 +796,14 @@ graficar_barras_apiladas <- function(
       )
     }
 
+    # Plot base sin leyenda y con margen inferior pequeño
     p_base_sin_leyenda <- p +
       ggplot2::theme(
         legend.position = "none",
         plot.margin     = ggplot2::margin(t = 10, r = 10, b = 6, l = 10)
       )
 
+    # Leyenda tal cual se ve en `p`
     leg <- cowplot::get_legend(
       p +
         ggplot2::theme(
@@ -817,6 +819,7 @@ graficar_barras_apiladas <- function(
 
     n_items_leyenda <- length(niveles_leyenda)
 
+    # Ancho "efectivo" de la fila para estimar centro horizontal
     ancho_fila <- if (n_items_leyenda <= 6) {
       n_items_leyenda
     } else {
@@ -831,43 +834,76 @@ graficar_barras_apiladas <- function(
       TRUE           ~ 0.22
     )
 
+    # Respeta tu override manual si lo pasas por `centro_cowplot`
     if (!is.na(centro_cowplot) && is.finite(centro_cowplot)) {
       pos_leyenda_x <- centro_cowplot
     }
+
+    # Porción de alto para la leyenda (bloque inferior)
+    legend_frac <- 0.12  # 12% del alto total → más aire entre barras y leyenda
 
     p <- cowplot::ggdraw() +
       cowplot::draw_plot(
         p_base_sin_leyenda,
         x      = 0,
-        y      = 0.05,
+        y      = legend_frac,        # barras empiezan ENCIMA de la leyenda
         width  = 1,
-        height = 0.95
+        height = 1 - legend_frac     # resto del alto
       ) +
       cowplot::draw_grob(
         leg,
         x      = pos_leyenda_x,
-        y      = 0.035,
+        y      = 0,                  # leyenda en la franja inferior
         width  = 1,
-        height = 0.05
+        height = legend_frac
       )
   }
 
   # ---------------------------------------------------------------------------
-  # 7. Exportación (altura total simple, sin ajustes raros por filas de leyenda)
+  # 7. Exportación (altura total con pequeños ajustes para Word)
   # ---------------------------------------------------------------------------
   n_categorias <- length(unique(df_long[[var_categoria]]))
 
-  alto_por_cat_eff <- alto_por_categoria %||% 0.35
+  # Tope máximo razonable en pulgadas
+  alto_max_total <- 9
+
+  # Altura base por categoría
+  alto_por_cat_base <- alto_por_categoria %||% 0.35
+
+  # Si hay pocas categorías (1–2), dar más aire vertical a las barras
+  if (n_categorias <= 2L) {
+    alto_por_cat_eff <- max(alto_por_cat_base, 0.9)
+  } else {
+    alto_por_cat_eff <- alto_por_cat_base
+  }
 
   alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
 
+  # Caption (nota al pie interna del gráfico), si existe
   tiene_caption <- !is.null(caption_text) && nzchar(caption_text)
   alto_cap      <- if (tiene_caption) 0.25 else 0
 
-  # Bloque fijo de leyenda (aplicable tanto si cowplot como si no)
-  alto_leyenda <- if (mostrar_leyenda) 0.7 else 0
+  # Bloque de leyenda: un poco más alto si hay muchas categorías en la leyenda
+  n_items_leyenda <- length(levels(df_long$.grupo))
 
+  alto_leyenda <- if (mostrar_leyenda && n_items_leyenda > 0L) {
+    if (n_items_leyenda <= 6L) {
+      1.4    # 1 fila aprox.
+    } else {
+      2    # 2 filas o más → más altura para que no se coma la barra
+    }
+  } else {
+    0
+  }
+
+  # Altura total sugerida
   alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap
+  alto_total_sugerido <- min(alto_total_sugerido, alto_max_total)
+
+  # Evitar que el gráfico quede demasiado aplastado en casos muy simples
+  # (por ejemplo, 1 barra + leyenda de 2 filas).
+  alto_min <- if (n_categorias <= 2L) 2.4 else 1.0
+  alto_total_sugerido <- max(alto_total_sugerido, alto_min)
 
   if (exportar == "rplot") {
     attr(p, "alto_word_sugerido") <- alto_total_sugerido

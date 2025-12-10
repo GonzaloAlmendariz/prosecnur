@@ -254,9 +254,47 @@ reporte_word <- function(
 
     if (!nrow(tab)) return(tab)
 
-    tab |>
+    # Extraer N correcto desde la fila "Total"
+    N_total <- NA_real_
+    if ("Opciones" %in% names(tab) && "n" %in% names(tab)) {
+      idx_tot <- which(tab$Opciones == "Total")
+      if (length(idx_tot)) {
+        N_total <- suppressWarnings(as.numeric(tab$n[idx_tot[1]]))
+      }
+    }
+
+    tab2 <- tab |>
       dplyr::filter(.data$Opciones != "Total") |>
-      dplyr::filter(is.na(.data$n) == FALSE & .data$n > 0)
+      dplyr::filter(!is.na(.data$n) & .data$n > 0)
+
+    if (is.finite(N_total)) {
+      attr(tab2, "N_total") <- N_total
+    }
+
+    tab2
+  }
+
+  .N_total_from_tab <- function(tab, total_casos = NULL) {
+    # Primero intentamos leer el atributo N_total (si vino de .tab_freq_var)
+    N <- attr(tab, "N_total", exact = TRUE)
+
+    # Si no existe, fallback: suma de n
+    if (is.null(N) || !is.finite(N)) {
+      if ("n" %in% names(tab)) {
+        N <- sum(tab$n, na.rm = TRUE)
+      } else {
+        N <- NA_real_
+      }
+    }
+
+    # Seguridad: no dejar que N supere el total de casos de la base
+    if (!is.null(total_casos) &&
+        is.finite(total_casos) && total_casos > 0 &&
+        is.finite(N) && N > total_casos) {
+      N <- total_casos
+    }
+
+    N
   }
 
   # Helper: dado un vector de frecuencias n, devuelve porcentajes ENTEROS
@@ -299,21 +337,10 @@ reporte_word <- function(
     floor_pct
   }
 
-  .extraer_N_total <- function(tab_freq) {
-    if ("N" %in% names(tab_freq)) {
-      N_vals <- suppressWarnings(as.numeric(unique(tab_freq$N)))
-      N_vals <- N_vals[is.finite(N_vals)]
-      if (length(N_vals)) {
-        return(max(N_vals))
-      }
-    }
-    sum(tab_freq$n, na.rm = TRUE)
-  }
-
   .build_tab_barras_agrupadas <- function(tab_freq, var_label) {
     if (!nrow(tab_freq)) return(NULL)
 
-    n_total <- .extraer_N_total(tab_freq)
+    n_total <- .N_total_from_tab(tab_freq, total_casos)
 
     pct_raw <- tab_freq$pct
     if (all(is.na(pct_raw))) return(NULL)
@@ -340,7 +367,7 @@ reporte_word <- function(
   .build_tab_barras_apiladas <- function(tab_freq, var_label) {
     if (!nrow(tab_freq)) return(NULL)
 
-    n_total <- .extraer_N_total(tab_freq)
+    n_total <- .N_total_from_tab(tab_freq, total_casos)
     if (!is.finite(n_total) || n_total <= 0) return(NULL)
 
     n_cat <- nrow(tab_freq)
@@ -385,7 +412,7 @@ reporte_word <- function(
 
     for (v in vars) {
 
-      tab <- freq_table_spss(
+      tab_full <- freq_table_spss(
         data,
         v,
         survey        = survey,
@@ -394,7 +421,18 @@ reporte_word <- function(
         mostrar_todo  = mostrar_todo
       )
 
-      tab <- tab |>
+      if (!nrow(tab_full)) next
+
+      # N de la variable según fila "Total"
+      N_total <- NA_real_
+      if ("Opciones" %in% names(tab_full) && "n" %in% names(tab_full)) {
+        idx_tot <- which(tab_full$Opciones == "Total")
+        if (length(idx_tot)) {
+          N_total <- suppressWarnings(as.numeric(tab_full$n[idx_tot[1]]))
+        }
+      }
+
+      tab <- tab_full |>
         dplyr::filter(Opciones != "Total") |>
         dplyr::filter(!is.na(n) & n > 0)
 
@@ -406,7 +444,13 @@ reporte_word <- function(
         label_v <- stringr::str_wrap(label_v, width = wrap_y)
       }
 
-      n_total <- .extraer_N_total(tab)
+      # Si no se pudo leer N_total, fallback a suma de n controlada por total_casos
+      n_total <- if (is.finite(N_total)) {
+        N_total
+      } else {
+        .N_total_from_tab(tab, total_casos)
+      }
+
       pct_int <- .pct_enteros_100(tab$n)
 
       listas[[v]] <- list(
@@ -889,7 +933,7 @@ reporte_word <- function(
       }
 
       # --- N de la pregunta (base por persona, no por alternativas) ---
-      n_var <- .extraer_N_total(tab_freq)
+      n_var <- .N_total_from_tab(tab_freq)
 
       N_texto <- NULL
       if (is.finite(n_var) && n_var >= 0) {
