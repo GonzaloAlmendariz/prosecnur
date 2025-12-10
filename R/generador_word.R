@@ -1484,7 +1484,6 @@ reporte_word <- function(
           width  = width_word,
           height = height_word
         )
-
         # ---------------- PIE CENTRADO ----------------
         pie_full <- NULL
 

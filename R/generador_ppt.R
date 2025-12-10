@@ -1180,6 +1180,35 @@ reporte_ppt <- function(
               (!is.na(list_name_v) && list_name_v %in% ln_inv_ley)
           )
 
+          cols <- tab_apil$cols_porcentaje
+          # nombres humanos de las categorías en el mismo orden que las columnas
+          labs <- unname(tab_apil$etiquetas_grupos[cols])
+
+          # Orden real de apilado (barras)
+          niveles_plot <- labs
+          if (invertir_segmentos_var) {
+            niveles_plot <- rev(niveles_plot)
+            cols         <- rev(cols)
+          }
+
+          # Orden de la leyenda (puede coincidir o no con el de las barras)
+          niveles_leyenda <- niveles_plot
+          if (invertir_leyenda_var) {
+            niveles_leyenda <- rev(niveles_leyenda)
+          }
+
+          # Actualizar objeto tab_apil con el nuevo orden
+          tab_apil$cols_porcentaje <- cols
+          tab_apil$etiquetas_grupos <- stats::setNames(niveles_leyenda, cols)
+
+          # Ajustar paleta a ese orden de leyenda
+          if (!is.null(colores_grupos)) {
+            colores_grupos <- colores_grupos[niveles_leyenda]
+          }
+
+          invertir_segmentos_var_use <- FALSE
+          invertir_leyenda_var_use   <- FALSE
+
           # Limpiar claves "meta" que el graficador NO conoce
           estilos_apiladas_clean <- estilos_barras_apiladas
           estilos_apiladas_clean$listnames_invertir_segmentos <- NULL

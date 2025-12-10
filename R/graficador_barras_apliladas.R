@@ -304,13 +304,26 @@ graficar_barras_apiladas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 1.1 Orden de grupos (segmentos), con opción de invertir
+  # 1.1 Orden de grupos (segmentos) y orden de leyenda (separados)
   # ---------------------------------------------------------------------------
-  niveles_grupos <- unname(etiquetas_grupos)
-  if (invertir_segmentos) {
-    niveles_grupos <- rev(niveles_grupos)
+  niveles_originales <- unname(etiquetas_grupos)
+
+  # Orden para el APILADO (segmentos en la barra)
+  niveles_stack <- if (invertir_segmentos) {
+    niveles_originales
+  } else {
+    rev(niveles_originales)
   }
-  df_long$.grupo <- factor(df_long$.grupo, levels = niveles_grupos)
+
+  # Orden para la LEYENDA (independiente de los segmentos)
+  niveles_leyenda <- if (invertir_leyenda) {
+    rev(niveles_originales)
+  } else {
+    niveles_originales
+  }
+
+  # Este factor manda en el apilado real
+  df_long$.grupo <- factor(df_long$.grupo, levels = niveles_stack)
 
   # ---------------------------------------------------------------------------
   # 1.2 Orden de categorías (barras Y), con opción de invertir
@@ -659,28 +672,44 @@ graficar_barras_apiladas <- function(
   # LEYENDA — Wrap automático de etiquetas + tamaño fijo del rectángulo
   wrap_fun <- NULL
   if (requireNamespace("stringr", quietly = TRUE)) {
-    # si quieres, aquí puedes cambiar a width = 60
     wrap_fun <- function(x) stringr::str_wrap(x, width = 40)
   }
 
-  # Aplicación del wrap a la escala de colores
   if (!is.null(colores_grupos)) {
 
-    # Paleta manual
+    # Asegurar que colores_grupos tenga nombres según niveles_originales
+    if (is.null(names(colores_grupos))) {
+      # asumimos que viene en el mismo orden que niveles_originales
+      colores_grupos <- stats::setNames(colores_grupos, niveles_originales)
+    }
+
+    # Reordenar los colores según el orden deseado de la LEYENDA
+    valores_leyenda <- colores_grupos[niveles_leyenda]
+
     p <- p +
       ggplot2::scale_fill_manual(
-        values = colores_grupos,
-        labels = if (!is.null(wrap_fun)) wrap_fun else waiver()
+        breaks = niveles_leyenda,                           # orden de la leyenda
+        values = valores_leyenda,                           # colores en ese orden
+        labels = if (!is.null(wrap_fun)) wrap_fun else ggplot2::waiver()
       )
 
   } else if (!is.null(wrap_fun)) {
 
-    # Paleta por defecto de ggplot con wrap
+    # Paleta por defecto de ggplot con wrap y orden explícito de leyenda
     p <- p +
-      ggplot2::scale_fill_discrete(labels = wrap_fun)
+      ggplot2::scale_fill_discrete(
+        breaks = niveles_leyenda,
+        labels = wrap_fun
+      )
 
+  } else {
+
+    # Paleta por defecto sin wrap, pero respetando el orden de leyenda
+    p <- p +
+      ggplot2::scale_fill_discrete(
+        breaks = niveles_leyenda
+      )
   }
-
   # Mantener el mismo tamaño de “swatch” aunque el texto tenga 1 o 2 líneas
   p <- p +
     ggplot2::theme(
@@ -698,21 +727,28 @@ graficar_barras_apiladas <- function(
     caption_text <- nota_pie_derecha
   }
 
-  # Número de ítems en la leyenda y filas necesarias (máx. 5 por fila)
-  n_items_leyenda <- length(levels(df_long$.grupo))
+  # Número de ítems en la leyenda y filas necesarias (máx. 6 por fila)
+  n_items_leyenda <- length(niveles_fill)
   n_por_fila      <- 6L
   n_filas_leyenda <- max(1L, ceiling(n_items_leyenda / n_por_fila))
 
-  # Leyenda centrada con filas dinámicas
   if (mostrar_leyenda) {
     p <- p +
       ggplot2::guides(
         fill = ggplot2::guide_legend(
-          nrow    = n_filas_leyenda,
-          reverse = invertir_leyenda
+          nrow = n_filas_leyenda
         )
       )
   }
+
+  extra_bottom_leyenda <- 0
+  if (mostrar_leyenda && n_items_leyenda > 0) {
+    if (n_filas_leyenda >= 2) extra_bottom_leyenda <- extra_bottom_leyenda + 12
+    if (n_filas_leyenda >= 3) extra_bottom_leyenda <- extra_bottom_leyenda + 5
+  }
+
+  top_margin    <- 5
+  bottom_margin <- 5 + extra_bottom_leyenda
 
   p <- p +
     ggplot2::theme_minimal(base_size = 9) +
@@ -823,7 +859,7 @@ graficar_barras_apiladas <- function(
     )
 
     # n_items_leyenda ya lo tienes calculado
-    n_items_leyenda <- length(levels(df_long$.grupo))
+    n_items_leyenda <- length(niveles_leyenda)
 
     # Ancho efectivo por fila (máx 6 por fila)
     ancho_fila <- if (n_items_leyenda <= 6) {
