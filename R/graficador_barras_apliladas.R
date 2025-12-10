@@ -136,10 +136,7 @@
 #' @param ancho Ancho del gráfico (cuando se exporta a archivo).
 #' @param alto Alto del gráfico (cuando se exporta a archivo).
 #' @param alto_por_categoria Alto (en pulgadas) a asignar por categoría en el
-#'   área de barras cuando no se especifica \code{alto}. Sobre ese alto se suma
-#'   automáticamente un bloque fijo para la leyenda (si \code{mostrar_leyenda})
-#'   y otro más pequeño para el caption (si existe), para evitar que la barra
-#'   desaparezca cuando hay pocas categorías.
+#'   área de barras cuando no se especifica \code{alto}.
 #' @param dpi Resolución en puntos por pulgada (solo para PNG).
 #'
 #' @return Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
@@ -247,8 +244,6 @@ graficar_barras_apiladas <- function(
   pulso_verde <- "#5BAF31"
 
   textos_negrita <- textos_negrita %||% character(0)
-
-  alto_extra_header <- 0
 
   # ---------------------------------------------------------------------------
   # 0. Validaciones
@@ -556,14 +551,13 @@ graficar_barras_apiladas <- function(
 
     # Función auxiliar: 1 decimal como máximo, pero sin ".0"
     .format_pct_clean <- function(x) {
-      x_round <- round(x, 1)  # seguimos con precisión 1 decimal
+      x_round <- round(x, 1)
       txt     <- format(
         x_round,
-        nsmall    = 1,
-        trim      = TRUE,
+        nsmall     = 1,
+        trim       = TRUE,
         scientific = FALSE
       )
-      # quitar ".0" al final si corresponde
       txt <- sub("\\.0$", "", txt)
       txt
     }
@@ -575,9 +569,7 @@ graficar_barras_apiladas <- function(
         by = var_categoria
       ) |>
       dplyr::mutate(
-        # Centro "teórico" de la columna de barra extra para cada barra
-        xpos_col = suma * (1 + extra_derecha_rel * 0.5),
-        # Mover un poquito a la izquierda todos los textos (N o %)
+        xpos_col  = suma * (1 + extra_derecha_rel * 0.5),
         xpos_text = xpos_col - max_suma * 0.015,
         lab_valor = dplyr::case_when(
           barra_extra_preset %in% c("top2box", "top3box", "bottom2box") ~
@@ -592,7 +584,6 @@ graficar_barras_apiladas <- function(
         lab_extra = paste0(prefijo_extra_int, lab_valor)
       )
 
-    # Textos de la barra extra (N, Top2Box, etc.), ligeramente a la izquierda
     p <- p +
       ggplot2::geom_text(
         data        = df_extra,
@@ -608,38 +599,22 @@ graficar_barras_apiladas <- function(
         fontface    = fontface_barra_extra
       )
 
-    # Encabezado de la barra extra (Total / Top 2 Box / etc.)
     if (!is.null(titulo_extra_int) && nzchar(titulo_extra_int)) {
 
       lvls         <- levels(df_long[[var_categoria]])
       cat_superior <- tail(lvls, 1)
 
-      # nº de barras en el gráfico
       n_categorias_header <- length(lvls)
 
-
-      # vjust definido por el usuario → tiene prioridad absoluta
       if (!is.null(barra_extra_vjust)) {
         vjust_header <- barra_extra_vjust
       } else {
-
-        # vjust dinámico:
-        # - 1–2 barras  → más arriba (más negativo)
-        # - 3 barras    → intermedio
-        # - 4+ barras   → como ahora (-6)
         vjust_header <- dplyr::case_when(
           n_categorias_header <= 2 ~ -8,
           n_categorias_header == 3 ~ -7,
           TRUE                     ~ -6
         )
       }
-
-      # Altura extra aproximada necesaria para que el título no se corte
-      alto_extra_header <- dplyr::case_when(
-        n_categorias_header <= 2 ~ 1.1,
-        n_categorias_header == 3 ~ 0.8,
-        TRUE                     ~ 0.6
-      )
 
       df_header <- data.frame(
         var_cat     = cat_superior,
@@ -669,7 +644,6 @@ graficar_barras_apiladas <- function(
   # 6. Colores, caption, leyenda y wrap automático de etiquetas largas
   # ---------------------------------------------------------------------------
 
-  # LEYENDA — Wrap automático de etiquetas + tamaño fijo del rectángulo
   wrap_fun <- NULL
   if (requireNamespace("stringr", quietly = TRUE)) {
     wrap_fun <- function(x) stringr::str_wrap(x, width = 40)
@@ -677,25 +651,21 @@ graficar_barras_apiladas <- function(
 
   if (!is.null(colores_grupos)) {
 
-    # Asegurar que colores_grupos tenga nombres según niveles_originales
     if (is.null(names(colores_grupos))) {
-      # asumimos que viene en el mismo orden que niveles_originales
       colores_grupos <- stats::setNames(colores_grupos, niveles_originales)
     }
 
-    # Reordenar los colores según el orden deseado de la LEYENDA
     valores_leyenda <- colores_grupos[niveles_leyenda]
 
     p <- p +
       ggplot2::scale_fill_manual(
-        breaks = niveles_leyenda,                           # orden de la leyenda
-        values = valores_leyenda,                           # colores en ese orden
+        breaks = niveles_leyenda,
+        values = valores_leyenda,
         labels = if (!is.null(wrap_fun)) wrap_fun else ggplot2::waiver()
       )
 
   } else if (!is.null(wrap_fun)) {
 
-    # Paleta por defecto de ggplot con wrap y orden explícito de leyenda
     p <- p +
       ggplot2::scale_fill_discrete(
         breaks = niveles_leyenda,
@@ -704,13 +674,12 @@ graficar_barras_apiladas <- function(
 
   } else {
 
-    # Paleta por defecto sin wrap, pero respetando el orden de leyenda
     p <- p +
       ggplot2::scale_fill_discrete(
         breaks = niveles_leyenda
       )
   }
-  # Mantener el mismo tamaño de “swatch” aunque el texto tenga 1 o 2 líneas
+
   p <- p +
     ggplot2::theme(
       legend.key.width  = grid::unit(0.3, "cm"),
@@ -727,7 +696,6 @@ graficar_barras_apiladas <- function(
     caption_text <- nota_pie_derecha
   }
 
-  # Número de ítems en la leyenda y filas necesarias (máx. 6 por fila)
   n_items_leyenda <- length(niveles_fill)
   n_por_fila      <- 6L
   n_filas_leyenda <- max(1L, ceiling(n_items_leyenda / n_por_fila))
@@ -740,15 +708,6 @@ graficar_barras_apiladas <- function(
         )
       )
   }
-
-  extra_bottom_leyenda <- 0
-  if (mostrar_leyenda && n_items_leyenda > 0) {
-    if (n_filas_leyenda >= 2) extra_bottom_leyenda <- extra_bottom_leyenda + 12
-    if (n_filas_leyenda >= 3) extra_bottom_leyenda <- extra_bottom_leyenda + 5
-  }
-
-  top_margin    <- 5
-  bottom_margin <- 5 + extra_bottom_leyenda
 
   p <- p +
     ggplot2::theme_minimal(base_size = 9) +
@@ -826,7 +785,7 @@ graficar_barras_apiladas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 6.bis. Recomposición con cowplot (95% barras / 5% leyenda)
+  # 6.bis. Recomposición con cowplot (95% barras / 5% leyenda fija)
   # ---------------------------------------------------------------------------
   if (mostrar_leyenda && usar_leyenda_cowplot) {
 
@@ -837,14 +796,12 @@ graficar_barras_apiladas <- function(
       )
     }
 
-    # Plot base sin leyenda y con margen inferior casi nulo
     p_base_sin_leyenda <- p +
       ggplot2::theme(
         legend.position = "none",
         plot.margin     = ggplot2::margin(t = 10, r = 10, b = 6, l = 10)
       )
 
-    # Leyenda extraída tal cual se ve en `p`
     leg <- cowplot::get_legend(
       p +
         ggplot2::theme(
@@ -858,78 +815,59 @@ graficar_barras_apiladas <- function(
         )
     )
 
-    # n_items_leyenda ya lo tienes calculado
     n_items_leyenda <- length(niveles_leyenda)
 
-    # Ancho efectivo por fila (máx 6 por fila)
     ancho_fila <- if (n_items_leyenda <= 6) {
       n_items_leyenda
     } else {
       ceiling(n_items_leyenda / 2)
     }
 
-    # POSICIÓN HORIZONTAL DINÁMICA DE LA LEYENDA
     pos_leyenda_x <- dplyr::case_when(
-      ancho_fila <= 2 ~ 0.48,  # 1–2 ítems: bastante centrado
-      ancho_fila == 3 ~ 0.42,  # 3 ítems
-      ancho_fila == 4 ~ 0.35,  # 4 ítems
-      ancho_fila == 5 ~ 0.30,  # 5 ítems
-      TRUE           ~ 0.22    # 6 ítems (fila llena)
+      ancho_fila <= 2 ~ 0.48,
+      ancho_fila == 3 ~ 0.42,
+      ancho_fila == 4 ~ 0.35,
+      ancho_fila == 5 ~ 0.30,
+      TRUE           ~ 0.22
     )
-    # OVERRIDE MANUAL (centro_cowplot)
+
     if (!is.na(centro_cowplot) && is.finite(centro_cowplot)) {
       pos_leyenda_x <- centro_cowplot
     }
 
-    # Composición 95% / 5%
     p <- cowplot::ggdraw() +
       cowplot::draw_plot(
         p_base_sin_leyenda,
         x      = 0,
-        y      = 0.05,  # empieza justo encima de la franja de leyenda
+        y      = 0.05,
         width  = 1,
-        height = 0.95   # 95% del alto para barras + título + caption
+        height = 0.95
       ) +
       cowplot::draw_grob(
         leg,
-        x      = pos_leyenda_x,  # mueve la leyenda hacia centro/izquierda
-        y      = 0.035,  # pegada a la parte baja, pero tocando el plot
+        x      = pos_leyenda_x,
+        y      = 0.035,
         width  = 1,
-        height = 0.05   # 5% del alto total
+        height = 0.05
       )
   }
 
   # ---------------------------------------------------------------------------
-  # 7. Exportación (altura total = panel + leyenda + caption)
+  # 7. Exportación (altura total simple, sin ajustes raros por filas de leyenda)
   # ---------------------------------------------------------------------------
   n_categorias <- length(unique(df_long[[var_categoria]]))
 
-  # Parámetros de descomposición de altura en pulgadas
-  alto_max_total <- 9.0     # tope máximo global
-  alto_caption   <- 0.25    # bloque adicional si hay caption
-
-  # Cálculo de alto sugerido para Word/PNG/PPT
   alto_por_cat_eff <- alto_por_categoria %||% 0.35
 
   alto_panel <- max(n_categorias, 1L) * alto_por_cat_eff
 
-  n_items_leyenda <- length(levels(df_long$.grupo))
-  alto_leyenda <- if (mostrar_leyenda && n_items_leyenda > 0) {
-    if (n_items_leyenda <= 5)       0.5
-    else if (n_items_leyenda <=10)  0.8
-    else                            1.1
-  } else {
-    0
-  }
-
   tiene_caption <- !is.null(caption_text) && nzchar(caption_text)
-  alto_cap      <- if (tiene_caption) alto_caption else 0
+  alto_cap      <- if (tiene_caption) 0.25 else 0
 
-  alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap + alto_extra_header
-  alto_total_sugerido <- min(alto_max_total, alto_total_sugerido)
+  # Bloque fijo de leyenda (aplicable tanto si cowplot como si no)
+  alto_leyenda <- if (mostrar_leyenda) 0.7 else 0
 
-  alto_min_suave <- (alto_por_cat_eff * 1.2) + alto_leyenda + alto_cap + alto_extra_header
-  alto_total_sugerido <- max(alto_min_suave, alto_total_sugerido)
+  alto_total_sugerido <- alto_panel + alto_leyenda + alto_cap
 
   if (exportar == "rplot") {
     attr(p, "alto_word_sugerido") <- alto_total_sugerido

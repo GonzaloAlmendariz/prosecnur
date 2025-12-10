@@ -232,10 +232,7 @@ mostrarse en negrita. Puede incluir cualquiera de:
 \item{alto}{Alto del gráfico (cuando se exporta a archivo).}
 
 \item{alto_por_categoria}{Alto (en pulgadas) a asignar por categoría en el
-área de barras cuando no se especifica \code{alto}. Sobre ese alto se suma
-automáticamente un bloque fijo para la leyenda (si \code{mostrar_leyenda})
-y otro más pequeño para el caption (si existe), para evitar que la barra
-desaparezca cuando hay pocas categorías.}
+área de barras cuando no se especifica \code{alto}.}
 
 \item{dpi}{Resolución en puntos por pulgada (solo para PNG).}
 }
