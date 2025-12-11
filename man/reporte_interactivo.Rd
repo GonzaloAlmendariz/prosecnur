@@ -2,7 +2,7 @@
 % Please edit documentation in R/generalidad_interactivo.R
 \name{reporte_interactivo}
 \alias{reporte_interactivo}
-\title{Explorador interactivo de frecuencias (Plotly + Shiny)}
+\title{Explorador interactivo de resultados tipo OPS/ACNUR}
 \usage{
 reporte_interactivo(
   data,
@@ -11,33 +11,55 @@ reporte_interactivo(
   fuente = NULL,
   titulo = "Explorador interactivo",
   colores_apiladas_por_listname = NULL,
-  facet_vars = NULL,
-  codigos_perdidos = NULL
+  codigos_perdidos = NULL,
+  facet_vars = NULL
 )
 }
 \arguments{
-\item{data}{Data.frame con la base ya adaptada (e.g. \code{rp_data}).}
+\item{data}{Base de reporte (idealmente salida de \code{reporte_data()}).}
 
-\item{instrumento}{Objeto \code{prosecnur_instrumento} de \code{reporte_instrumento()}.}
+\item{instrumento}{Objeto devuelto por \code{reporte_instrumento()}, que debe
+contener al menos el componente \code{survey} y, opcionalmente,
+\code{orders_list}.}
 
-\item{secciones}{Lista nombrada: nombre de sección -> vector de nombres de variables.}
+\item{secciones}{Lista nombrada de vectores de variables por sección,
+usada para poblar los selectores de variables de los gráficos.}
 
-\item{fuente}{Texto breve de fuente a mostrar debajo del gráfico.}
+\item{fuente}{Texto de fuente a mostrar en los pies de los gráficos.}
 
-\item{titulo}{Título general del explorador.}
+\item{titulo}{Título principal de la app.}
 
-\item{colores_apiladas_por_listname}{Lista nombrada por \code{list_name} con paletas
-(como las que ya usas en PPT/Word). Se usan solo los colores.}
+\item{colores_apiladas_por_listname}{Lista nombrada de paletas de
+colores por \code{list_name} del instrumento (para las barras apiladas).}
 
-\item{facet_vars}{Vector opcional con nombres de variables que se permiten
-usar como “Dividir gráfico por”.}
+\item{codigos_perdidos}{Vector de códigos que deben excluirse de las
+variables categóricas (por ejemplo, 96, 97, 98, 99).}
 
-\item{codigos_perdidos}{Vector opcional de códigos numéricos que deben
-tratarse como valores perdidos (ej. 99, 98, 97).}
+\item{facet_vars}{Vector de nombres de variables que se usarán como
+candidatas a filtro y a variable de cruce (estratos).}
 }
 \value{
-Lanza una app Shiny.
+Un objeto \code{shiny.appobj} que puede ejecutarse con
+\code{print()} o \code{shiny::runApp()}.
 }
 \description{
-Explorador interactivo de frecuencias (Plotly + Shiny)
+Genera una aplicación \pkg{shiny} que permite:
+\itemize{
+\item Aplicar filtros dinámicos sobre variables seleccionadas.
+\item Elegir hasta cuatro variables para graficar simultáneamente.
+\item Alternar entre vista simple (distribución total) y vista de
+cruces (una barra por estrato).
+\item Visualizar los gráficos como barras horizontales apiladas con
+etiquetas de porcentaje y N total.
+}
+}
+\details{
+El layout de la sección de configuración de gráficos se mantiene
+fijo (cuatro selectores para variables), y el panel principal
+ajusta dinámicamente el número y disposición de gráficos:
+\itemize{
+\item 1 gráfico: ocupa todo el ancho.
+\item 2 gráficos: mitad – mitad.
+\item 3–4 gráficos: cuadrícula 2 × 2.
+}
 }
