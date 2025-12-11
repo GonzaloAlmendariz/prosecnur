@@ -1,12 +1,13 @@
 # =============================================================================
-# Explorador interactivo de resultados (reporte_interactivo)
+# Explorador interactivo simple: reporte_interactivo()
+# Fase 1 – Una variable principal, filtros y cruce opcional
 # =============================================================================
 
-# Pequeño helper genérico
+# Helper genérico
 `%||%` <- function(x, y) if (!is.null(x)) x else y
 
 # -----------------------------------------------------------------------------
-# Helpers internos para labels y tipo de variable
+# Helpers internos
 # -----------------------------------------------------------------------------
 
 #' Obtener etiqueta legible de una variable
@@ -15,12 +16,6 @@
 #' `label` de la columna en `data`, y finalmente retorna el nombre
 #' de la variable si no encuentra nada.
 #'
-#' @param var Nombre de variable (string).
-#' @param instrumento Objeto del instrumento (con componente `survey`).
-#' @param data (Opcional) data.frame con los datos, para buscar
-#'   atributos de etiqueta.
-#'
-#' @return Un string con la etiqueta legible.
 #' @keywords internal
 #' @noRd
 .obtener_label_var <- function(var, instrumento, data = NULL) {
@@ -49,547 +44,396 @@
   as.character(var)
 }
 
-#' Determinar tipo de variable para el explorador interactivo
+#' Obtener etiqueta legible de una categoría (choices)
 #'
-#' Wrapper simple sobre `tipo_pregunta_spss()` para dejar abierta
-#' la posibilidad de incluir lógica adicional específica del
-#' explorador.
+#' Usa el componente `choices` del instrumento si existe.
 #'
-#' @param var Nombre de variable.
-#' @param data Base de datos.
-#' @param instrumento Instrumento con componente `survey`.
-#' @param sm_vars_force (Opcional) vector de variables que deben
-#'   tratarse como `select_multiple`.
-#'
-#' @return Lista con elemento `tipo`.
 #' @keywords internal
 #' @noRd
-tipo_var_interactivo <- function(var,
-                                 data,
-                                 instrumento,
-                                 sm_vars_force = NULL) {
-  survey <- instrumento$survey
+.obtener_label_choice <- function(list_name, value, instrumento) {
+  choices <- instrumento$choices
+  if (is.null(choices) ||
+      !all(c("list_name", "name", "label") %in% names(choices)) ||
+      is.na(list_name) || !nzchar(list_name)) {
 
-  tipo <- tipo_pregunta_spss(
-    var           = var,
-    survey        = survey,
-    sm_vars_force = sm_vars_force
-  )
+    return(as.character(value))
+  }
 
-  list(tipo = tipo)
+  ch <- choices[choices$list_name == list_name &
+                  choices$name == value, , drop = FALSE]
+
+  if (nrow(ch) == 0L) {
+    return(as.character(value))
+  }
+
+  lab <- ch$label[1]
+  if (is.na(lab) || !nzchar(as.character(lab))) {
+    return(as.character(value))
+  }
+
+  as.character(lab)
 }
 
-# -----------------------------------------------------------------------------
-# Graficador: vista simple (una barra apilada con distribución total)
-# -----------------------------------------------------------------------------
-
-#' Construir gráfico ggplot para una variable (vista simple)
+#' Wrap del título en HTML (usa <br>)
 #'
-#' Genera una barra horizontal apilada que representa la distribución
-#' de la variable sobre el total de casos, usando `graficar_barras_apiladas()`.
-#'
-#' @param data Base de datos (filtrada).
-#' @param instrumento Instrumento con `survey` y `orders_list`.
-#' @param var Nombre de la variable a graficar.
-#' @param fuente Texto de fuente para el pie de página.
-#' @param colores_apiladas_por_listname Lista de paletas por `list_name`.
-#' @param codigos_perdidos Vector de códigos a excluir para la variable.
-#'
-#' @return Un objeto `ggplot`.
 #' @keywords internal
 #' @noRd
-build_gg_for_var <- function(data,
-                             instrumento,
-                             var,
-                             fuente                         = NULL,
-                             colores_apiladas_por_listname  = NULL,
-                             codigos_perdidos               = NULL) {
+.wrap_titulo_html <- function(txt, width = 120) {
+  if (!requireNamespace("stringr", quietly = TRUE)) {
+    return(txt)
+  }
+  txt <- as.character(txt)
+  if (!nzchar(txt)) return(txt)
 
-  survey <- instrumento$survey
-  orders <- instrumento$orders_list %||% NULL
+  lineas <- stringr::str_wrap(txt, width = width)
+  paste(lineas, collapse = "<br>")
+}
 
-  tipo_info <- tipo_var_interactivo(
-    var           = var,
-    data          = data,
-    instrumento   = instrumento,
-    sm_vars_force = NULL
-  )
-  tipo <- tipo_info$tipo
+#' Construir tabla de proporciones para variable principal (simple o cruzada)
+#'
+#' Devuelve un data.frame largo con:
+#'  - estrato_label : etiqueta de la fila (Total o categoría del cruce)
+#'  - opcion_label  : etiqueta de la respuesta (No, Sí, etc.)
+#'  - pct           : proporción 0–1
+#'  - n             : conteo de casos en cada combinación
+#'
+#' @keywords internal
+#' @noRd
+.preparar_tabla_proporciones <- function(data,
+                                         instrumento,
+                                         var,
+                                         var_cruce = NULL,
+                                         codigos_perdidos = NULL) {
 
-  if (tipo == "ninguno") {
-    stop("La variable '", var, "' no se puede graficar en este explorador.",
+  if (!requireNamespace("dplyr", quietly = TRUE)) {
+    stop("Se requiere el paquete 'dplyr' para `reporte_interactivo()`.",
          call. = FALSE)
   }
 
-  d_var <- data
+  survey  <- instrumento$survey
+  choices <- instrumento$choices %||% NULL
 
-  # excluir códigos perdidos SOLO para esta variable
-  if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0 &&
-      var %in% names(d_var)) {
-
-    col_vals <- d_var[[var]]
-    if (is.numeric(col_vals)) {
-      d_var <- d_var[!(col_vals %in% codigos_perdidos), , drop = FALSE]
-    } else {
-      d_var <- d_var[!(as.character(col_vals) %in% as.character(codigos_perdidos)),
-                     , drop = FALSE]
-    }
-  }
-
-  tab_freq <- freq_table_spss(
-    data          = d_var,
-    var           = var,
-    survey        = survey,
-    sm_vars_force = NULL,
-    orders_list   = orders,
-    mostrar_todo  = TRUE
-  )
-
-  if (!nrow(tab_freq)) {
-    stop("La variable '", var, "' no tiene datos válidos tras filtros/aplicación de pesos.",
+  if (is.null(survey) || !"name" %in% names(survey)) {
+    stop("El `instrumento` debe contener un componente `survey` válido.",
          call. = FALSE)
   }
 
-  is_total <- tab_freq$Opciones == "Total"
-  body     <- tab_freq[!is_total, , drop = FALSE]
-  total    <- tab_freq[ is_total, , drop = FALSE]
-
-  if (!nrow(body)) {
-    stop("La variable '", var, "' solo tiene fila Total; no se puede graficar.",
+  # Info de la variable principal
+  fila_var <- survey[survey$name == var, , drop = FALSE]
+  if (nrow(fila_var) == 0L) {
+    stop("La variable '", var, "' no está en `instrumento$survey`.",
          call. = FALSE)
   }
+  list_main <- fila_var$list_name[1]
 
-  # ---------------------------------------------------------------------------
-  # Tabla ancha: UNA barra "Distribución"
-  # ---------------------------------------------------------------------------
-  dummy_cat   <- "Distribución"
-  var_cat_col <- "categoria"
+  # Mapeo código → etiqueta para la variable principal
+  if (!is.null(choices) &&
+      all(c("list_name", "name", "label") %in% names(choices)) &&
+      !is.na(list_main) && nzchar(list_main)) {
 
-  wide <- body |>
-    dplyr::mutate(
-      !!var_cat_col := dummy_cat,
-      pct = as.numeric(.data$pct)
-    )
+    ch_main <- choices[choices$list_name == list_main, , drop = FALSE]
+    codigos_main <- as.character(ch_main$name)
+    labels_main  <- as.character(ch_main$label)
 
-  cols_pct  <- paste0("pct_", seq_len(nrow(wide)))
-  etiquetas <- as.character(wide$Opciones)
-
-  for (i in seq_len(nrow(wide))) {
-    nm_col <- cols_pct[i]
-    wide[[nm_col]] <- 0
-    wide[[nm_col]][1] <- wide$pct[i]
-  }
-
-  wide <- wide[1, c(var_cat_col, "n", cols_pct), drop = FALSE]
-  wide$n[1] <- if (nrow(total)) as.numeric(total$n[1]) else sum(body$n, na.rm = TRUE)
-
-  names(etiquetas) <- cols_pct
-
-  titulo_var_plot <- .obtener_label_var(var, instrumento, data = data)
-
-  nota_pie <- fuente %||% NULL
-  nota_pie_derecha <- if (nrow(total)) {
-    paste0("N total = ",
-           format(total$n[1], big.mark = ",", scientific = FALSE))
   } else {
-    NULL
+    # Fallback: usar valores únicos en data
+    codigos_main <- sort(unique(as.character(data[[var]])))
+    labels_main  <- codigos_main
   }
 
-  # ---------------------------------------------------------------------------
-  # Colores por list_name (etiquetas, no códigos)
-  # ---------------------------------------------------------------------------
-  colores_grupos <- NULL
-  if (!is.null(colores_apiladas_por_listname) &&
-      !is.null(survey) &&
-      all(c("name", "list_name") %in% names(survey)) &&
-      var %in% survey$name) {
+  map_main <- stats::setNames(labels_main, codigos_main)
 
-    ln <- survey$list_name[survey$name == var][1]
-    if (!is.na(ln) && ln %in% names(colores_apiladas_por_listname)) {
-      pal <- colores_apiladas_por_listname[[ln]]
-      if (!is.null(pal) && length(pal)) {
-        n_etq <- length(etiquetas)
-        if (length(pal) < n_etq) {
-          pal <- rep(pal, length.out = n_etq)
-        } else if (length(pal) > n_etq) {
-          pal <- pal[seq_len(n_etq)]
-        }
-        names(pal) <- etiquetas
-        colores_grupos <- pal
-      }
-    }
+  # Filtrar NA y códigos perdidos en variable principal
+  df <- data
+  if (!var %in% names(df)) {
+    stop("La variable '", var, "' no existe en `data`.", call. = FALSE)
   }
 
-  graficar_barras_apiladas(
-    data                 = wide,
-    var_categoria        = var_cat_col,
-    var_n                = "n",
-    cols_porcentaje      = cols_pct,
-    etiquetas_grupos     = etiquetas,
-    escala_valor         = "proporcion_1",
-    colores_grupos       = colores_grupos,
-    mostrar_valores      = TRUE,
-    decimales            = 1,
-    umbral_etiqueta      = 0.03,
-    umbral_etiqueta_peq  = 0.015,
-    mostrar_barra_extra  = TRUE,
-    barra_extra_preset   = "totales",
-    prefijo_barra_extra  = NULL,
-    titulo_barra_extra   = NULL,
-    barra_extra_vjust    = NULL,
-    titulo               = titulo_var_plot,
-    subtitulo            = NULL,
-    nota_pie             = nota_pie,
-    nota_pie_derecha     = nota_pie_derecha,
-    pos_titulo           = "izquierda",
-    pos_nota_pie         = "derecha",
-    centro_cowplot       = NA_real_,
-    color_titulo         = "#000000",
-    size_titulo          = 11,
-    color_subtitulo      = "#000000",
-    size_subtitulo       = 9,
-    color_nota_pie       = "#000000",
-    size_nota_pie        = 8,
-    color_leyenda        = "#000000",
-    size_leyenda         = 8,
-    color_texto_barras   = "white",
-    size_texto_barras    = 3,
-    size_texto_barras_peq = 2.5,
-    color_barra_extra    = "#000000",
-    size_barra_extra     = 3,
-    color_ejes           = "#000000",
-    size_ejes            = 9,
-    color_fondo          = NA,
-    grosor_barras        = 0.7,
-    extra_derecha_rel    = 0.12,
-    espacio_izquierda_rel = 0,
-    ancho_max_eje_y      = NULL,
-    mostrar_leyenda      = TRUE,
-    usar_leyenda_cowplot = FALSE,   # importante para compatibilidad con plotly
-    invertir_leyenda     = FALSE,
-    invertir_barras      = FALSE,
-    invertir_segmentos   = FALSE,
-    textos_negrita       = c("titulo", "porcentajes", "barra_extra"),
-    exportar             = "rplot"
+  df[[var]] <- as.character(df[[var]])
+
+  df <- df[!is.na(df[[var]]), , drop = FALSE]
+
+  if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0) {
+    df <- df[!(df[[var]] %in% as.character(codigos_perdidos)), , drop = FALSE]
+  }
+
+  if (nrow(df) == 0L) {
+    stop("No hay datos válidos para la variable '", var, "'.", call. = FALSE)
+  }
+
+  # Si no hay cruce → una sola barra ("Total")
+  if (is.null(var_cruce) || !nzchar(var_cruce)) {
+
+    df_tab <- df |>
+      dplyr::count(.data[[var]], name = "n") |>
+      dplyr::mutate(
+        pct          = n / sum(n),
+        opcion_code  = as.character(.data[[var]]),
+        opcion_label = map_main[opcion_code] %||% opcion_code,
+        estrato_label = "Total"
+      ) |>
+      dplyr::select(estrato_label, opcion_label, pct, n)
+
+    # Ordenar categorías según labels_main
+    orden_lvls <- map_main[codigos_main]
+    df_tab$opcion_label <- factor(
+      df_tab$opcion_label,
+      levels = unique(orden_lvls[!is.na(orden_lvls)])
+    )
+    df_tab <- df_tab[order(df_tab$opcion_label), , drop = FALSE]
+
+    return(df_tab)
+  }
+
+  # ---------------------------------------------------------
+  # Con cruce
+  # ---------------------------------------------------------
+  if (!var_cruce %in% names(df)) {
+    stop("La variable de cruce '", var_cruce, "' no existe en `data`.",
+         call. = FALSE)
+  }
+
+  df[[var_cruce]] <- as.character(df[[var_cruce]])
+
+  # Mapeo código → etiqueta para la variable de cruce (si aplica)
+  fila_cruce <- survey[survey$name == var_cruce, , drop = FALSE]
+  list_cruce <- if (nrow(fila_cruce)) fila_cruce$list_name[1] else NA_character_
+
+  if (!is.null(choices) &&
+      all(c("list_name", "name", "label") %in% names(choices)) &&
+      !is.na(list_cruce) && nzchar(list_cruce)) {
+
+    ch_cruce <- choices[choices$list_name == list_cruce, , drop = FALSE]
+    map_cruce <- stats::setNames(
+      as.character(ch_cruce$label),
+      as.character(ch_cruce$name)
+    )
+  } else {
+    # Fallback: usar los valores tal cual
+    niveles_cruce <- sort(unique(df[[var_cruce]]))
+    map_cruce <- stats::setNames(niveles_cruce, niveles_cruce)
+  }
+
+  df_tab <- df |>
+    dplyr::count(.data[[var_cruce]], .data[[var]], name = "n") |>
+    dplyr::group_by(.data[[var_cruce]]) |>
+    dplyr::mutate(
+      pct = n / sum(n)
+    ) |>
+    dplyr::ungroup() |>
+    dplyr::mutate(
+      opcion_code   = as.character(.data[[var]]),
+      opcion_label  = map_main[opcion_code] %||% opcion_code,
+      estrato_code  = as.character(.data[[var_cruce]]),
+      estrato_label = map_cruce[estrato_code] %||% estrato_code
+    ) |>
+    dplyr::select(estrato_label, opcion_label, pct, n)
+
+  # Orden sensible: primero por estrato_label, luego por orden de labels_main
+  orden_lvls_main <- map_main[codigos_main]
+  df_tab$opcion_label <- factor(
+    df_tab$opcion_label,
+    levels = unique(orden_lvls_main[!is.na(orden_lvls_main)])
   )
+
+  df_tab$estrato_label <- factor(
+    df_tab$estrato_label,
+    levels = sort(unique(df_tab$estrato_label))
+  )
+
+  df_tab[order(df_tab$estrato_label, df_tab$opcion_label), , drop = FALSE]
 }
 
-# -----------------------------------------------------------------------------
-# Graficador: vista de cruces (una barra por estrato)
-# -----------------------------------------------------------------------------
-
-#' Construir gráfico ggplot para una variable cruzada por estrato
+#' Construir gráfico plotly a partir de la tabla larga de proporciones
 #'
-#' Genera un gráfico de barras apiladas donde cada barra corresponde
-#' a una categoría de la variable de cruce (estrato), y los segmentos
-#' representan la distribución de la variable de interés.
-#'
-#' @param data Base de datos (filtrada).
-#' @param instrumento Instrumento con `survey` y `orders_list`.
-#' @param var Variable principal a graficar.
-#' @param var_cruce Variable de cruce (estrato).
-#' @param fuente Texto de fuente para el pie de página.
-#' @param colores_apiladas_por_listname Lista de paletas por `list_name`.
-#' @param codigos_perdidos Vector de códigos a excluir para la variable.
-#'
-#' @return Un objeto `ggplot`.
 #' @keywords internal
 #' @noRd
-build_gg_for_var_cruce <- function(data,
-                                   instrumento,
-                                   var,
-                                   var_cruce,
-                                   fuente                         = NULL,
-                                   colores_apiladas_por_listname  = NULL,
-                                   codigos_perdidos               = NULL) {
+.construir_plotly_barras <- function(df_tab,
+                                     titulo,
+                                     paleta_colores = NULL,
+                                     height = 600) {
 
-  survey <- instrumento$survey
-  orders <- instrumento$orders_list %||% NULL
-
-  if (!var_cruce %in% names(data)) {
-    stop("La variable de cruce '", var_cruce, "' no existe en la base.", call. = FALSE)
-  }
-
-  tipo_info <- tipo_var_interactivo(
-    var           = var,
-    data          = data,
-    instrumento   = instrumento,
-    sm_vars_force = NULL
-  )
-  tipo <- tipo_info$tipo
-  if (tipo == "ninguno") {
-    stop("La variable '", var, "' no se puede graficar en este explorador.",
+  if (!requireNamespace("plotly", quietly = TRUE)) {
+    stop("Se requiere el paquete 'plotly' para `reporte_interactivo()`.",
          call. = FALSE)
   }
 
-  d_var <- data
+  # Asegurar proporciones y conteos válidos
+  df_tab$pct[is.na(df_tab$pct)] <- 0
+  df_tab$pct[df_tab$pct < 0] <- 0
+  df_tab$pct[df_tab$pct > 1] <- 1
+  df_tab$n[is.na(df_tab$n)]   <- 0
 
-  # excluir códigos perdidos para la variable principal
-  if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0 &&
-      var %in% names(d_var)) {
+  # Re-normalizar para que los porcentajes enteros sumen 100% por estrato
+  df_tab <- df_tab |>
+    dplyr::group_by(.data$estrato_label) |>
+    dplyr::mutate(
+      porc_raw = ifelse(sum(pct) > 0, pct / sum(pct), 0),
+      porc_int = round(porc_raw * 100),
+      diff     = 100 - sum(porc_int),
+      porc_int = ifelse(
+        dplyr::row_number() == which.max(pct),
+        porc_int + diff,
+        porc_int
+      )
+    ) |>
+    dplyr::ungroup()
 
-    col_vals <- d_var[[var]]
-    if (is.numeric(col_vals)) {
-      d_var <- d_var[!(col_vals %in% codigos_perdidos), , drop = FALSE]
-    } else {
-      d_var <- d_var[!(as.character(col_vals) %in% as.character(codigos_perdidos)),
-                     , drop = FALSE]
-    }
+  df_tab$texto_pct      <- paste0(df_tab$porc_int, "%")
+  df_tab$texto_pct_html <- paste0("<b>", df_tab$porc_int, "%</b>")
+
+  # Ordenar niveles
+  opcion_levels  <- levels(df_tab$opcion_label)
+  estrato_levels <- levels(df_tab$estrato_label)
+
+  if (is.null(opcion_levels)) {
+    opcion_levels <- unique(df_tab$opcion_label)
+  }
+  if (is.null(estrato_levels)) {
+    estrato_levels <- unique(df_tab$estrato_label)
   }
 
-  # niveles del cruce
-  cruce_vals    <- d_var[[var_cruce]]
-  niveles_cruce <- sort(unique(cruce_vals[!is.na(cruce_vals)]))
-  if (!length(niveles_cruce)) {
-    stop("La variable de cruce '", var_cruce, "' no tiene categorías válidas.",
-         call. = FALSE)
+  df_tab$opcion_label  <- factor(df_tab$opcion_label,  levels = opcion_levels)
+  df_tab$estrato_label <- factor(df_tab$estrato_label, levels = estrato_levels)
+
+  opcion_levels <- levels(df_tab$opcion_label)
+
+  # Paleta de colores
+  if (is.null(paleta_colores) || length(paleta_colores) == 0L) {
+    n_cols <- max(3L, length(opcion_levels))
+    paleta_colores <- grDevices::hcl.colors(n_cols, palette = "Blues")
   }
 
-  # categorías globales de la variable (para asegurar mismo orden)
-  tab_global <- freq_table_spss(
-    data          = d_var,
-    var           = var,
-    survey        = survey,
-    sm_vars_force = NULL,
-    orders_list   = orders,
-    mostrar_todo  = TRUE
-  )
-  is_total_global <- tab_global$Opciones == "Total"
-  cats_global     <- as.character(tab_global$Opciones[!is_total_global])
-
-  if (!length(cats_global)) {
-    stop("La variable '", var, "' no tiene categorías de respuesta válidas.",
-         call. = FALSE)
+  if (length(paleta_colores) < length(opcion_levels)) {
+    paleta_colores <- rep(paleta_colores, length.out = length(opcion_levels))
   }
 
-  # ---------------------------------------------------------------------------
-  # Construir tabla ancha: una fila por estrato (cruce)
-  # ---------------------------------------------------------------------------
-  lista_filas <- vector("list", length(niveles_cruce))
+  names(paleta_colores) <- opcion_levels
 
-  for (i in seq_along(niveles_cruce)) {
-    val_i <- niveles_cruce[i]
-    sub_i <- d_var[d_var[[var_cruce]] == val_i, , drop = FALSE]
+  # Construir gráfico
+  p <- plotly::plot_ly()
 
-    tab_i <- freq_table_spss(
-      data          = sub_i,
-      var           = var,
-      survey        = survey,
-      sm_vars_force = NULL,
-      orders_list   = orders,
-      mostrar_todo  = TRUE
-    )
+  for (opt in opcion_levels) {
+    df_opt <- df_tab[df_tab$opcion_label == opt, , drop = FALSE]
 
-    if (!nrow(tab_i)) {
-      next
-    }
+    if (nrow(df_opt) == 0L) next
 
-    is_total_i <- tab_i$Opciones == "Total"
-    body_i     <- tab_i[!is_total_i, , drop = FALSE]
-    total_i    <- tab_i[ is_total_i, , drop = FALSE]
-
-    if (!nrow(body_i)) next
-
-    # asegurar que estén todas las cats_global en el mismo orden
-    body_i <- body_i |>
-      dplyr::filter(.data$Opciones %in% cats_global)
-
-    pct_vec   <- rep(0, length(cats_global))
-    match_idx <- match(cats_global, body_i$Opciones)
-    pct_vec[!is.na(match_idx)] <- body_i$pct[match_idx]
-
-    df_row <- tibble::tibble(
-      categoria = as.character(val_i),
-      n        = if (nrow(total_i)) as.numeric(total_i$n[1]) else sum(body_i$n, na.rm = TRUE)
-    )
-
-    for (j in seq_along(cats_global)) {
-      nm_col <- paste0("pct_", j)
-      df_row[[nm_col]] <- pct_vec[j]
-    }
-
-    lista_filas[[i]] <- df_row
+    p <- p |>
+      plotly::add_bars(
+        data        = df_opt,
+        x           = ~pct,
+        y           = ~estrato_label,
+        name        = as.character(opt),
+        orientation = "h",
+        text        = ~texto_pct_html,
+        textposition = "inside",
+        insidetextanchor = "middle",
+        textfont    = list(
+          color = "white",
+          size  = 11
+        ),
+        customdata = ~n,
+        marker      = list(
+          color = paleta_colores[as.character(opt)],
+          line  = list(width = 0)
+        ),
+        hovertemplate = paste0(
+          "%{y}<br>",
+          as.character(opt), ": %{text}<br>",
+          "N: %{customdata}",
+          "<extra></extra>"
+        )
+      )
   }
 
-  wide <- dplyr::bind_rows(lista_filas)
-  if (!nrow(wide)) {
-    stop("No hay datos válidos para los cruces de '", var, "' por '", var_cruce, "'.",
-         call. = FALSE)
-  }
-
-  cols_pct  <- paste0("pct_", seq_along(cats_global))
-  etiquetas <- cats_global
-  names(etiquetas) <- cols_pct
-
-  titulo_var_plot <- paste0(
-    .obtener_label_var(var, instrumento, data = data),
-    " según ",
-    .obtener_label_var(var_cruce, instrumento, data = data)
-  )
-
-  nota_pie <- fuente %||% NULL
-
-  nota_pie_derecha <- paste0(
-    "Cruce por ",
-    .obtener_label_var(var_cruce, instrumento, data = data)
-  )
-
-  # Colores por list_name, igual que en vista simple
-  colores_grupos <- NULL
-  if (!is.null(colores_apiladas_por_listname) &&
-      !is.null(survey) &&
-      all(c("name", "list_name") %in% names(survey)) &&
-      var %in% survey$name) {
-
-    ln <- survey$list_name[survey$name == var][1]
-    if (!is.na(ln) && ln %in% names(colores_apiladas_por_listname)) {
-      pal <- colores_apiladas_por_listname[[ln]]
-      if (!is.null(pal) && length(pal)) {
-        n_etq <- length(etiquetas)
-        if (length(pal) < n_etq) {
-          pal <- rep(pal, length.out = n_etq)
-        } else if (length(pal) > n_etq) {
-          pal <- pal[seq_len(n_etq)]
-        }
-        names(pal) <- etiquetas
-        colores_grupos <- pal
-      }
-    }
-  }
-
-  graficar_barras_apiladas(
-    data                 = wide,
-    var_categoria        = "categoria",
-    var_n                = "n",
-    cols_porcentaje      = cols_pct,
-    etiquetas_grupos     = etiquetas,
-    escala_valor         = "proporcion_1",
-    colores_grupos       = colores_grupos,
-    mostrar_valores      = TRUE,
-    decimales            = 1,
-    umbral_etiqueta      = 0.03,
-    umbral_etiqueta_peq  = 0.015,
-    mostrar_barra_extra  = TRUE,
-    barra_extra_preset   = "totales",
-    prefijo_barra_extra  = NULL,
-    titulo_barra_extra   = NULL,
-    barra_extra_vjust    = NULL,
-    titulo               = titulo_var_plot,
-    subtitulo            = NULL,
-    nota_pie             = nota_pie,
-    nota_pie_derecha     = nota_pie_derecha,
-    pos_titulo           = "izquierda",
-    pos_nota_pie         = "derecha",
-    centro_cowplot       = NA_real_,
-    color_titulo         = "#000000",
-    size_titulo          = 11,
-    color_subtitulo      = "#000000",
-    size_subtitulo       = 9,
-    color_nota_pie       = "#000000",
-    size_nota_pie        = 8,
-    color_leyenda        = "#000000",
-    size_leyenda         = 8,
-    color_texto_barras   = "white",
-    size_texto_barras    = 3,
-    size_texto_barras_peq = 2.5,
-    color_barra_extra    = "#000000",
-    size_barra_extra     = 3,
-    color_ejes           = "#000000",
-    size_ejes            = 9,
-    color_fondo          = NA,
-    grosor_barras        = 0.7,
-    extra_derecha_rel    = 0.12,
-    espacio_izquierda_rel = 0,
-    ancho_max_eje_y      = 40,
-    mostrar_leyenda      = TRUE,
-    usar_leyenda_cowplot = FALSE,
-    invertir_leyenda     = FALSE,
-    invertir_barras      = FALSE,
-    invertir_segmentos   = FALSE,
-    textos_negrita       = c("titulo", "porcentajes", "barra_extra"),
-    exportar             = "rplot"
-  )
-}
-
-# -----------------------------------------------------------------------------
-# Conversión ggplot → plotly con transición animada
-# -----------------------------------------------------------------------------
-
-#' Convertir un ggplot a plotly con transición suave
-#'
-#' Envuelve `plotly::ggplotly()` y añade una configuración básica
-#' de `transition` para suavizar los cambios cuando se actualiza el
-#' gráfico en la app.
-#'
-#' @param p Objeto `ggplot`.
-#'
-#' @return Objeto `plotly` (o `p` si no es `ggplot`).
-#' @keywords internal
-#' @noRd
-gg_to_plotly_interactivo <- function(p) {
-  if (!inherits(p, "gg")) return(p)
-
-  pl <- plotly::ggplotly(p)
-
-  pl <- pl |>
+  p <- p |>
     plotly::layout(
+      barmode = "stack",
+      bargap  = 0.25,
+      xaxis   = list(
+        title          = "",
+        range          = c(0, 1),
+        showgrid       = FALSE,
+        zeroline       = FALSE,
+        showticklabels = FALSE,
+        ticks          = ""
+      ),
+      yaxis   = list(
+        title      = "",
+        automargin = TRUE
+      ),
+      legend = list(
+        orientation = "h",
+        x           = 0.5,
+        xanchor     = "center",
+        y           = -0.12
+      ),
+      margin = list(
+        l = 170,
+        r = 30,
+        t = 80,
+        b = 40
+      ),
+      height = height,
+      title  = list(
+        text    = titulo,
+        x       = 0,
+        xanchor = "left"
+      ),
+      uniformtext = list(
+        minsize = 10,
+        mode    = "hide"
+      ),
+      hovermode = "closest",
       transition = list(
-        duration = 400,
+        duration = 350,
         easing   = "cubic-in-out"
       )
+    ) |>
+    plotly::config(
+      displayModeBar = FALSE
     )
 
-  pl
+  p
 }
 
 # -----------------------------------------------------------------------------
 # App principal: reporte_interactivo()
 # -----------------------------------------------------------------------------
 
-#' Explorador interactivo de resultados tipo OPS/ACNUR
+#' Explorador interactivo de resultados (fase 1)
 #'
 #' Genera una aplicación \pkg{shiny} que permite:
 #' \itemize{
-#'   \item Aplicar filtros dinámicos sobre variables seleccionadas.
-#'   \item Elegir hasta cuatro variables para graficar simultáneamente.
-#'   \item Alternar entre vista simple (distribución total) y vista de
-#'         cruces (una barra por estrato).
-#'   \item Visualizar los gráficos como barras horizontales apiladas con
-#'         etiquetas de porcentaje y N total.
+#'   \item Seleccionar una variable principal (categórica) y visualizar su
+#'         distribución como barra horizontal apilada (100\%).
+#'   \item Aplicar filtros sobre una variable categórica (checkboxes tipo chip).
+#'   \item Cruzar la variable principal por una variable categórica (estratos),
+#'         mostrando una barra por categoría del cruce.
 #' }
 #'
-#' El layout de la sección de configuración de gráficos se mantiene
-#' fijo (cuatro selectores para variables), y el panel principal
-#' ajusta dinámicamente el número y disposición de gráficos:
-#' \itemize{
-#'   \item 1 gráfico: ocupa todo el ancho.
-#'   \item 2 gráficos: mitad – mitad.
-#'   \item 3–4 gráficos: cuadrícula 2 × 2.
-#' }
+#' El título del gráfico siempre corresponde únicamente a la etiqueta de la
+#' variable principal, independientemente de si hay cruce.
 #'
 #' @param data Base de reporte (idealmente salida de `reporte_data()`).
 #' @param instrumento Objeto devuelto por `reporte_instrumento()`, que debe
-#'   contener al menos el componente `survey` y, opcionalmente,
-#'   `orders_list`.
+#'   contener al menos el componente `survey` y, opcionalmente, `choices`.
 #' @param secciones Lista nombrada de vectores de variables por sección,
-#'   usada para poblar los selectores de variables de los gráficos.
-#' @param fuente Texto de fuente a mostrar en los pies de los gráficos.
-#' @param titulo Título principal de la app.
+#'   usada para poblar el selector de la variable principal.
+#' @param fuente (Por ahora no se muestra, reservado para futuras versiones).
+#' @param titulo Título principal de la aplicación.
 #' @param colores_apiladas_por_listname Lista nombrada de paletas de
 #'   colores por `list_name` del instrumento (para las barras apiladas).
-#' @param codigos_perdidos Vector de códigos que deben excluirse de las
-#'   variables categóricas (por ejemplo, 96, 97, 98, 99).
-#' @param facet_vars Vector de nombres de variables que se usarán como
-#'   candidatas a filtro y a variable de cruce (estratos).
+#' @param codigos_perdidos Vector de códigos que deben excluirse de la
+#'   variable principal (por ejemplo, 96, 97, 98, 99).
+#' @param facet_vars Vector de nombres de variables categóricas candidatas
+#'   a filtro y cruce.
 #'
-#' @return Un objeto \code{shiny.appobj} que puede ejecutarse con
-#'   `print()` o `shiny::runApp()`.
-#'
-#' @importFrom dplyr filter mutate all_of
-#' @importFrom tidyr pivot_longer
-#' @importFrom tibble tibble
-#' @importFrom stats setNames
+#' @return Un objeto \code{shiny.appobj}.
 #' @export
+#'
+#' @importFrom dplyr count mutate group_by ungroup
+#' @importFrom stats setNames
 reporte_interactivo <- function(
     data,
     instrumento,
@@ -602,8 +446,9 @@ reporte_interactivo <- function(
 ) {
 
   if (!requireNamespace("shiny", quietly = TRUE) ||
-      !requireNamespace("plotly", quietly = TRUE)) {
-    stop("Se requieren los paquetes 'shiny' y 'plotly' para `reporte_interactivo()`.",
+      !requireNamespace("plotly", quietly = TRUE) ||
+      !requireNamespace("dplyr",  quietly = TRUE)) {
+    stop("Se requieren los paquetes 'shiny', 'plotly' y 'dplyr' para `reporte_interactivo()`.",
          call. = FALSE)
   }
 
@@ -612,57 +457,34 @@ reporte_interactivo <- function(
     stop("El `instrumento` debe contener un `survey` válido.", call. = FALSE)
   }
 
-  # ---------------------------------------------------------------------------
-  # Labels amigables para desplegar variables
-  # ---------------------------------------------------------------------------
-  survey_labels <- survey |>
-    dplyr::filter(!is.na(.data$name), .data$name != "") |>
-    dplyr::mutate(
-      label = ifelse(is.na(.data$label) | .data$label == "",
-                     .data$name,
-                     as.character(.data$label))
-    )
-
-  label_var <- function(v) {
-    if (!v %in% survey_labels$name) return(v)
-    survey_labels$label[survey_labels$name == v][1]
-  }
-
-  # ---------------------------------------------------------------------------
-  # Variables candidatas a filtro y a cruce
-  # ---------------------------------------------------------------------------
-  facet_vars <- facet_vars %||% character(0)
-  facet_vars <- facet_vars[facet_vars %in% names(data)]
-
-  filtro_vars_default <- facet_vars
-  filtro_choices <- stats::setNames(
-    filtro_vars_default,
-    vapply(filtro_vars_default, label_var, character(1))
-  )
-
-  cruce_choices <- stats::setNames(
-    facet_vars,
-    vapply(facet_vars, label_var, character(1))
-  )
-
-  # ---------------------------------------------------------------------------
-  # Variables para los 4 gráficos (secciones)
-  # ---------------------------------------------------------------------------
+  # ----------------------- Variables disponibles ------------------------------
   vars_disponibles <- unique(unlist(secciones, use.names = FALSE))
   vars_disponibles <- vars_disponibles[vars_disponibles %in% names(data)]
+
+  if (!length(vars_disponibles)) {
+    stop("No hay variables disponibles en `secciones` que estén en `data`.",
+         call. = FALSE)
+  }
+
+  label_var <- function(v) .obtener_label_var(v, instrumento, data)
 
   var_choices <- stats::setNames(
     vars_disponibles,
     vapply(vars_disponibles, label_var, character(1))
   )
 
-  default_vars <- head(vars_disponibles, 4)
-  default_vars <- c(default_vars, rep(NA_character_, 4 - length(default_vars)))
-  names(default_vars) <- paste0("var_", 1:4)
+  var_default <- vars_disponibles[1]
 
-  # ---------------------------------------------------------------------------
-  # UI
-  # ---------------------------------------------------------------------------
+  # Candidatas a filtro / cruce
+  facet_vars <- facet_vars %||% character(0)
+  facet_vars <- facet_vars[facet_vars %in% names(data)]
+
+  facet_choices <- stats::setNames(
+    facet_vars,
+    vapply(facet_vars, label_var, character(1))
+  )
+
+  # ------------------------------- UI ----------------------------------------
   ui <- shiny::fluidPage(
     shiny::titlePanel(title = titulo),
 
@@ -670,224 +492,178 @@ reporte_interactivo <- function(
       shiny::sidebarPanel(
         width = 3,
 
-        # ------------------ CONFIGURACIÓN DE GRÁFICOS (ARRIBA) ------------------
-        shiny::h3("Configuración de gráficos"),
+        # ---------------------- VARIABLES -------------------------------------
+        shiny::h3("Variables"),
 
-        shiny::p("Seleccione hasta cuatro variables para graficar."),
+        shiny::p("Seleccione la variable principal a visualizar."),
 
         shiny::selectInput(
-          inputId = "var_1",
-          label   = "Gráfico 1",
-          choices = c("Ninguno" = "", var_choices),
-          selected = default_vars[1] %||% ""
-        ),
-        shiny::selectInput(
-          inputId = "var_2",
-          label   = "Gráfico 2",
-          choices = c("Ninguno" = "", var_choices),
-          selected = default_vars[2] %||% ""
-        ),
-        shiny::selectInput(
-          inputId = "var_3",
-          label   = "Gráfico 3",
-          choices = c("Ninguno" = "", var_choices),
-          selected = default_vars[3] %||% ""
-        ),
-        shiny::selectInput(
-          inputId = "var_4",
-          label   = "Gráfico 4",
-          choices = c("Ninguno" = "", var_choices),
-          selected = default_vars[4] %||% ""
+          inputId  = "var_principal",
+          label    = "Variable principal",
+          choices  = var_choices,
+          selected = var_default
         ),
 
         shiny::hr(),
 
-        # ------------------ FILTROS (ABAJO) ------------------
+        # ------------------------ FILTROS ------------------------------------
         shiny::h3("Filtros"),
 
-        shiny::selectizeInput(
-          inputId = "filtro_vars",
-          label   = "Variables de filtro",
-          choices = filtro_choices,
-          multiple = TRUE,
-          options = list(
-            placeholder = "Seleccione una o más variables de filtro"
-          )
+        shiny::selectInput(
+          inputId  = "filtro_var",
+          label    = "Variable de filtro",
+          choices  = c("Ninguno" = "", facet_choices),
+          selected = ""
         ),
 
-        shiny::uiOutput("filtros_dinamicos"),
+        shiny::uiOutput("filtro_categorias_ui"),
+
+        shiny::actionButton(
+          inputId = "limpiar_filtros",
+          label   = "Limpiar filtros"
+        ),
 
         shiny::hr(),
 
-        # ------------------ CRUCES (ABAJO) ------------------
-        shiny::h3("Cruces"),
-
-        shiny::checkboxInput(
-          inputId = "activar_cruce",
-          label   = "Mostrar cruces por estrato",
-          value   = FALSE
-        ),
+        # ------------------------- CRUCE -------------------------------------
+        shiny::h3("Cruce"),
 
         shiny::selectInput(
-          inputId = "var_cruce",
-          label   = "Variable de cruce",
-          choices = cruce_choices,
-          selected = if (length(facet_vars)) facet_vars[1] else NULL
+          inputId  = "var_cruce",
+          label    = "Cruce",
+          choices  = c("Ninguno" = "", facet_choices),
+          selected = ""
         ),
 
-        shiny::helpText(
-          "Cuando se activa, cada gráfico muestra una barra por estrato ",
-          "de la variable de cruce seleccionada."
+        shiny::actionButton(
+          inputId = "limpiar_cruce",
+          label   = "Limpiar cruce"
         )
+
       ),
 
       shiny::mainPanel(
         width = 9,
-        shiny::uiOutput("plots_panel")
+        plotly::plotlyOutput("plot_principal", height = "620px")
       )
     )
   )
 
-  # ---------------------------------------------------------------------------
-  # Server
-  # ---------------------------------------------------------------------------
+  # ------------------------------- SERVER ------------------------------------
   server <- function(input, output, session) {
 
-    # --------- filtros dinámicos UI ---------
-    output$filtros_dinamicos <- shiny::renderUI({
-      req(input$filtro_vars)
+    # --------- UI dinámico para categorías del filtro ------------------------
+    output$filtro_categorias_ui <- shiny::renderUI({
+      v <- input$filtro_var
+      if (is.null(v) || !nzchar(v) || !v %in% names(data)) {
+        return(NULL)
+      }
 
-      purrr::map(input$filtro_vars, function(v) {
-        vals <- sort(unique(data[[v]]))
-        vals <- vals[!is.na(vals)]
+      vals <- sort(unique(as.character(data[[v]])))
+      vals <- vals[!is.na(vals)]
 
-        shiny::selectInput(
-          inputId = paste0("filtro_", v),
-          label   = label_var(v),
-          choices = vals,
-          selected = vals,
-          multiple = TRUE
-        )
-      })
+      if (!length(vals)) return(NULL)
+
+      shiny::checkboxGroupInput(
+        inputId  = "filtro_categorias",
+        label    = label_var(v),
+        choices  = vals,
+        selected = vals
+      )
     })
 
-    # --------- data filtrada ---------
+    # --------- Limpiar filtros -----------------------------------------------
+    shiny::observeEvent(input$limpiar_filtros, {
+      v <- input$filtro_var
+      if (is.null(v) || !nzchar(v) || !v %in% names(data)) {
+        return()
+      }
+      vals <- sort(unique(as.character(data[[v]])))
+      vals <- vals[!is.na(vals)]
+      shiny::updateCheckboxGroupInput(
+        session,
+        inputId  = "filtro_categorias",
+        selected = vals
+      )
+    })
+
+    # --------- Limpiar cruce -------------------------------------------------
+    shiny::observeEvent(input$limpiar_cruce, {
+      shiny::updateSelectInput(
+        session,
+        inputId  = "var_cruce",
+        selected = ""
+      )
+    })
+
+    # --------- Data filtrada -------------------------------------------------
     data_filtrada <- shiny::reactive({
       df <- data
 
-      if (!is.null(input$filtro_vars) && length(input$filtro_vars) > 0) {
-        for (v in input$filtro_vars) {
-          id_f <- paste0("filtro_", v)
-          vals_sel <- input[[id_f]]
-          if (!is.null(vals_sel) && length(vals_sel)) {
-            df <- df[df[[v]] %in% vals_sel, , drop = FALSE]
-          }
+      v_filtro <- input$filtro_var
+
+      if (!is.null(v_filtro) &&
+          nzchar(v_filtro) &&
+          v_filtro %in% names(df) &&
+          !is.null(input$filtro_categorias)) {
+
+        vals_sel <- input$filtro_categorias
+        if (length(vals_sel) > 0L) {
+          df <- df[df[[v_filtro]] %in% vals_sel, , drop = FALSE]
         }
       }
 
       df
     })
 
-    # --------- indicador de modo cruce ---------
-    modo_cruce <- shiny::reactive({
-      isTRUE(input$activar_cruce) &&
-        !is.null(input$var_cruce) &&
-        nzchar(input$var_cruce)
-    })
+    # --------- Gráfico principal ---------------------------------------------
+    output$plot_principal <- plotly::renderPlotly({
+      req(input$var_principal)
 
-    # --------- helper para un gráfico dado ---------
-    build_plot_for_var <- function(var_input) {
-      req(var_input)
-      if (!nzchar(var_input)) {
-        return(NULL)
-      }
+      var_main  <- input$var_principal
+      df        <- data_filtrada()
+      var_cruce <- input$var_cruce
+      if (!nzchar(var_cruce)) var_cruce <- NULL
 
-      df <- data_filtrada()
-
-      if (modo_cruce()) {
-        p <- build_gg_for_var_cruce(
-          data        = df,
-          instrumento = instrumento,
-          var         = var_input,
-          var_cruce   = input$var_cruce,
-          fuente      = fuente,
-          colores_apiladas_por_listname = colores_apiladas_por_listname,
-          codigos_perdidos = codigos_perdidos
-        )
-      } else {
-        p <- build_gg_for_var(
-          data        = df,
-          instrumento = instrumento,
-          var         = var_input,
-          fuente      = fuente,
-          colores_apiladas_por_listname = colores_apiladas_por_listname,
-          codigos_perdidos = codigos_perdidos
+      if (nrow(df) == 0L) {
+        shiny::validate(
+          shiny::need(FALSE, "No hay datos después de aplicar los filtros.")
         )
       }
 
-      gg_to_plotly_interactivo(p)
-    }
+      # Título SIEMPRE solo de la variable principal
+      titulo_plot <- .wrap_titulo_html(
+        .obtener_label_var(var_main, instrumento, data),
+        width = 120
+      )
 
-    # --------- render de cada plot (1–4) ---------
-    output$plot_1 <- plotly::renderPlotly({
-      req(input$var_1)
-      if (!nzchar(input$var_1)) return(NULL)
-      build_plot_for_var(input$var_1)
-    })
+      # Paleta por list_name si existe
+      survey  <- instrumento$survey
 
-    output$plot_2 <- plotly::renderPlotly({
-      req(input$var_2)
-      if (!nzchar(input$var_2)) return(NULL)
-      build_plot_for_var(input$var_2)
-    })
+      paleta <- NULL
+      if (!is.null(colores_apiladas_por_listname) &&
+          all(c("name", "list_name") %in% names(survey))) {
 
-    output$plot_3 <- plotly::renderPlotly({
-      req(input$var_3)
-      if (!nzchar(input$var_3)) return(NULL)
-      build_plot_for_var(input$var_3)
-    })
-
-    output$plot_4 <- plotly::renderPlotly({
-      req(input$var_4)
-      if (!nzchar(input$var_4)) return(NULL)
-      build_plot_for_var(input$var_4)
-    })
-
-    # --------- layout dinámico 1–4 gráficos ---------
-    output$plots_panel <- shiny::renderUI({
-      vars <- list(input$var_1, input$var_2, input$var_3, input$var_4)
-      activos_idx <- which(vapply(vars, function(x) nzchar(x %||% ""), logical(1)))
-      n_activos   <- length(activos_idx)
-
-      if (n_activos == 0) {
-        return(
-          shiny::div(
-            shiny::br(),
-            shiny::p("Seleccione al menos una variable en la configuración de gráficos.")
-          )
-        )
+        ln_main <- survey$list_name[survey$name == var_main][1]
+        if (!is.na(ln_main) && ln_main %in% names(colores_apiladas_por_listname)) {
+          paleta <- colores_apiladas_por_listname[[ln_main]]
+        }
       }
 
-      ids <- paste0("plot_", activos_idx)
+      df_tab <- .preparar_tabla_proporciones(
+        data              = df,
+        instrumento       = instrumento,
+        var               = var_main,
+        var_cruce         = var_cruce,
+        codigos_perdidos  = codigos_perdidos
+      )
 
-      if (n_activos == 1) {
-        plotly::plotlyOutput(ids[1], height = "520px")
-
-      } else if (n_activos == 2) {
-        shiny::fluidRow(
-          shiny::column(6, plotly::plotlyOutput(ids[1], height = "480px")),
-          shiny::column(6, plotly::plotlyOutput(ids[2], height = "480px"))
-        )
-
-      } else {
-        # 3 o 4 → cuadrícula 2x2 (referencia fija a plot_1:plot_4)
-        shiny::fluidRow(
-          shiny::column(6, plotly::plotlyOutput("plot_1", height = "420px")),
-          shiny::column(6, plotly::plotlyOutput("plot_2", height = "420px")),
-          shiny::column(6, plotly::plotlyOutput("plot_3", height = "420px")),
-          shiny::column(6, plotly::plotlyOutput("plot_4", height = "420px"))
-        )
-      }
+      .construir_plotly_barras(
+        df_tab          = df_tab,
+        titulo          = titulo_plot,
+        paleta_colores  = paleta,
+        height          = 600
+      )
     })
   }
 

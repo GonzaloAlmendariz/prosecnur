@@ -2,7 +2,7 @@
 % Please edit documentation in R/generalidad_interactivo.R
 \name{reporte_interactivo}
 \alias{reporte_interactivo}
-\title{Explorador interactivo de resultados tipo OPS/ACNUR}
+\title{Explorador interactivo de resultados (fase 1)}
 \usage{
 reporte_interactivo(
   data,
@@ -19,47 +19,38 @@ reporte_interactivo(
 \item{data}{Base de reporte (idealmente salida de \code{reporte_data()}).}
 
 \item{instrumento}{Objeto devuelto por \code{reporte_instrumento()}, que debe
-contener al menos el componente \code{survey} y, opcionalmente,
-\code{orders_list}.}
+contener al menos el componente \code{survey} y, opcionalmente, \code{choices}.}
 
 \item{secciones}{Lista nombrada de vectores de variables por sección,
-usada para poblar los selectores de variables de los gráficos.}
+usada para poblar el selector de la variable principal.}
 
-\item{fuente}{Texto de fuente a mostrar en los pies de los gráficos.}
+\item{fuente}{(Por ahora no se muestra, reservado para futuras versiones).}
 
-\item{titulo}{Título principal de la app.}
+\item{titulo}{Título principal de la aplicación.}
 
 \item{colores_apiladas_por_listname}{Lista nombrada de paletas de
 colores por \code{list_name} del instrumento (para las barras apiladas).}
 
-\item{codigos_perdidos}{Vector de códigos que deben excluirse de las
-variables categóricas (por ejemplo, 96, 97, 98, 99).}
+\item{codigos_perdidos}{Vector de códigos que deben excluirse de la
+variable principal (por ejemplo, 96, 97, 98, 99).}
 
-\item{facet_vars}{Vector de nombres de variables que se usarán como
-candidatas a filtro y a variable de cruce (estratos).}
+\item{facet_vars}{Vector de nombres de variables categóricas candidatas
+a filtro y cruce.}
 }
 \value{
-Un objeto \code{shiny.appobj} que puede ejecutarse con
-\code{print()} o \code{shiny::runApp()}.
+Un objeto \code{shiny.appobj}.
 }
 \description{
 Genera una aplicación \pkg{shiny} que permite:
 \itemize{
-\item Aplicar filtros dinámicos sobre variables seleccionadas.
-\item Elegir hasta cuatro variables para graficar simultáneamente.
-\item Alternar entre vista simple (distribución total) y vista de
-cruces (una barra por estrato).
-\item Visualizar los gráficos como barras horizontales apiladas con
-etiquetas de porcentaje y N total.
+\item Seleccionar una variable principal (categórica) y visualizar su
+distribución como barra horizontal apilada (100\\%).
+\item Aplicar filtros sobre una variable categórica (checkboxes tipo chip).
+\item Cruzar la variable principal por una variable categórica (estratos),
+mostrando una barra por categoría del cruce.
 }
 }
 \details{
-El layout de la sección de configuración de gráficos se mantiene
-fijo (cuatro selectores para variables), y el panel principal
-ajusta dinámicamente el número y disposición de gráficos:
-\itemize{
-\item 1 gráfico: ocupa todo el ancho.
-\item 2 gráficos: mitad – mitad.
-\item 3–4 gráficos: cuadrícula 2 × 2.
-}
+El título del gráfico siempre corresponde únicamente a la etiqueta de la
+variable principal, independientemente de si hay cruce.
 }
