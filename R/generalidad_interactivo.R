@@ -161,16 +161,18 @@
     stop("No hay datos válidos para la variable '", var, "'.", call. = FALSE)
   }
 
-  # Si no hay cruce → una sola barra ("Total")
+  # ---------------------------------------------------------------------------
+  # SIN CRUCE → una sola barra, SIN mostrar "Total" en el eje
+  # ---------------------------------------------------------------------------
   if (is.null(var_cruce) || !nzchar(var_cruce)) {
 
     df_tab <- df |>
       dplyr::count(.data[[var]], name = "n") |>
       dplyr::mutate(
-        pct          = n / sum(n),
-        opcion_code  = as.character(.data[[var]]),
-        opcion_label = map_main[opcion_code] %||% opcion_code,
-        estrato_label = "Total"
+        pct           = n / sum(n),
+        opcion_code   = as.character(.data[[var]]),
+        opcion_label  = map_main[opcion_code] %||% opcion_code,
+        estrato_label = ""   # <--- AQUÍ en vez de "Total"
       ) |>
       dplyr::select(estrato_label, opcion_label, pct, n)
 
@@ -185,9 +187,9 @@
     return(df_tab)
   }
 
-  # ---------------------------------------------------------
-  # Con cruce
-  # ---------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # CON CRUCE
+  # ---------------------------------------------------------------------------
   if (!var_cruce %in% names(df)) {
     stop("La variable de cruce '", var_cruce, "' no existe en `data`.",
          call. = FALSE)
@@ -241,6 +243,13 @@
     levels = sort(unique(df_tab$estrato_label))
   )
 
+  # Parche por si en algún caso el único nivel fuera realmente "Total"
+  if (length(unique(df_tab$estrato_label)) == 1 &&
+      unique(as.character(df_tab$estrato_label)) %in% c("Total", "TOTAL", "total")) {
+
+    df_tab$estrato_label <- factor(rep("", nrow(df_tab)))
+  }
+
   df_tab[order(df_tab$estrato_label, df_tab$opcion_label), , drop = FALSE]
 }
 
@@ -251,7 +260,7 @@
 .construir_plotly_barras <- function(df_tab,
                                      titulo,
                                      paleta_colores = NULL,
-                                     height = 600) {
+                                     height = NULL) {
 
   if (!requireNamespace("plotly", quietly = TRUE)) {
     stop("Se requiere el paquete 'plotly' para `reporte_interactivo()`.",
@@ -261,23 +270,56 @@
   # Asegurar proporciones y conteos válidos
   df_tab$pct[is.na(df_tab$pct)] <- 0
   df_tab$pct[df_tab$pct < 0] <- 0
-  df_tab$pct[df_tab$pct > 1] <- 1
   df_tab$n[is.na(df_tab$n)]   <- 0
 
-  # Re-normalizar para que los porcentajes enteros sumen 100% por estrato
-  df_tab <- df_tab |>
-    dplyr::group_by(.data$estrato_label) |>
-    dplyr::mutate(
-      porc_raw = ifelse(sum(pct) > 0, pct / sum(pct), 0),
-      porc_int = round(porc_raw * 100),
-      diff     = 100 - sum(porc_int),
-      porc_int = ifelse(
-        dplyr::row_number() == which.max(pct),
-        porc_int + diff,
-        porc_int
-      )
-    ) |>
-    dplyr::ungroup()
+  # ---------------------------------------------------------------------------
+  # Recalcular porcentajes ENTEROS por estrato con algoritmo estable
+  # (largest remainder): nunca negativos, nunca > 100, suma EXACTA = 100
+  # ---------------------------------------------------------------------------
+  df_split <- split(df_tab, df_tab$estrato_label, drop = FALSE)
+
+  df_list <- lapply(df_split, function(df_g) {
+    total <- sum(df_g$pct, na.rm = TRUE)
+
+    if (is.na(total) || total <= 0) {
+      df_g$porc_raw <- 0
+      df_g$porc_int <- 0L
+      return(df_g)
+    }
+
+    # Normalizar por seguridad
+    pct_norm <- df_g$pct / total
+
+    raw  <- pct_norm * 100
+    base <- floor(raw + 1e-9)          # base entera
+    frac <- raw - base
+
+    # Ajuste para que la suma sea 100
+    suma_base <- sum(base)
+    rem       <- as.integer(round(100 - suma_base))
+
+    if (rem > 0) {
+      # Agregar 1 a las categorías con mayor fracción
+      ord <- order(frac, decreasing = TRUE, na.last = NA)
+      k   <- min(rem, length(ord))
+      if (k > 0) {
+        base[ord[seq_len(k)]] <- base[ord[seq_len(k)]] + 1L
+      }
+    } else if (rem < 0) {
+      # Quitar 1 a las categorías con menor fracción
+      ord <- order(frac, decreasing = FALSE, na.last = NA)
+      k   <- min(-rem, length(ord))
+      if (k > 0) {
+        base[ord[seq_len(k)]] <- pmax(0L, base[ord[seq_len(k)]] - 1L)
+      }
+    }
+
+    df_g$porc_raw <- pct_norm
+    df_g$porc_int <- base
+    df_g
+  })
+
+  df_tab <- dplyr::bind_rows(df_list)
 
   df_tab$texto_pct      <- paste0(df_tab$porc_int, "%")
   df_tab$texto_pct_html <- paste0("<b>", df_tab$porc_int, "%</b>")
@@ -310,38 +352,56 @@
 
   names(paleta_colores) <- opcion_levels
 
-  # Construir gráfico
-  p <- plotly::plot_ly()
+  # Altura dinámica según número de estratos
+  n_estratos <- length(unique(df_tab$estrato_label))
+  if (is.null(height)) {
+    height <- max(260, min(650, 160 + 60 * n_estratos))
+  }
+
+  # IMPORTANTE: altura se pasa en plot_ly(), NO en layout()
+  p <- plotly::plot_ly(height = height)
 
   for (opt in opcion_levels) {
     df_opt <- df_tab[df_tab$opcion_label == opt, , drop = FALSE]
-
     if (nrow(df_opt) == 0L) next
+
+    # Hover: si no hay cruce, no mostrar estrato (ni "Total")
+    if (all(as.character(df_tab$estrato_label) %in% c("", NA))) {
+      df_opt$hover_text <- sprintf(
+        "%s: %s<br>N: %s",
+        as.character(opt),
+        df_opt$texto_pct,
+        df_opt$n
+      )
+    } else {
+      df_opt$hover_text <- sprintf(
+        "%s<br>%s: %s<br>N: %s",
+        as.character(df_opt$estrato_label),
+        as.character(opt),
+        df_opt$texto_pct,
+        df_opt$n
+      )
+    }
 
     p <- p |>
       plotly::add_bars(
         data        = df_opt,
-        x           = ~pct,
+        x           = ~pct,                 # ancho de la barra: proporción original
         y           = ~estrato_label,
         name        = as.character(opt),
         orientation = "h",
-        text        = ~texto_pct_html,
+        text        = ~texto_pct_html,      # porcentaje entero dentro de la barra
         textposition = "inside",
         insidetextanchor = "middle",
         textfont    = list(
           color = "white",
           size  = 11
         ),
-        customdata = ~n,
+        customdata  = ~hover_text,
+        hovertemplate = "%{customdata}<extra></extra>",
         marker      = list(
           color = paleta_colores[as.character(opt)],
           line  = list(width = 0)
-        ),
-        hovertemplate = paste0(
-          "%{y}<br>",
-          as.character(opt), ": %{text}<br>",
-          "N: %{customdata}",
-          "<extra></extra>"
         )
       )
   }
@@ -374,7 +434,6 @@
         t = 80,
         b = 40
       ),
-      height = height,
       title  = list(
         text    = titulo,
         x       = 0,
@@ -396,7 +455,6 @@
 
   p
 }
-
 # -----------------------------------------------------------------------------
 # App principal: reporte_interactivo()
 # -----------------------------------------------------------------------------
@@ -659,10 +717,9 @@ reporte_interactivo <- function(
       )
 
       .construir_plotly_barras(
-        df_tab          = df_tab,
-        titulo          = titulo_plot,
-        paleta_colores  = paleta,
-        height          = 600
+        df_tab         = df_tab,
+        titulo         = titulo_plot,
+        paleta_colores = paleta
       )
     })
   }
