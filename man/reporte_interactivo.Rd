@@ -17,58 +17,6 @@ reporte_interactivo(
   kpi_vars = NULL
 )
 }
-\arguments{
-\item{data}{Base de reporte (idealmente salida de \code{reporte_data()}).}
-
-\item{instrumento}{Objeto devuelto por \code{reporte_instrumento()}, que debe
-contener al menos el componente \code{survey} y, opcionalmente, \code{choices}.}
-
-\item{secciones}{Lista nombrada de vectores de variables por sección,
-usada para poblar el selector de sección y variable principal.}
-
-\item{fuente}{(Por ahora no se muestra, reservado para futuras versiones).}
-
-\item{titulo}{Título principal de la aplicación.}
-
-\item{colores_apiladas_por_listname}{Lista nombrada de paletas de
-colores por \code{list_name} del instrumento (para las barras apiladas).}
-
-\item{codigos_perdidos}{Vector de códigos que deben excluirse de la
-variable principal y de los KPIs (por ejemplo, 96, 97, 98, 99).}
-
-\item{facet_vars}{Vector de nombres de variables categóricas candidatas
-a filtro y cruce.}
-
-\item{id_unidad}{Nombre de la variable que identifica la unidad de
-análisis (por ejemplo, código de EESS). Si se especifica, el N del
-perfil corresponde al número de unidades distintas; en caso contrario,
-corresponde al número de filas.}
-
-\item{kpi_vars}{Vector con 0, 1 o 2 nombres de variables categóricas a
-mostrar como KPIs en el Bloque 3. Si hay más de 2, se usan solo las
-dos primeras.}
-}
-\value{
-Un objeto \code{shiny.appobj}.
-}
 \description{
-Genera una aplicación \pkg{shiny} con tres bloques:
-\itemize{
-\item Bloque 1 (superior): gráfico principal de barras horizontales
-apiladas al 100\\% para una variable categórica seleccionada,
-con opción de cruce por otra variable categórica.
-\item Bloque 2 (inferior izquierda): tabla resumen de frecuencias y
-porcentajes (coherente con el gráfico y los filtros aplicados),
-en un contenedor de altura fija con scroll interno.
-\item Bloque 3 (inferior derecha): perfil dinámico de la muestra para
-la pregunta seleccionada, que incluye una tarjeta con el N de
-casos válidos de la pregunta y hasta dos gráficos KPI (barras
-apiladas verticales sin leyenda) para variables definidas en
-\code{kpi_vars}.
-}
-}
-\details{
-El perfil se calcula siempre sobre los mismos casos que alimentan el
-gráfico principal: sólo casos con respuesta válida (no NA) en la
-variable principal, después de aplicar filtros.
+Explorador interactivo de resultados (fase 2)
 }

@@ -64,9 +64,9 @@ instrumento_codificar_xms <- function(inst,
   # key “agresiva” SOLO para matching headers (madre/opción) (fallback)
   .px_key <- function(x) {
     x <- .px_norm(x)
-    x <- stringr::str_replace_all(x, "\\$\\{[^}]+\\}", "")      # quita ${...}
+    x <- stringr::str_replace_all(x, "\\$\\{[^}]+\\}", "")
     x <- tolower(x)
-    x <- stringr::str_replace_all(x, "[^[:alnum:]]+", " ")      # quita puntuación y símbolos
+    x <- stringr::str_replace_all(x, "[^[:alnum:]]+", " ")
     stringr::str_squish(trimws(x))
   }
 
@@ -78,14 +78,14 @@ instrumento_codificar_xms <- function(inst,
   # ---- limpieza mínima headers (para SM posicional)
   .px_clean_hdr_min <- function(x) {
     x <- as.character(x)
-    x <- stringr::str_replace_all(x, "\u00A0", " ")                 # NBSP
-    x <- stringr::str_replace_all(x, "\u200B", "")                  # ZWSP
-    x <- stringr::str_replace_all(x, "\uFEFF", "")                  # BOM
-    x <- stringr::str_replace_all(x, "\\.{3,}\\s*\\d+\\s*$", "")    # "...7" final Excel
+    x <- stringr::str_replace_all(x, "\u00A0", " ")
+    x <- stringr::str_replace_all(x, "\u200B", "")
+    x <- stringr::str_replace_all(x, "\uFEFF", "")
+    x <- stringr::str_replace_all(x, "\\.{3,}\\s*\\d+\\s*$", "")
     x
   }
 
-  # 👇 FIX CLAVE: colapsar espacios SIN cambiar letras/puntuación
+  # colapsar espacios SIN cambiar letras/puntuación
   .px_soft_space <- function(x) {
     x <- .px_clean_hdr_min(x)
     x <- stringr::str_replace_all(x, "\\s+", " ")
@@ -104,27 +104,41 @@ instrumento_codificar_xms <- function(inst,
       dplyr::mutate(
         label_norm = .px_norm(.data$label_es),
         code_norm  = .px_norm(.data$code),
-        label_key  = .px_key(.data$label_es)   # fallback
+        label_key  = .px_key(.data$label_es),
+        code_key   = .px_key(.data$code)
       )
   }
 
   choice_dict <- .px_build_choice_dict(inst$choices)
 
+  # ---- mapeo select_one más robusto (codes, labels, key fallback)
   .px_map_select_one <- function(x, list_name) {
     if (is.null(x)) return(x)
     x_chr <- as.character(x)
     x_chr[.px_is_blank_chr(x_chr)] <- NA_character_
-    x_norm <- .px_norm(x_chr)
 
     dict <- choice_dict |>
       dplyr::filter(.data$list_name == list_name) |>
-      dplyr::select(code, label_norm, code_norm)
+      dplyr::select(code, label_norm, code_norm, label_key, code_key)
 
     if (nrow(dict) == 0) return(x_chr)
 
-    m_code  <- dict$code[match(x_norm, dict$code_norm)]
-    m_label <- dict$code[match(x_norm, dict$label_norm)]
-    ifelse(!is.na(m_code), m_code, m_label)
+    x_norm <- .px_norm(x_chr)
+    x_key  <- .px_key(x_chr)
+
+    m_code_norm  <- dict$code[match(x_norm, dict$code_norm)]
+    m_label_norm <- dict$code[match(x_norm, dict$label_norm)]
+    m_code_key   <- dict$code[match(x_key,  dict$code_key)]
+    m_label_key  <- dict$code[match(x_key,  dict$label_key)]
+
+    out <- x_chr
+    out <- ifelse(!is.na(m_code_norm),  m_code_norm,  out)
+    out <- ifelse(!is.na(m_label_norm), m_label_norm, out)
+    out <- ifelse(!is.na(m_code_key),   m_code_key,   out)
+    out <- ifelse(!is.na(m_label_key),  m_label_key,  out)
+
+    # si algo no mapeó, se deja tal cual (no se fuerza NA)
+    out
   }
 
   .px_map_select_multiple_mother <- function(x, list_name) {
@@ -185,7 +199,7 @@ instrumento_codificar_xms <- function(inst,
     ) |>
     dplyr::mutate(
       label_norm = .px_norm(.data$label_es),
-      label_key  = .px_key(.data$label_es),   # fallback (dummies por texto)
+      label_key  = .px_key(.data$label_es),
 
       type_base = dplyr::case_when(
         stringr::str_starts(.data$type, "select_one") ~ "select_one",
@@ -241,6 +255,7 @@ instrumento_codificar_xms <- function(inst,
 
   # ============================================================
   # 1) RENOMBRE “SEGURO” POR NORMALIZACIÓN: label_es header -> code name
+  #    (y registro de provenance raw -> dest para diagnósticos)
   # ============================================================
   survey_labels_exact <- inst$survey %>%
     dplyr::transmute(
@@ -253,6 +268,8 @@ instrumento_codificar_xms <- function(inst,
   hdrs <- names(data_ren)
   hdrs_norm <- vapply(hdrs, .px_norm, character(1))
 
+  provenance <- tibble::tibble(raw = character(), dest = character(), how = character())
+
   for (i in seq_len(nrow(survey_labels_exact))) {
     nm <- survey_labels_exact$name[i]
     lb <- survey_labels_exact$label_es[i]
@@ -263,7 +280,17 @@ instrumento_codificar_xms <- function(inst,
     hit <- which(hdrs_norm == lb_norm)
 
     if (length(hit) >= 1) {
-      names(data_ren)[hit[1]] <- nm
+      raw_before <- names(data_ren)[hit[1]]
+
+      # evitar pisar si el destino ya existe
+      if (!(nm %in% names(data_ren))) {
+        names(data_ren)[hit[1]] <- nm
+        provenance <- dplyr::bind_rows(
+          provenance,
+          tibble::tibble(raw = raw_before, dest = nm, how = "label_norm_exact")
+        )
+      }
+
       hdrs <- names(data_ren)
       hdrs_norm <- vapply(hdrs, .px_norm, character(1))
     }
@@ -271,11 +298,18 @@ instrumento_codificar_xms <- function(inst,
 
   # ============================================================
   # 2) MAPEO adicional (no-slash) por normalización
+  #    FIX: evitar ambigüedad -> SOLO labels únicos en survey_use
   # ============================================================
   map_label_to_name <- survey_use |>
     dplyr::filter(!is.na(.data$label_norm), .data$label_norm != "") |>
     dplyr::group_by(.data$label_norm) |>
-    dplyr::summarise(name = dplyr::first(.data$name), .groups = "drop")
+    dplyr::summarise(
+      n = dplyr::n_distinct(.data$name),
+      name = dplyr::first(.data$name),
+      .groups = "drop"
+    ) |>
+    dplyr::filter(.data$n == 1) |>
+    dplyr::select(.data$label_norm, .data$name)
 
   raw_names <- names(data_ren)
   raw_norm  <- .px_norm(raw_names)
@@ -293,7 +327,12 @@ instrumento_codificar_xms <- function(inst,
       r <- mapA$raw[i]
       d <- mapA$dest[i]
       if (!is.na(r) && !is.na(d) && r %in% names(data_ren) && nzchar(d)) {
+        if (d %in% names(data_ren)) next  # no pisar destinos existentes
         names(data_ren)[names(data_ren) == r] <- d
+        provenance <- dplyr::bind_rows(
+          provenance,
+          tibble::tibble(raw = r, dest = d, how = "label_norm_unique")
+        )
       }
     }
   }
@@ -303,7 +342,6 @@ instrumento_codificar_xms <- function(inst,
   #     + fallback por KEY para complementar lo que falte
   # ============================================================
 
-  # --- helpers SM posicional
   .px_is_01_na <- function(x) {
     x <- x[!is.na(x)]
     if (length(x) == 0) return(TRUE)
@@ -317,8 +355,6 @@ instrumento_codificar_xms <- function(inst,
     mean(vapply(idx, function(j) .px_is_01_na(df[[j]]), logical(1)))
   }
 
-  # --- construir definiciones SM desde instrumento (k y choice_codes)
-  #     usando ORDEN como viene inst$choices (misma lógica que tu prueba)
   choice_ord_tbl <- inst$choices %>%
     dplyr::transmute(
       list_name   = as.character(.data$list_name),
@@ -394,25 +430,13 @@ instrumento_codificar_xms <- function(inst,
       dplyr::slice(1) %>%
       dplyr::ungroup()
 
-    # log (útil cuando había dobles hits)
-    multi_hits <- mother_cand %>% dplyr::filter(!is.na(.data$raw_pos)) %>% dplyr::count(.data$name) %>% dplyr::filter(.data$n > 1)
-    if (nrow(multi_hits) > 0) {
-      message("instrumento_codificar_xms(): madres SM con múltiples hits en raw = ", nrow(multi_hits),
-              " (se eligió mejor ventana por score). Ejemplos: ",
-              paste0(head(multi_hits$name, 5), collapse = ", "))
-    }
-
-    # construir mapping por POSICIÓN (madre + k columnas siguientes)
     build_map_one <- function(parent_name, raw_pos, k, choice_codes) {
       if (is.na(raw_pos)) return(tibble::tibble(raw_pos = integer(), dest = character()))
       idx <- (raw_pos + 1):(raw_pos + k)
       idx <- idx[idx >= 1 & idx <= ncol(data_raw)]
       if (length(idx) == 0) return(tibble::tibble(raw_pos = integer(), dest = character()))
       if (length(idx) < length(choice_codes)) choice_codes <- choice_codes[seq_len(length(idx))]
-      tibble::tibble(
-        raw_pos = idx,
-        dest = paste0(parent_name, "/", choice_codes)
-      )
+      tibble::tibble(raw_pos = idx, dest = paste0(parent_name, "/", choice_codes))
     }
 
     dummy_map_pos <- dplyr::bind_rows(lapply(seq_len(nrow(mother_hits_best)), function(i) {
@@ -425,15 +449,6 @@ instrumento_codificar_xms <- function(inst,
     })) %>%
       dplyr::filter(!is.na(.data$dest), .data$dest != "") %>%
       dplyr::distinct(.data$dest, .keep_all = TRUE)
-
-    # sanity log
-    if (nrow(dummy_map_pos) > 0) {
-      exp_total <- sum(mother_hits_best$k[!is.na(mother_hits_best$raw_pos)], na.rm = TRUE)
-      if (nrow(dummy_map_pos) < exp_total) {
-        message("instrumento_codificar_xms(): SM posicional mapeó ", nrow(dummy_map_pos),
-                " dummies de ", exp_total, " esperadas (posible falta de columnas en Excel).")
-      }
-    }
   }
 
   # --- fallback antiguo (por KEY) para complementar si algo quedara suelto
@@ -450,16 +465,6 @@ instrumento_codificar_xms <- function(inst,
         parent_key  = .px_key(.data$parent_part),
         option_key  = .px_key(.data$option_part)
       )
-
-    multi_slash <- slash_tbl %>%
-      dplyr::mutate(n_slash = stringr::str_count(.data$raw, "/")) %>%
-      dplyr::filter(.data$n_slash > 1)
-
-    if (nrow(multi_slash) > 0) {
-      message("instrumento_codificar_xms(): se detectaron ", nrow(multi_slash),
-              " headers dummy con más de un '/'. Split por ÚLTIMO '/' aplicado. Ejemplos:\n",
-              paste0(" - ", head(multi_slash$raw, 5), collapse = "\n"))
-    }
 
     dict_choices <- choice_dict %>%
       dplyr::select(list_name, choice_code = .data$code, choice_key = .data$label_key)
@@ -499,7 +504,7 @@ instrumento_codificar_xms <- function(inst,
   out <- data_ren
   n <- nrow(out)
 
-  # 3A) POSICIONAL (por índice de columna)
+  # 3A) POSICIONAL
   if (nrow(dummy_map_pos) > 0) {
     for (i in seq_len(nrow(dummy_map_pos))) {
       rp <- dummy_map_pos$raw_pos[i]
@@ -554,18 +559,12 @@ instrumento_codificar_xms <- function(inst,
         codes <- choice_dict |>
           dplyr::filter(.data$list_name == ln) |>
           dplyr::pull(.data$code)
-
-        if (length(codes) > 0) {
-          base_order2 <- c(base_order2, paste0(nm, "/", codes))
-        }
+        if (length(codes) > 0) base_order2 <- c(base_order2, paste0(nm, "/", codes))
       }
     }
   }
 
-  # system al final (solo los presentes)
   base_order2 <- c(base_order2, sys_present)
-
-  # unicidad + asegurar cobertura total del modelo_xms
   base_order2 <- unique(base_order2)
   missing_from_base <- setdiff(modelo_xms$dest, base_order2)
   base_order2 <- c(base_order2, missing_from_base)
@@ -583,7 +582,8 @@ instrumento_codificar_xms <- function(inst,
   # 4) CODIFICACIÓN: select_one / select_multiple + dummies 0/1
   # ============================================================
   so <- survey_use |>
-    dplyr::filter(.data$type_base == "select_one", !is.na(.data$list_final), .data$list_final != "") |>
+    dplyr::filter(.data$type_base == "select_one",
+                  !is.na(.data$list_final), .data$list_final != "") |>
     dplyr::select(name = .data$name, list_name = .data$list_final)
 
   if (nrow(so) > 0) {
@@ -595,7 +595,8 @@ instrumento_codificar_xms <- function(inst,
   }
 
   sm <- survey_use |>
-    dplyr::filter(.data$type_base == "select_multiple", !is.na(.data$list_final), .data$list_final != "") |>
+    dplyr::filter(.data$type_base == "select_multiple",
+                  !is.na(.data$list_final), .data$list_final != "") |>
     dplyr::select(name = .data$name, list_name = .data$list_final)
 
   if (nrow(sm) > 0) {
@@ -606,7 +607,6 @@ instrumento_codificar_xms <- function(inst,
     }
   }
 
-  # dummies -> 0/1
   dmy <- mult_choices$dest
   dmy <- dmy[dmy %in% names(out)]
   if (length(dmy) > 0) {
@@ -639,7 +639,6 @@ instrumento_codificar_xms <- function(inst,
       dcols <- dcols[dcols %in% names(out)]
       if (length(dcols) == 0) next
 
-      # asegurar 0/1
       for (dc in dcols) out[[dc]] <- .px_as_dummy01(out[[dc]])
 
       mat <- as.data.frame(out[, dcols, drop = FALSE])
@@ -661,6 +660,65 @@ instrumento_codificar_xms <- function(inst,
   }
 
   out <- .px_sm_rebuild_from_dummies(out, survey_use, choice_dict)
+
+  # ============================================================
+  # CHECKS GENÉRICOS (no bloquean): detectar columnas SO “contaminadas”
+  # ============================================================
+  # Regla: si una variable select_one tiene lista L, se calcula % de valores
+  # que pertenecen a (codes o labels) de L. Si es ~0, se avisa.
+  .px_diag_select_one <- function(out, survey_use, choice_dict, thr_warn = 0.05) {
+    so_tbl <- survey_use |>
+      dplyr::filter(.data$type_base == "select_one",
+                    !is.na(.data$list_final), .data$list_final != "") |>
+      dplyr::select(name = .data$name, listn = .data$list_final)
+
+    if (nrow(so_tbl) == 0) return(invisible(NULL))
+
+    dict2 <- choice_dict |>
+      dplyr::transmute(
+        list_name = .data$list_name,
+        code      = as.character(.data$code),
+        label     = as.character(.data$label_es),
+        code_norm = .px_norm(.data$code),
+        lab_norm  = .px_norm(.data$label_es)
+      )
+
+    msgs <- character(0)
+
+    for (i in seq_len(nrow(so_tbl))) {
+      nm <- so_tbl$name[i]
+      ln <- so_tbl$listn[i]
+      if (!nm %in% names(out)) next
+
+      x <- as.character(out[[nm]])
+      x <- x[!is.na(x) & nzchar(trimws(x))]
+      if (length(x) == 0) next
+
+      dL <- dict2 |> dplyr::filter(.data$list_name == ln)
+      if (nrow(dL) == 0) next
+
+      set_codes <- unique(dL$code_norm)
+      set_labs  <- unique(dL$lab_norm)
+
+      x_norm <- .px_norm(x)
+      pct <- mean(x_norm %in% set_codes | x_norm %in% set_labs)
+
+      if (is.finite(pct) && pct < thr_warn) {
+        msgs <- c(msgs, paste0(nm, " (list=", ln, "): pct_match=", sprintf("%.3f", pct)))
+      }
+    }
+
+    if (length(msgs) > 0) {
+      message(
+        "instrumento_codificar_xms(): WARNING select_one con baja coincidencia a sus listas (posible mapeo/renombre cruzado):\n",
+        paste0(" - ", msgs, collapse = "\n")
+      )
+    }
+
+    invisible(NULL)
+  }
+
+  .px_diag_select_one(out, survey_use, choice_dict)
 
   out
 }
