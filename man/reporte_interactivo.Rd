@@ -2,7 +2,7 @@
 % Please edit documentation in R/generalidad_interactivo.R
 \name{reporte_interactivo}
 \alias{reporte_interactivo}
-\title{Explorador interactivo de resultados (fase 1)}
+\title{Explorador interactivo de resultados (fase 2)}
 \usage{
 reporte_interactivo(
   data,
@@ -12,7 +12,9 @@ reporte_interactivo(
   titulo = "Explorador interactivo",
   colores_apiladas_por_listname = NULL,
   codigos_perdidos = NULL,
-  facet_vars = NULL
+  facet_vars = NULL,
+  id_unidad = NULL,
+  kpi_vars = NULL
 )
 }
 \arguments{
@@ -22,7 +24,7 @@ reporte_interactivo(
 contener al menos el componente \code{survey} y, opcionalmente, \code{choices}.}
 
 \item{secciones}{Lista nombrada de vectores de variables por sección,
-usada para poblar el selector de la variable principal.}
+usada para poblar el selector de sección y variable principal.}
 
 \item{fuente}{(Por ahora no se muestra, reservado para futuras versiones).}
 
@@ -32,25 +34,41 @@ usada para poblar el selector de la variable principal.}
 colores por \code{list_name} del instrumento (para las barras apiladas).}
 
 \item{codigos_perdidos}{Vector de códigos que deben excluirse de la
-variable principal (por ejemplo, 96, 97, 98, 99).}
+variable principal y de los KPIs (por ejemplo, 96, 97, 98, 99).}
 
 \item{facet_vars}{Vector de nombres de variables categóricas candidatas
 a filtro y cruce.}
+
+\item{id_unidad}{Nombre de la variable que identifica la unidad de
+análisis (por ejemplo, código de EESS). Si se especifica, el N del
+perfil corresponde al número de unidades distintas; en caso contrario,
+corresponde al número de filas.}
+
+\item{kpi_vars}{Vector con 0, 1 o 2 nombres de variables categóricas a
+mostrar como KPIs en el Bloque 3. Si hay más de 2, se usan solo las
+dos primeras.}
 }
 \value{
 Un objeto \code{shiny.appobj}.
 }
 \description{
-Genera una aplicación \pkg{shiny} que permite:
+Genera una aplicación \pkg{shiny} con tres bloques:
 \itemize{
-\item Seleccionar una variable principal (categórica) y visualizar su
-distribución como barra horizontal apilada (100\\%).
-\item Aplicar filtros sobre una variable categórica (checkboxes tipo chip).
-\item Cruzar la variable principal por una variable categórica (estratos),
-mostrando una barra por categoría del cruce.
+\item Bloque 1 (superior): gráfico principal de barras horizontales
+apiladas al 100\\% para una variable categórica seleccionada,
+con opción de cruce por otra variable categórica.
+\item Bloque 2 (inferior izquierda): tabla resumen de frecuencias y
+porcentajes (coherente con el gráfico y los filtros aplicados),
+en un contenedor de altura fija con scroll interno.
+\item Bloque 3 (inferior derecha): perfil dinámico de la muestra para
+la pregunta seleccionada, que incluye una tarjeta con el N de
+casos válidos de la pregunta y hasta dos gráficos KPI (barras
+apiladas verticales sin leyenda) para variables definidas en
+\code{kpi_vars}.
 }
 }
 \details{
-El título del gráfico siempre corresponde únicamente a la etiqueta de la
-variable principal, independientemente de si hay cruce.
+El perfil se calcula siempre sobre los mismos casos que alimentan el
+gráfico principal: sólo casos con respuesta válida (no NA) en la
+variable principal, después de aplicar filtros.
 }
