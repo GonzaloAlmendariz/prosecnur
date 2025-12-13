@@ -580,7 +580,10 @@ reporte_interactivo <- function(
     codigos_perdidos = NULL,
     facet_vars = NULL,
     id_unidad  = NULL,
-    kpi_vars   = NULL
+    kpi_vars   = NULL,
+    logo_png   = NULL,
+    logo_alt   = "Logo",
+    logo_height_px = 52
 ) {
 
   if (!requireNamespace("shiny", quietly = TRUE) ||
@@ -620,24 +623,185 @@ reporte_interactivo <- function(
   kpi_vars <- unique(kpi_vars[kpi_vars %in% names(data)])
   if (length(kpi_vars) > 2L) kpi_vars <- kpi_vars[1:2]
 
+  logo_src <- NULL
+  if (!is.null(logo_png) && nzchar(logo_png) && file.exists(logo_png)) {
+    shiny::addResourcePath("reporte_logo", normalizePath(dirname(logo_png), winslash = "/"))
+    logo_src <- paste0("reporte_logo/", basename(logo_png))
+  }
+
   # -------------------------------- UI ---------------------------------------
   ui <- shiny::fluidPage(
+
     shiny::tags$head(
       shiny::tags$style(shiny::HTML("
-        /* Plotly: usar todo el ancho del contenedor */
-        .html-widget, .plotly, .plotly html-widget, .plot-container, .svg-container {
-          width: 100% !important;
-          max-width: 100% !important;
+        /* ====== Base ====== */
+        body {
+          background: #f5f6fa;
+          color: #1f2933;
         }
-        /* Evitar recortes de hover en tarjetas */
-        .shiny-output-error, .shiny-output-error-validation { color: #b30000; }
-        /* Ajuste fino del grid bootstrap */
-        .row { margin-left: -10px; margin-right: -10px; }
-        .col-sm-6, .col-sm-12, .col-sm-9, .col-sm-3 { padding-left: 10px; padding-right: 10px; }
+
+        .container-fluid {
+          max-width: 1400px;
+        }
+
+        /* ====== Tipografía ====== */
+        h2, h3, h4 {
+          font-weight: 800;
+          color: #002457;
+        }
+
+        .title {
+          font-weight: 900;
+          color: #002457;
+        }
+
+        /* ====== Sidebar ====== */
+        .well, .sidebarPanel {
+          background: #ffffff !important;
+          border: 1px solid #e6e9f2 !important;
+          border-radius: 16px !important;
+          box-shadow: 0 12px 28px rgba(0, 36, 87, 0.06);
+        }
+
+        .sidebar h3 {
+          margin-top: 0;
+          color: #002457;
+        }
+
+        .sidebar p {
+          color: #5f6b7a;
+          font-size: 13px;
+        }
+
+        .sidebar hr {
+          border-top: 1px solid #edf0f7;
+        }
+
+        /* ====== Inputs ====== */
+        .selectize-input, .form-control {
+          border-radius: 12px !important;
+          border: 1px solid #e6e9f2 !important;
+          box-shadow: none !important;
+          font-size: 13px;
+        }
+
+        .selectize-input.focus, .form-control:focus {
+          border-color: #002457 !important;
+          box-shadow: 0 0 0 3px rgba(0, 36, 87, 0.15) !important;
+        }
+
+        /* ====== Botones ====== */
+        .btn {
+          border-radius: 12px !important;
+          border: 1px solid #e6e9f2 !important;
+          background: #ffffff !important;
+          font-weight: 700;
+          color: #002457 !important;
+        }
+
+        .btn:hover {
+          background: rgba(0, 36, 87, 0.05) !important;
+          border-color: #002457 !important;
+        }
+
+        /* ====== Cards (bloques principales) ====== */
+        .cardbox {
+          background: #ffffff;
+          border: 1px solid #e6e9f2;
+          border-radius: 18px;
+          box-shadow: 0 14px 34px rgba(0, 36, 87, 0.07);
+          padding: 12px;
+        }
+
+        /* ====== KPI N ====== */
+        .kpi-n {
+          color: #002457;
+          font-weight: 900;
+          letter-spacing: 0.02em;
+        }
+
+        /* ====== Plotly ====== */
+        .plot-container, .svg-container {
+          width: 100% !important;
+        }
+
+        .plotly .main-svg {
+          overflow: visible !important;
+        }
+
+        /* ====== Tabla ====== */
+        table.dataTable {
+          border-radius: 14px;
+          overflow: hidden;
+        }
+
+        table.dataTable thead th {
+          background: #f1f3f9;
+          color: #002457;
+          font-weight: 800;
+          border-bottom: none;
+        }
+
+        table.dataTable tbody td {
+          font-size: 13px;
+          color: #1f2933;
+        }
+
+        /* ====== Layout spacing (bootstrap intacto) ====== */
+        .row {
+          margin-left: -10px;
+          margin-right: -10px;
+        }
+
+        .col-sm-6, .col-sm-12, .col-sm-9, .col-sm-3 {
+          padding-left: 10px;
+          padding-right: 10px;
+        }
+
+        /* ====== Header con logo ====== */
+.topbar {
+  background: #ffffff;
+  border: 1px solid #e6e9f2;
+  border-radius: 18px;
+  box-shadow: 0 14px 34px rgba(0, 36, 87, 0.07);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.topbar-title {
+  font-size: 26px;
+  font-weight: 900;
+  color: #002457;
+  line-height: 1.1;
+}
+
+.topbar-logo {
+  height: 52px;           /* se sobreescribe inline con logo_height_px */
+  max-width: 240px;
+  object-fit: contain;
+  display: block;
+}
+
+.topbar-title { flex: 1 1 auto; }
+.topbar-logo  { flex: 0 0 auto; }
       "))
     ),
 
-    shiny::titlePanel(title = titulo),
+    shiny::div(
+      class = "topbar",
+      shiny::div(class = "topbar-title", titulo),
+      if (!is.null(logo_src)) shiny::tags$img(
+        src   = logo_src,
+        alt   = logo_alt,
+        class = "topbar-logo",
+        style = paste0("height:", as.integer(logo_height_px), "px;")
+      )
+    ),
 
     shiny::sidebarLayout(
       shiny::sidebarPanel(
@@ -700,7 +864,10 @@ reporte_interactivo <- function(
         shiny::fluidRow(
           shiny::column(
             width = 12,
-            plotly::plotlyOutput("plot_principal", height = "420px")
+            shiny::div(
+              class = "cardbox",
+              plotly::plotlyOutput("plot_principal", height = "420px")
+            )
           )
         ),
 
@@ -710,21 +877,17 @@ reporte_interactivo <- function(
           shiny::column(
             width = 6,
             shiny::div(
-              style = paste(
-                "height: 360px; overflow-y: auto;",
-                "border: 1px solid #eee; border-radius: 10px; padding: 8px;",
-                "background: #fff;"
-              ),
+              class = "cardbox",
+              style = "height: 360px; overflow-y: auto;",
               if (usa_DT) DT::dataTableOutput("tabla_principal") else shiny::tableOutput("tabla_principal")
             )
           ),
           shiny::column(
             width = 6,
             shiny::div(
+              class = "cardbox",
               style = paste(
                 "height: 360px;",
-                "border: 1px solid #eee; border-radius: 10px; padding: 8px;",
-                "background: #fff;",
                 "display: flex; flex-direction: column; align-items: stretch;",
                 "overflow: visible;"
               ),
@@ -759,21 +922,51 @@ reporte_interactivo <- function(
       vals <- vals[!is.na(vals)]
       if (!length(vals)) return(NULL)
 
+      # ---- mapear code -> label usando instrumento (choices) si existe ----
+      surv <- instrumento$survey
+      ch   <- instrumento$choices %||% NULL
+
+      labels_vals <- vals
+
+      if (!is.null(surv) && all(c("name", "list_name") %in% names(surv)) &&
+          !is.null(ch)   && all(c("list_name","name","label") %in% names(ch))) {
+
+        ln <- surv$list_name[surv$name == v][1]
+        if (!is.na(ln) && nzchar(ln)) {
+          ch_v <- ch[ch$list_name == ln, , drop = FALSE]
+          if (nrow(ch_v)) {
+            map_code_to_label <- stats::setNames(as.character(ch_v$label), as.character(ch_v$name))
+            labels_vals <- unname(map_code_to_label[vals])
+            # fallback si algún código no está en choices
+            labels_vals[is.na(labels_vals) | labels_vals == ""] <- vals[is.na(labels_vals) | labels_vals == ""]
+          }
+        }
+      }
+
       shiny::checkboxGroupInput(
         inputId  = "filtro_categorias",
         label    = label_var(v),
-        choices  = vals,
+        choices  = stats::setNames(vals, labels_vals),
         selected = vals
       )
     })
 
     shiny::observeEvent(input$limpiar_filtros, {
-      v <- input$filtro_var
-      if (is.null(v) || !nzchar(v) || !v %in% names(data)) return()
+      # volver a "Ninguno" (default)
+      shiny::updateSelectInput(
+        session,
+        inputId  = "filtro_var",
+        selected = ""
+      )
 
-      vals <- sort(unique(as.character(data[[v]])))
-      vals <- vals[!is.na(vals)]
-      shiny::updateCheckboxGroupInput(session, "filtro_categorias", selected = vals)
+      # por limpieza visual: vaciar selección de categorías (el UI desaparecerá porque filtro_var="")
+      if (!is.null(input$filtro_categorias)) {
+        shiny::updateCheckboxGroupInput(
+          session,
+          inputId  = "filtro_categorias",
+          selected = character(0)
+        )
+      }
     })
 
     shiny::observeEvent(input$limpiar_cruce, {

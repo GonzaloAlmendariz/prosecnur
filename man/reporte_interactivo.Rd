@@ -14,7 +14,10 @@ reporte_interactivo(
   codigos_perdidos = NULL,
   facet_vars = NULL,
   id_unidad = NULL,
-  kpi_vars = NULL
+  kpi_vars = NULL,
+  logo_png = NULL,
+  logo_alt = "Logo",
+  logo_height_px = 52
 )
 }
 \description{
