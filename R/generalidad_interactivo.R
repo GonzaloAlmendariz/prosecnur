@@ -454,7 +454,6 @@
         y = -0.12
       ),
       margin = list(l = margin_left, r = margin_right, t = titulo_margin_top, b = margin_bottom),
-      title  = list(text = titulo, x = 0, xanchor = "left", font = list(size = titulo_font_size)),
       uniformtext = list(minsize = 10, mode = "hide"),
       hovermode  = "closest",
       showlegend = mostrar_leyenda,
@@ -546,8 +545,6 @@
       title = list(text = titulo_kpi, x = 0.5, xanchor = "center", font = list(size = 12)),
       showlegend = FALSE,
       margin = list(l = 10, r = 10, t = 45, b = 5),
-      # recorte para que sea media dona (solo mitad superior)
-      # (plotly: se logra jugando con el dominio/annotations; esto funciona bien en la práctica)
       annotations = list(),
       transition = list(duration = 450, easing = "cubic-in-out")
     ) |>
@@ -789,6 +786,27 @@ reporte_interactivo <- function(
 
 .topbar-title { flex: 1 1 auto; }
 .topbar-logo  { flex: 0 0 auto; }
+
+/* ====== Card header (editorial) ====== */
+.cardbox-header{
+  padding: 10px 12px 6px 12px;
+  border-bottom: 1px solid #edf0f7;
+  margin: -12px -12px 10px -12px; /* compensa padding del cardbox */
+}
+
+.cardbox-title{
+  font-size: 18px;
+  font-weight: 900;
+  color: #002457; /* Azul Pulso */
+  line-height: 1.15;
+  margin: 0;
+}
+
+.cardbox-subtitle{
+  margin-top: 4px;
+  font-size: 12px;
+  color: #5f6b7a;
+}
       "))
     ),
 
@@ -866,6 +884,12 @@ reporte_interactivo <- function(
             width = 12,
             shiny::div(
               class = "cardbox",
+
+              shiny::div(
+                class = "cardbox-header",
+                shiny::uiOutput("plot_header")
+              ),
+
               plotly::plotlyOutput("plot_principal", height = "420px")
             )
           )
@@ -879,6 +903,13 @@ reporte_interactivo <- function(
             shiny::div(
               class = "cardbox",
               style = "height: 360px; overflow-y: auto;",
+
+              # --- HEADER EJECUTIVO DE TABLA (nuevo) ---
+              shiny::div(
+                class = "cardbox-header",
+                shiny::div(class = "cardbox-title", shiny::textOutput("titulo_tabla"))
+              ),
+
               if (usa_DT) DT::dataTableOutput("tabla_principal") else shiny::tableOutput("tabla_principal")
             )
           ),
@@ -894,7 +925,10 @@ reporte_interactivo <- function(
               shiny::uiOutput("kpi_panel")
             )
           )
-        )
+        ),
+
+        # --- ESPACIO INFERIOR (nuevo) ---
+        shiny::div(style = "height: 48px;")
       )
     )
   )
@@ -937,7 +971,6 @@ reporte_interactivo <- function(
           if (nrow(ch_v)) {
             map_code_to_label <- stats::setNames(as.character(ch_v$label), as.character(ch_v$name))
             labels_vals <- unname(map_code_to_label[vals])
-            # fallback si algún código no está en choices
             labels_vals[is.na(labels_vals) | labels_vals == ""] <- vals[is.na(labels_vals) | labels_vals == ""]
           }
         }
@@ -952,20 +985,9 @@ reporte_interactivo <- function(
     })
 
     shiny::observeEvent(input$limpiar_filtros, {
-      # volver a "Ninguno" (default)
-      shiny::updateSelectInput(
-        session,
-        inputId  = "filtro_var",
-        selected = ""
-      )
-
-      # por limpieza visual: vaciar selección de categorías (el UI desaparecerá porque filtro_var="")
+      shiny::updateSelectInput(session, inputId = "filtro_var", selected = "")
       if (!is.null(input$filtro_categorias)) {
-        shiny::updateCheckboxGroupInput(
-          session,
-          inputId  = "filtro_categorias",
-          selected = character(0)
-        )
+        shiny::updateCheckboxGroupInput(session, inputId = "filtro_categorias", selected = character(0))
       }
     })
 
@@ -984,6 +1006,36 @@ reporte_interactivo <- function(
         if (length(vals_sel) > 0L) df <- df[df[[v_filtro]] %in% vals_sel, , drop = FALSE]
       }
       df
+    })
+
+    # ------------------ Header del gráfico (título fuera de plotly) ----------
+    output$plot_header <- shiny::renderUI({
+      shiny::req(input$var_principal)
+
+      var_main <- input$var_principal
+      titulo_h <- .obtener_label_var(var_main, instrumento, data)
+      titulo_h <- .wrap_titulo_html(titulo_h, width = 110)
+
+      cruce <- input$var_cruce
+      cruce_txt <- if (!is.null(cruce) && nzchar(cruce)) {
+        paste0("Cruce: ", .obtener_label_var(cruce, instrumento, data))
+      } else {
+        NULL
+      }
+
+      shiny::tagList(
+        shiny::div(class = "cardbox-title", shiny::HTML(titulo_h)),
+        if (!is.null(cruce_txt)) shiny::div(class = "cardbox-subtitle", cruce_txt)
+      )
+    })
+
+    # ------------------ Título ejecutivo de tabla (nuevo) --------------------
+    output$titulo_tabla <- shiny::renderText({
+      if (!is.null(input$var_cruce) && nzchar(input$var_cruce)) {
+        "Distribución de respuestas por estrato"
+      } else {
+        "Distribución de respuestas"
+      }
     })
 
     # ------------------ Bloque 1: gráfico principal --------------------------
@@ -1106,7 +1158,6 @@ reporte_interactivo <- function(
         nrow(df)
       }
 
-      # texto: "N: 14 EESS" (usa id_unidad como sufijo si viene)
       n_sufijo <- if (!is.null(id_unidad) && nzchar(id_unidad)) id_unidad else ""
       texto_N  <- paste0(
         "N: ",
@@ -1131,7 +1182,6 @@ reporte_interactivo <- function(
 
       kpi_elems <- list(tarjeta_N)
 
-      # leyenda pequeña abajo (no afecta al plot)
       legend_html <- function(legend_df) {
         shiny::div(
           style = paste(
@@ -1153,7 +1203,6 @@ reporte_interactivo <- function(
         )
       }
 
-      # construir KPIs half-donut (SIEMPRE) + leyenda abajo
       kpi_obj_1 <- NULL
       kpi_obj_2 <- NULL
 
