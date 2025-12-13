@@ -2,7 +2,7 @@
 % Please edit documentation in R/generalidad_interactivo.R
 \name{reporte_interactivo}
 \alias{reporte_interactivo}
-\title{Explorador interactivo de resultados (fase 2)}
+\title{Explorador interactivo de resultados (pestaña Resumen + pestaña Base de datos)}
 \usage{
 reporte_interactivo(
   data,
@@ -21,5 +21,5 @@ reporte_interactivo(
 )
 }
 \description{
-Explorador interactivo de resultados (fase 2)
+Explorador interactivo de resultados (pestaña Resumen + pestaña Base de datos)
 }

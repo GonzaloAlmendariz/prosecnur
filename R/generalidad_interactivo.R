@@ -1,7 +1,7 @@
 # =============================================================================
 # Explorador interactivo: reporte_interactivo()
-# Fase 2 – Gráfico principal + tabla + bloque de perfil (N + 2 KPIs)
-# Versión más sofisticada: paletas robustas + layout limpio + KPIs half-donut
+# Pestaña 1: Resumen (gráfico + tabla + perfil N + 2 KPIs)
+# Pestaña 2: Base de datos (diccionario + tabla de datos + descarga + toggle etiquetas/códigos)
 # =============================================================================
 
 `%||%` <- function(x, y) if (!is.null(x)) x else y
@@ -377,13 +377,11 @@
   if (is.null(height)) height <- max(220, min(650, 160 + 60 * n_estratos))
 
   if (mostrar_leyenda) {
-    titulo_font_size  <- 14
     titulo_margin_top <- 60
     margin_left       <- if (solo_total) 20 else 170
     margin_right      <- 25
     margin_bottom     <- 45
   } else {
-    titulo_font_size  <- 11
     titulo_margin_top <- 35
     margin_left       <- if (solo_total) 20 else 120
     margin_right      <- 10
@@ -415,7 +413,7 @@
         y                = ~estrato_label,
         name             = opt,
         orientation      = "h",
-        text             = ~texto_pct_html,
+        text             = ~paste0("<b>", df_opt$texto_pct, "</b>"),
         textposition     = "inside",
         insidetextanchor = "middle",
         textfont         = list(color = "white", size = 11),
@@ -461,15 +459,13 @@
     ) |>
     plotly::config(displayModeBar = FALSE, responsive = TRUE)
 
-  p <- plotly::animation_opts(
+  plotly::animation_opts(
     p,
     frame      = 600,
     transition = 450,
     easing     = "cubic-in-out",
     redraw     = TRUE
   )
-
-  p
 }
 
 # -----------------------------------------------------------------------------
@@ -499,7 +495,6 @@
   )
   df_tab <- .anotar_porcentajes_enteros(df_tab)
 
-  # ordenar y consolidar
   df_tab$opcion_label <- as.character(df_tab$opcion_label)
   df_tab <- df_tab[order(df_tab$opcion_label), , drop = FALSE]
 
@@ -522,12 +517,6 @@
     stringsAsFactors = FALSE
   )
 
-  # Texto central: mostrar categoría líder (más %)
-  idx_max <- which.max(df_tab$porc_int)
-  center_pct   <- df_tab$porc_int[idx_max] %||% 0L
-  center_label <- df_tab$opcion_label[idx_max] %||% ""
-
-  # half donut: pie + hole + rotation + domain + sin leyenda interna
   p <- plotly::plot_ly(
     data   = df_tab,
     labels = ~opcion_label,
@@ -542,7 +531,7 @@
     hovertemplate = paste0("<b>", titulo_kpi, "</b><br>%{label}: %{value}%<extra></extra>")
   ) |>
     plotly::layout(
-      title = list(text = titulo_kpi, x = 0.5, xanchor = "center", font = list(size = 12)),
+      title = list(text = titulo_kpi, x = 0.5, xanchor = "center", font = list(size = 12, color = "#002457")),
       showlegend = FALSE,
       margin = list(l = 10, r = 10, t = 45, b = 5),
       annotations = list(),
@@ -563,7 +552,7 @@
 # App principal
 # -----------------------------------------------------------------------------
 
-#' Explorador interactivo de resultados (fase 2)
+#' Explorador interactivo de resultados (pestaña Resumen + pestaña Base de datos)
 #' @export
 #' @importFrom stats setNames
 #' @importFrom dplyr n_distinct
@@ -585,8 +574,9 @@ reporte_interactivo <- function(
 
   if (!requireNamespace("shiny", quietly = TRUE) ||
       !requireNamespace("plotly", quietly = TRUE) ||
-      !requireNamespace("dplyr",  quietly = TRUE)) {
-    stop("Se requieren 'shiny', 'plotly' y 'dplyr' para `reporte_interactivo()`.", call. = FALSE)
+      !requireNamespace("dplyr",  quietly = TRUE) ||
+      !requireNamespace("DT",     quietly = TRUE)) {
+    stop("Se requieren 'shiny', 'plotly', 'dplyr' y 'DT' para `reporte_interactivo()`.", call. = FALSE)
   }
 
   survey <- instrumento$survey
@@ -594,11 +584,94 @@ reporte_interactivo <- function(
     stop("El `instrumento` debe contener un `survey` válido.", call. = FALSE)
   }
 
-  usa_DT <- requireNamespace("DT", quietly = TRUE)
-
   if (is.null(secciones) || !length(secciones)) {
     stop("`secciones` debe ser una lista nombrada con vectores de variables.", call. = FALSE)
   }
+
+  # -------------------- Helpers de pestaña Base de datos ---------------------
+
+  .is_tecnica <- function(v, instrumento) {
+    if (!nzchar(v)) return(TRUE)
+    if (startsWith(v, "_")) return(TRUE)
+    # variables temporales declaradas por instrumento
+    vf <- as.character(attr(data, "vars_fecha", exact = TRUE) %||% instrumento$vars_fecha %||% character(0))
+    vh <- as.character(attr(data, "vars_hora", exact = TRUE) %||% instrumento$vars_hora %||% character(0))
+    vd <- as.character(attr(data, "vars_datetime", exact = TRUE) %||% instrumento$vars_datetime %||% character(0))
+    if (v %in% c(vf, vh, vd)) return(TRUE)
+
+    # “start/end/deviceid/etc” si existieran
+    if (!is.null(instrumento$survey) && all(c("name","type") %in% names(instrumento$survey))) {
+      fila <- instrumento$survey[instrumento$survey$name == v, , drop = FALSE]
+      if (nrow(fila)) {
+        tp <- tolower(as.character(fila$type[1]))
+        if (tp %in% c("start","end","deviceid","subscriberid","simserial","phonenumber","today","username","audit")) {
+          return(TRUE)
+        }
+      }
+    }
+
+    FALSE
+  }
+
+  label_var <- function(v) .obtener_label_var(v, instrumento, data)
+
+  # variables candidatas (para mostrar en data): quitar técnicas
+  vars_data_visibles <- setdiff(names(data), names(data)[vapply(names(data), .is_tecnica, logical(1), instrumento = instrumento)])
+
+  # Para el diccionario: solo variables que tengan “codificación” (select_one o dummies de select_multiple)
+  so_vars <- character(0)
+  sm_vars <- character(0)
+  if (!is.null(instrumento$survey) && all(c("name","type") %in% names(instrumento$survey))) {
+    so_vars <- instrumento$survey$name[grepl("^select_one", instrumento$survey$type)]
+    sm_vars <- instrumento$survey$name[grepl("^select_multiple", instrumento$survey$type)]
+    so_vars <- intersect(so_vars, vars_data_visibles)
+  }
+
+  # dummies de select_multiple: v.[...], v_recod.[...], v_otro
+  sm_dummies <- character(0)
+  if (length(sm_vars)) {
+    for (v in sm_vars) {
+      patt <- paste0("^", v, "(\\.|_recod\\.|_otro$)")
+      sm_dummies <- union(sm_dummies, grep(patt, vars_data_visibles, value = TRUE))
+    }
+  }
+
+  vars_diccionario <- sort(unique(c(so_vars, sm_dummies)))
+  if (!length(vars_diccionario)) {
+    # si no hay, igual permitir que el usuario explore data, pero diccionario quedará vacío
+    vars_diccionario <- character(0)
+  }
+
+  # vista etiquetada: transformar columnas usando attr(labels), sin “inventar” nada
+  .to_labels_df <- function(df) {
+    out <- df
+    for (v in names(out)) {
+      labs <- attr(out[[v]], "labels", exact = TRUE)
+      if (!is.null(labs) && length(labs) > 0) {
+        # labs típicamente: names = codes, values = labels (como lo has definido en reporte_data)
+        codes <- names(labs)
+        lbls  <- unname(labs)
+
+        x <- out[[v]]
+        x_chr <- as.character(x)
+
+        map_code_to_label <- stats::setNames(as.character(lbls), as.character(codes))
+        x_lbl <- unname(map_code_to_label[x_chr])
+        # fallback: si algo no mapea, mantener el código tal cual (sin resaltar NAs)
+        x_lbl[is.na(x_lbl) & !is.na(x_chr)] <- x_chr[is.na(x_lbl) & !is.na(x_chr)]
+        out[[v]] <- x_lbl
+      } else {
+        # si no hay labels, dejar tal cual
+        out[[v]] <- out[[v]]
+      }
+    }
+    out
+  }
+
+  # KPIs (máx 2)
+  kpi_vars <- (kpi_vars %||% character(0))
+  kpi_vars <- unique(kpi_vars[kpi_vars %in% names(data)])
+  if (length(kpi_vars) > 2L) kpi_vars <- kpi_vars[1:2]
 
   # Secciones: sólo variables presentes en data
   secciones_limpias <- lapply(secciones, function(v) v[v %in% names(data)])
@@ -606,19 +679,12 @@ reporte_interactivo <- function(
   if (!length(secciones_limpias)) {
     stop("Ninguna sección de `secciones` tiene variables presentes en `data`.", call. = FALSE)
   }
-
   secciones_nombres <- names(secciones_limpias)
-  label_var <- function(v) .obtener_label_var(v, instrumento, data)
 
-  # Filtros / cruces
+  # Filtros / cruces (solo pestaña 1)
   facet_vars <- (facet_vars %||% character(0))
   facet_vars <- facet_vars[facet_vars %in% names(data)]
   facet_choices <- stats::setNames(facet_vars, vapply(facet_vars, label_var, character(1)))
-
-  # KPIs (máx 2)
-  kpi_vars <- (kpi_vars %||% character(0))
-  kpi_vars <- unique(kpi_vars[kpi_vars %in% names(data)])
-  if (length(kpi_vars) > 2L) kpi_vars <- kpi_vars[1:2]
 
   logo_src <- NULL
   if (!is.null(logo_png) && nzchar(logo_png) && file.exists(logo_png)) {
@@ -632,25 +698,12 @@ reporte_interactivo <- function(
     shiny::tags$head(
       shiny::tags$style(shiny::HTML("
         /* ====== Base ====== */
-        body {
-          background: #f5f6fa;
-          color: #1f2933;
-        }
-
-        .container-fluid {
-          max-width: 1400px;
-        }
+        body { background: #f5f6fa; color: #1f2933; }
+        .container-fluid { max-width: 1400px; }
 
         /* ====== Tipografía ====== */
-        h2, h3, h4 {
-          font-weight: 800;
-          color: #002457;
-        }
-
-        .title {
-          font-weight: 900;
-          color: #002457;
-        }
+        h2, h3, h4 { font-weight: 800; color: #002457; }
+        .title { font-weight: 900; color: #002457; }
 
         /* ====== Sidebar ====== */
         .well, .sidebarPanel {
@@ -659,20 +712,9 @@ reporte_interactivo <- function(
           border-radius: 16px !important;
           box-shadow: 0 12px 28px rgba(0, 36, 87, 0.06);
         }
-
-        .sidebar h3 {
-          margin-top: 0;
-          color: #002457;
-        }
-
-        .sidebar p {
-          color: #5f6b7a;
-          font-size: 13px;
-        }
-
-        .sidebar hr {
-          border-top: 1px solid #edf0f7;
-        }
+        .sidebar h3 { margin-top: 0; color: #002457; }
+        .sidebar p  { color: #5f6b7a; font-size: 13px; }
+        .sidebar hr { border-top: 1px solid #edf0f7; }
 
         /* ====== Inputs ====== */
         .selectize-input, .form-control {
@@ -681,7 +723,6 @@ reporte_interactivo <- function(
           box-shadow: none !important;
           font-size: 13px;
         }
-
         .selectize-input.focus, .form-control:focus {
           border-color: #002457 !important;
           box-shadow: 0 0 0 3px rgba(0, 36, 87, 0.15) !important;
@@ -695,13 +736,12 @@ reporte_interactivo <- function(
           font-weight: 700;
           color: #002457 !important;
         }
-
         .btn:hover {
           background: rgba(0, 36, 87, 0.05) !important;
           border-color: #002457 !important;
         }
 
-        /* ====== Cards (bloques principales) ====== */
+        /* ====== Cards ====== */
         .cardbox {
           background: #ffffff;
           border: 1px solid #e6e9f2;
@@ -710,103 +750,150 @@ reporte_interactivo <- function(
           padding: 12px;
         }
 
-        /* ====== KPI N ====== */
-        .kpi-n {
-          color: #002457;
-          font-weight: 900;
-          letter-spacing: 0.02em;
+        /* ====== Layout spacing ====== */
+        .row { margin-left: -10px; margin-right: -10px; }
+        .col-sm-6, .col-sm-12, .col-sm-9, .col-sm-3 { padding-left: 10px; padding-right: 10px; }
+
+        /* ====== Header con logo ====== */
+        .topbar{
+          background:#ffffff;
+          border:1px solid #e6e9f2;
+          border-radius:18px;
+          box-shadow:0 14px 34px rgba(0, 36, 87, 0.07);
+          padding:14px 16px;
+          margin-bottom:14px;
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:14px;
+        }
+        .topbar-title{
+          font-size:26px;
+          font-weight:900;
+          color:#002457;
+          line-height:1.1;
+          flex: 1 1 auto;
+        }
+        .topbar-logo{
+          height:52px;
+          max-width:240px;
+          object-fit:contain;
+          display:block;
+          flex: 0 0 auto;
+        }
+
+        /* ====== Card header (editorial) ====== */
+        .cardbox-header{
+          padding:10px 12px 6px 12px;
+          border-bottom:1px solid #edf0f7;
+          margin:-12px -12px 10px -12px;
+        }
+        .cardbox-title{
+          font-size:18px;
+          font-weight:900;
+          color:#002457;
+          line-height:1.15;
+          margin:0;
+        }
+        .cardbox-subtitle{
+          margin-top:4px;
+          font-size:12px;
+          color:#5f6b7a;
         }
 
         /* ====== Plotly ====== */
-        .plot-container, .svg-container {
-          width: 100% !important;
+        .plot-container, .svg-container { width: 100% !important; }
+        .plotly .main-svg { overflow: visible !important; }
+
+        /* ====== DataTable: look más “ejecutivo” ====== */
+        table.dataTable { border-collapse: collapse !important; }
+        table.dataTable thead th{
+          background:#f1f3f9;
+          color:#002457;
+          font-weight:800;
+          border-bottom: 1px solid #dfe5f2 !important;
+          border-right: 1px solid #dfe5f2 !important;
+        }
+        table.dataTable tbody td{
+          font-size:12px;
+          color:#1f2933;
+          border-bottom: 1px solid #edf0f7 !important;
+          border-right: 1px solid #edf0f7 !important;
+        }
+        table.dataTable tbody tr:hover td{
+          background: #fafbff !important;
         }
 
-        .plotly .main-svg {
-          overflow: visible !important;
+        /* ====== Toggle (switch) elegante: Códigos <-> Etiquetas ====== */
+        .toggle-row{
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:10px;
+          margin-top: 10px;
+          margin-bottom: 10px;
+        }
+        .toggle-label{
+          font-size: 12px;
+          color: #5f6b7a;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .switch {
+          position: relative;
+          display: inline-block;
+          width: 52px;
+          height: 28px;
+          flex: 0 0 auto;
+        }
+        .switch input { display:none; }
+        .slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background-color: #e6e9f2;
+          transition: .25s;
+          border-radius: 999px;
+          border: 1px solid #dfe5f2;
+        }
+        .slider:before {
+          position: absolute;
+          content: \"\";
+          height: 22px;
+          width: 22px;
+          left: 3px;
+          bottom: 2.5px;
+          background-color: white;
+          transition: .25s;
+          border-radius: 50%;
+          box-shadow: 0 6px 14px rgba(0,0,0,0.12);
+        }
+        input:checked + .slider {
+          background-color: rgba(0, 36, 87, 0.20);
+          border-color: rgba(0, 36, 87, 0.35);
+        }
+        input:checked + .slider:before {
+          transform: translateX(23px);
         }
 
-        /* ====== Tabla ====== */
-        table.dataTable {
-          border-radius: 14px;
-          overflow: hidden;
-        }
-
-        table.dataTable thead th {
-          background: #f1f3f9;
-          color: #002457;
-          font-weight: 800;
-          border-bottom: none;
-        }
-
-        table.dataTable tbody td {
-          font-size: 13px;
+        /* ====== Diccionario ====== */
+        .dicc-kv{
+          display:grid;
+          grid-template-columns: 92px 1fr;
+          gap: 6px 10px;
+          font-size: 12px;
           color: #1f2933;
         }
-
-        /* ====== Layout spacing (bootstrap intacto) ====== */
-        .row {
-          margin-left: -10px;
-          margin-right: -10px;
+        .dicc-k{
+          color: #5f6b7a;
+          font-weight: 800;
+        }
+        .dicc-v{
+          color: #1f2933;
+          font-weight: 600;
+          word-break: break-word;
         }
 
-        .col-sm-6, .col-sm-12, .col-sm-9, .col-sm-3 {
-          padding-left: 10px;
-          padding-right: 10px;
-        }
-
-        /* ====== Header con logo ====== */
-.topbar {
-  background: #ffffff;
-  border: 1px solid #e6e9f2;
-  border-radius: 18px;
-  box-shadow: 0 14px 34px rgba(0, 36, 87, 0.07);
-  padding: 14px 16px;
-  margin-bottom: 14px;
-
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.topbar-title {
-  font-size: 26px;
-  font-weight: 900;
-  color: #002457;
-  line-height: 1.1;
-}
-
-.topbar-logo {
-  height: 52px;           /* se sobreescribe inline con logo_height_px */
-  max-width: 240px;
-  object-fit: contain;
-  display: block;
-}
-
-.topbar-title { flex: 1 1 auto; }
-.topbar-logo  { flex: 0 0 auto; }
-
-/* ====== Card header (editorial) ====== */
-.cardbox-header{
-  padding: 10px 12px 6px 12px;
-  border-bottom: 1px solid #edf0f7;
-  margin: -12px -12px 10px -12px; /* compensa padding del cardbox */
-}
-
-.cardbox-title{
-  font-size: 18px;
-  font-weight: 900;
-  color: #002457; /* Azul Pulso */
-  line-height: 1.15;
-  margin: 0;
-}
-
-.cardbox-subtitle{
-  margin-top: 4px;
-  font-size: 12px;
-  color: #5f6b7a;
-}
       "))
     ),
 
@@ -821,120 +908,198 @@ reporte_interactivo <- function(
       )
     ),
 
-    shiny::sidebarLayout(
-      shiny::sidebarPanel(
-        width = 3,
+    shiny::navbarPage(
+      title = NULL,
+      id    = "tabs_main",
 
-        shiny::h3("Variables"),
-        shiny::p("Seleccione la sección y la variable principal a visualizar."),
+      # =========================
+      # TAB 1 — RESUMEN (igual lógica)
+      # =========================
+      shiny::tabPanel(
+        title = "Resumen",
 
-        shiny::selectInput(
-          inputId  = "seccion",
-          label    = "Sección",
-          choices  = stats::setNames(secciones_nombres, secciones_nombres),
-          selected = secciones_nombres[1]
-        ),
+        shiny::sidebarLayout(
+          shiny::sidebarPanel(
+            width = 3,
 
-        shiny::selectInput(
-          inputId  = "var_principal",
-          label    = "Variable principal",
-          choices  = NULL
-        ),
+            shiny::h3("Variables"),
+            shiny::p("Seleccione la sección y la variable principal a visualizar."),
 
-        shiny::hr(),
+            shiny::selectInput(
+              inputId  = "seccion",
+              label    = "Sección",
+              choices  = stats::setNames(secciones_nombres, secciones_nombres),
+              selected = secciones_nombres[1]
+            ),
 
-        shiny::h3("Filtros"),
+            shiny::selectInput(
+              inputId  = "var_principal",
+              label    = "Variable principal",
+              choices  = NULL
+            ),
 
-        shiny::selectInput(
-          inputId  = "filtro_var",
-          label    = "Variable de filtro",
-          choices  = c("Ninguno" = "", facet_choices),
-          selected = ""
-        ),
+            shiny::hr(),
 
-        shiny::uiOutput("filtro_categorias_ui"),
+            shiny::h3("Filtros"),
 
-        shiny::actionButton(
-          inputId = "limpiar_filtros",
-          label   = "Limpiar filtros"
-        ),
+            shiny::selectInput(
+              inputId  = "filtro_var",
+              label    = "Variable de filtro",
+              choices  = c("Ninguno" = "", facet_choices),
+              selected = ""
+            ),
 
-        shiny::hr(),
+            shiny::uiOutput("filtro_categorias_ui"),
 
-        shiny::h3("Cruce"),
+            shiny::actionButton(
+              inputId = "limpiar_filtros",
+              label   = "Limpiar filtros"
+            ),
 
-        shiny::selectInput(
-          inputId  = "var_cruce",
-          label    = "Cruce",
-          choices  = c("Ninguno" = "", facet_choices),
-          selected = ""
-        ),
+            shiny::hr(),
 
-        shiny::actionButton(
-          inputId = "limpiar_cruce",
-          label   = "Limpiar cruce"
+            shiny::h3("Cruce"),
+
+            shiny::selectInput(
+              inputId  = "var_cruce",
+              label    = "Cruce",
+              choices  = c("Ninguno" = "", facet_choices),
+              selected = ""
+            ),
+
+            shiny::actionButton(
+              inputId = "limpiar_cruce",
+              label   = "Limpiar cruce"
+            )
+          ),
+
+          shiny::mainPanel(
+            width = 9,
+
+            shiny::fluidRow(
+              shiny::column(
+                width = 12,
+                shiny::div(
+                  class = "cardbox",
+                  shiny::div(class = "cardbox-header", shiny::uiOutput("plot_header")),
+                  plotly::plotlyOutput("plot_principal", height = "420px")
+                )
+              )
+            ),
+
+            shiny::br(),
+
+            shiny::fluidRow(
+              shiny::column(
+                width = 6,
+                shiny::div(
+                  class = "cardbox",
+                  style = "height: 360px; overflow-y: auto;",
+                  shiny::div(
+                    class = "cardbox-header",
+                    shiny::div(class = "cardbox-title", shiny::textOutput("titulo_tabla"))
+                  ),
+                  DT::dataTableOutput("tabla_principal")
+                )
+              ),
+              shiny::column(
+                width = 6,
+                shiny::div(
+                  class = "cardbox",
+                  style = paste(
+                    "height: 360px;",
+                    "display: flex; flex-direction: column; align-items: stretch;",
+                    "overflow: visible;"
+                  ),
+                  shiny::uiOutput("kpi_panel")
+                )
+              )
+            ),
+
+            shiny::div(style = "height: 48px;")
+          )
         )
       ),
 
-      shiny::mainPanel(
-        width = 9,
+      # =========================
+      # TAB 2 — BASE DE DATOS
+      # =========================
+      shiny::tabPanel(
+        title = "Base de datos",
 
-        shiny::fluidRow(
-          shiny::column(
-            width = 12,
+        shiny::sidebarLayout(
+          shiny::sidebarPanel(
+            width = 3,
+            shiny::h3("Diccionario"),
+            shiny::p("Información de variables con categorías codificadas."),
+
+            shiny::selectInput(
+              inputId  = "dicc_var",
+              label    = "Variable",
+              choices  = if (length(vars_diccionario)) stats::setNames(vars_diccionario, vapply(vars_diccionario, label_var, character(1))) else c(),
+              selected = if (length(vars_diccionario)) vars_diccionario[1] else NULL
+            ),
+
+            shiny::div(class = "cardbox", style = "padding: 10px; margin-top: 10px;",
+                       shiny::uiOutput("diccionario_detalle")
+            ),
+
+            shiny::hr(),
+
+            shiny::h3("Vista"),
             shiny::div(
-              class = "cardbox",
-
-              shiny::div(
-                class = "cardbox-header",
-                shiny::uiOutput("plot_header")
+              class = "toggle-row",
+              shiny::span(class = "toggle-label", "Códigos"),
+              shiny::tags$label(
+                class = "switch",
+                shiny::tags$input(id = "vista_etiquetas", type = "checkbox", checked = "checked"),
+                shiny::tags$span(class = "slider")
               ),
+              shiny::span(class = "toggle-label", "Etiquetas")
+            ),
 
-              plotly::plotlyOutput("plot_principal", height = "420px")
-            )
-          )
-        ),
+            shiny::selectizeInput(
+              inputId  = "cols_data",
+              label    = "Columnas visibles",
+              choices  = vars_data_visibles,
+              selected = head(vars_data_visibles, 12),
+              multiple = TRUE,
+              options  = list(plugins = list("remove_button"), placeholder = "Seleccionar columnas...")
+            ),
 
-        shiny::br(),
-
-        shiny::fluidRow(
-          shiny::column(
-            width = 6,
-            shiny::div(
-              class = "cardbox",
-              style = "height: 360px; overflow-y: auto;",
-
-              # --- HEADER EJECUTIVO DE TABLA (nuevo) ---
-              shiny::div(
-                class = "cardbox-header",
-                shiny::div(class = "cardbox-title", shiny::textOutput("titulo_tabla"))
-              ),
-
-              if (usa_DT) DT::dataTableOutput("tabla_principal") else shiny::tableOutput("tabla_principal")
-            )
+            shiny::downloadButton("descargar_csv", "Descargar CSV")
           ),
-          shiny::column(
-            width = 6,
-            shiny::div(
-              class = "cardbox",
-              style = paste(
-                "height: 360px;",
-                "display: flex; flex-direction: column; align-items: stretch;",
-                "overflow: visible;"
-              ),
-              shiny::uiOutput("kpi_panel")
-            )
-          )
-        ),
 
-        # --- ESPACIO INFERIOR (nuevo) ---
-        shiny::div(style = "height: 48px;")
+          shiny::mainPanel(
+            width = 9,
+
+            shiny::fluidRow(
+              shiny::column(
+                width = 12,
+                shiny::div(
+                  class = "cardbox",
+                  shiny::div(class = "cardbox-header",
+                             shiny::div(class = "cardbox-title", "Base de datos"),
+                             shiny::div(class = "cardbox-subtitle", "Búsqueda, ordenamiento y paginación disponibles.")
+                  ),
+                  DT::dataTableOutput("tabla_data")
+                )
+              )
+            ),
+
+            shiny::div(style = "height: 48px;")
+          )
+        )
       )
     )
   )
 
   # ------------------------------- SERVER ------------------------------------
   server <- function(input, output, session) {
+
+    # ======================
+    # TAB 1 — RESUMEN
+    # ======================
 
     shiny::observe({
       sec      <- input$seccion
@@ -956,7 +1121,6 @@ reporte_interactivo <- function(
       vals <- vals[!is.na(vals)]
       if (!length(vals)) return(NULL)
 
-      # ---- mapear code -> label usando instrumento (choices) si existe ----
       surv <- instrumento$survey
       ch   <- instrumento$choices %||% NULL
 
@@ -1008,7 +1172,6 @@ reporte_interactivo <- function(
       df
     })
 
-    # ------------------ Header del gráfico (título fuera de plotly) ----------
     output$plot_header <- shiny::renderUI({
       shiny::req(input$var_principal)
 
@@ -1029,7 +1192,6 @@ reporte_interactivo <- function(
       )
     })
 
-    # ------------------ Título ejecutivo de tabla (nuevo) --------------------
     output$titulo_tabla <- shiny::renderText({
       if (!is.null(input$var_cruce) && nzchar(input$var_cruce)) {
         "Distribución de respuestas por estrato"
@@ -1038,21 +1200,17 @@ reporte_interactivo <- function(
       }
     })
 
-    # ------------------ Bloque 1: gráfico principal --------------------------
     output$plot_principal <- plotly::renderPlotly({
       shiny::req(input$var_principal)
 
       var_main <- input$var_principal
       df_all   <- data_filtrada()
-
       df <- if (var_main %in% names(df_all)) df_all[!is.na(df_all[[var_main]]), , drop = FALSE] else df_all
 
       var_cruce <- input$var_cruce
       if (!nzchar(var_cruce)) var_cruce <- NULL
 
-      if (nrow(df) == 0L) {
-        shiny::validate(shiny::need(FALSE, "No hay datos válidos (después de filtros)."))
-      }
+      if (nrow(df) == 0L) shiny::validate(shiny::need(FALSE, "No hay datos válidos (después de filtros)."))
 
       titulo_plot <- .wrap_titulo_html(.obtener_label_var(var_main, instrumento, data), width = 120)
 
@@ -1084,60 +1242,39 @@ reporte_interactivo <- function(
       )
     })
 
-    # ------------------ Bloque 2: tabla resumen ------------------------------
-    if (usa_DT) {
-      output$tabla_principal <- DT::renderDataTable({
-        shiny::req(input$var_principal)
+    output$tabla_principal <- DT::renderDataTable({
+      shiny::req(input$var_principal)
 
-        var_main <- input$var_principal
-        df_all   <- data_filtrada()
-        df <- if (var_main %in% names(df_all)) df_all[!is.na(df_all[[var_main]]), , drop = FALSE] else df_all
+      var_main <- input$var_principal
+      df_all   <- data_filtrada()
+      df <- if (var_main %in% names(df_all)) df_all[!is.na(df_all[[var_main]]), , drop = FALSE] else df_all
 
-        var_cruce <- input$var_cruce
-        if (!nzchar(var_cruce)) var_cruce <- NULL
-        if (!nrow(df)) return(NULL)
+      var_cruce <- input$var_cruce
+      if (!nzchar(var_cruce)) var_cruce <- NULL
+      if (!nrow(df)) return(NULL)
 
-        df_tab <- .preparar_tabla_proporciones(
-          data             = df,
-          instrumento      = instrumento,
-          var              = var_main,
-          var_cruce        = var_cruce,
-          codigos_perdidos = codigos_perdidos
+      df_tab <- .preparar_tabla_proporciones(
+        data             = df,
+        instrumento      = instrumento,
+        var              = var_main,
+        var_cruce        = var_cruce,
+        codigos_perdidos = codigos_perdidos
+      )
+
+      tabla <- .construir_tabla_resumen(df_tab)
+
+      DT::datatable(
+        tabla,
+        rownames = FALSE,
+        options  = list(
+          paging = FALSE,
+          searching = FALSE,
+          info = FALSE,
+          language = list(url = "//cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json")
         )
+      )
+    })
 
-        tabla <- .construir_tabla_resumen(df_tab)
-
-        DT::datatable(
-          tabla,
-          rownames = FALSE,
-          options  = list(paging = FALSE, searching = FALSE, info = FALSE)
-        )
-      })
-    } else {
-      output$tabla_principal <- shiny::renderTable({
-        shiny::req(input$var_principal)
-
-        var_main <- input$var_principal
-        df_all   <- data_filtrada()
-        df <- if (var_main %in% names(df_all)) df_all[!is.na(df_all[[var_main]]), , drop = FALSE] else df_all
-
-        var_cruce <- input$var_cruce
-        if (!nzchar(var_cruce)) var_cruce <- NULL
-        if (!nrow(df)) return(NULL)
-
-        df_tab <- .preparar_tabla_proporciones(
-          data             = df,
-          instrumento      = instrumento,
-          var              = var_main,
-          var_cruce        = var_cruce,
-          codigos_perdidos = codigos_perdidos
-        )
-
-        .construir_tabla_resumen(df_tab)
-      })
-    }
-
-    # ------------------ Bloque 3: perfil (N + KPIs) --------------------------
     output$kpi_panel <- shiny::renderUI({
 
       df_all   <- data_filtrada()
@@ -1151,7 +1288,6 @@ reporte_interactivo <- function(
 
       if (!nrow(df)) return(shiny::div("Sin datos para la pregunta seleccionada."))
 
-      # N dinámico
       n_unidades <- if (!is.null(id_unidad) && id_unidad %in% names(df)) {
         dplyr::n_distinct(df[[id_unidad]])
       } else {
@@ -1175,12 +1311,10 @@ reporte_interactivo <- function(
           "text-align: center;"
         ),
         shiny::div(
-          style = "font-size: 18px; font-weight: 800; color: #222;",
+          style = "font-size: 18px; font-weight: 900; color: #002457; letter-spacing: 0.02em;",
           texto_N
         )
       )
-
-      kpi_elems <- list(tarjeta_N)
 
       legend_html <- function(legend_df) {
         shiny::div(
@@ -1202,6 +1336,8 @@ reporte_interactivo <- function(
           })
         )
       }
+
+      kpi_elems <- list(tarjeta_N)
 
       kpi_obj_1 <- NULL
       kpi_obj_2 <- NULL
@@ -1251,6 +1387,195 @@ reporte_interactivo <- function(
 
       do.call(shiny::tagList, kpi_elems)
     })
+
+    # ======================
+    # TAB 2 — BASE DE DATOS
+    # ======================
+
+    # Detalle diccionario: informativo, NO controla la tabla
+    output$diccionario_detalle <- shiny::renderUI({
+      v <- input$dicc_var
+      if (is.null(v) || !nzchar(v) || !v %in% names(data)) {
+        return(shiny::div(style = "font-size:12px;color:#5f6b7a;", "Sin variables codificadas disponibles."))
+      }
+
+      # metadata básica desde data (reporte_data)
+      etq <- attr(data[[v]], "label", exact = TRUE) %||% label_var(v)
+      meas <- attr(data[[v]], "measure", exact = TRUE)
+      meas <- if (!is.null(meas) && nzchar(as.character(meas))) toupper(as.character(meas)) else "—"
+
+      # identificar si es select_one (en survey) o dummy (asumir multiple)
+      tipo <- "Variable codificada"
+      is_so <- v %in% so_vars
+      if (is_so) tipo <- "Selección única"
+      if (!is_so) tipo <- "Selección múltiple (indicador 0/1)"
+
+      # tabla de opciones:
+      # - select_one: listar choices del list_name
+      # - dummy: mostrar 0/1 con sus labels + “opción” como etiqueta de la variable dummy
+      opts_df <- NULL
+
+      if (is_so) {
+        fila <- instrumento$survey[instrumento$survey$name == v, , drop = FALSE]
+        ln   <- if (nrow(fila)) as.character(fila$list_name[1]) else NA_character_
+        ch   <- instrumento$choices %||% NULL
+
+        if (!is.null(ch) && all(c("list_name","name","label") %in% names(ch)) &&
+            !is.na(ln) && nzchar(ln)) {
+
+          chv <- ch[ch$list_name == ln, c("name","label"), drop = FALSE]
+          if (nrow(chv)) {
+            opts_df <- data.frame(
+              Código   = as.character(chv$name),
+              Etiqueta = as.character(chv$label),
+              stringsAsFactors = FALSE
+            )
+          }
+        }
+
+      } else {
+        labs <- attr(data[[v]], "labels", exact = TRUE)
+        if (!is.null(labs) && length(labs) > 0) {
+          opts_df <- data.frame(
+            Código   = names(labs),
+            Etiqueta = unname(labs),
+            stringsAsFactors = FALSE
+          )
+        } else {
+          opts_df <- data.frame(
+            Código   = c("0","1"),
+            Etiqueta = c("No","Sí"),
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+
+      shiny::tagList(
+        shiny::div(class = "dicc-kv",
+                   shiny::div(class="dicc-k","Variable"), shiny::div(class="dicc-v", v),
+                   shiny::div(class="dicc-k","Etiqueta"), shiny::div(class="dicc-v", as.character(etq)),
+                   shiny::div(class="dicc-k","Tipo"),     shiny::div(class="dicc-v", tipo),
+                   shiny::div(class="dicc-k","Medición"), shiny::div(class="dicc-v", meas)
+        ),
+        shiny::hr(),
+        shiny::div(style="font-size:12px;font-weight:800;color:#002457;margin-bottom:6px;", "Categorías"),
+        DT::DTOutput("dicc_opciones")
+      )
+    })
+
+    output$dicc_opciones <- DT::renderDT({
+      v <- input$dicc_var
+      if (is.null(v) || !nzchar(v) || !v %in% names(data)) return(NULL)
+
+      # reconstruir igual que arriba (sin duplicar lógica “pesada”)
+      is_so <- v %in% so_vars
+      opts_df <- NULL
+
+      if (is_so) {
+        fila <- instrumento$survey[instrumento$survey$name == v, , drop = FALSE]
+        ln   <- if (nrow(fila)) as.character(fila$list_name[1]) else NA_character_
+        ch   <- instrumento$choices %||% NULL
+
+        if (!is.null(ch) && all(c("list_name","name","label") %in% names(ch)) &&
+            !is.na(ln) && nzchar(ln)) {
+
+          chv <- ch[ch$list_name == ln, c("name","label"), drop = FALSE]
+          if (nrow(chv)) {
+            opts_df <- data.frame(
+              Código   = as.character(chv$name),
+              Etiqueta = as.character(chv$label),
+              stringsAsFactors = FALSE
+            )
+          }
+        }
+      } else {
+        labs <- attr(data[[v]], "labels", exact = TRUE)
+        if (!is.null(labs) && length(labs) > 0) {
+          opts_df <- data.frame(
+            Código   = names(labs),
+            Etiqueta = unname(labs),
+            stringsAsFactors = FALSE
+          )
+        } else {
+          opts_df <- data.frame(
+            Código   = c("0","1"),
+            Etiqueta = c("No","Sí"),
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+
+      if (is.null(opts_df) || !nrow(opts_df)) {
+        opts_df <- data.frame(Código = character(0), Etiqueta = character(0), stringsAsFactors = FALSE)
+      }
+
+      DT::datatable(
+        opts_df,
+        rownames = FALSE,
+        options = list(
+          paging = FALSE,
+          searching = FALSE,
+          info = FALSE,
+          language = list(
+            search = "Buscar:",
+            zeroRecords = "Sin resultados"
+          )
+        )
+      )
+    })
+
+    # Datos para la tabla (respetando columnas visibles)
+    data_base_filtrada <- shiny::reactive({
+      cols <- input$cols_data %||% character(0)
+      cols <- intersect(cols, vars_data_visibles)
+      if (!length(cols)) cols <- head(vars_data_visibles, 12)
+      df <- data[, cols, drop = FALSE]
+      df
+    })
+
+    data_base_vista <- shiny::reactive({
+      df <- data_base_filtrada()
+      # input vista_etiquetas es checkbox custom; cuando está checked => etiquetas
+      use_labels <- isTRUE(input$vista_etiquetas)
+      if (use_labels) .to_labels_df(df) else df
+    })
+
+    output$tabla_data <- DT::renderDataTable({
+      df <- data_base_vista()
+
+      DT::datatable(
+        df,
+        rownames = FALSE,
+        extensions = c("Scroller"),
+        options = list(
+          deferRender = TRUE,
+          scrollX = TRUE,
+          scrollY = 560,
+          scroller = TRUE,
+          pageLength = 15,
+          lengthMenu = c(10, 15, 25, 50),
+          language = list(
+            lengthMenu   = "Mostrando _MENU_ registros",
+            search       = "Buscar:",
+            info         = "Mostrando _START_ a _END_ de _TOTAL_ registros",
+            infoEmpty    = "Mostrando 0 a 0 de 0 registros",
+            infoFiltered = "(filtrado de _MAX_ registros)",
+            zeroRecords  = "Sin resultados",
+            paginate     = list(previous = "Anterior", `next` = "Siguiente")
+          )
+        )
+      )
+    })
+
+    output$descargar_csv <- shiny::downloadHandler(
+      filename = function() {
+        if (isTRUE(input$vista_etiquetas)) "base_datos_etiquetas.csv" else "base_datos_codigos.csv"
+      },
+      content = function(file) {
+        df <- data_base_vista()
+        utils::write.csv(df, file = file, row.names = FALSE, fileEncoding = "UTF-8")
+      }
+    )
   }
 
   shiny::shinyApp(ui = ui, server = server)
