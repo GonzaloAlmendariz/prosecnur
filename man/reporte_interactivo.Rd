@@ -2,7 +2,7 @@
 % Please edit documentation in R/generalidad_interactivo.R
 \name{reporte_interactivo}
 \alias{reporte_interactivo}
-\title{Explorador interactivo de resultados (pestaña Resumen + pestaña Base de datos)}
+\title{Explorador interactivo de resultados (pestañas parametrizables)}
 \usage{
 reporte_interactivo(
   data,
@@ -17,9 +17,10 @@ reporte_interactivo(
   kpi_vars = NULL,
   logo_png = NULL,
   logo_alt = "Logo",
-  logo_height_px = 52
+  logo_height_px = 52,
+  tabs = c("resumen", "relacion", "base_datos")
 )
 }
 \description{
-Explorador interactivo de resultados (pestaña Resumen + pestaña Base de datos)
+Explorador interactivo de resultados (pestañas parametrizables)
 }
