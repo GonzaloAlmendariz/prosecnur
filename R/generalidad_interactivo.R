@@ -1013,9 +1013,9 @@ reporte_interactivo <- function(
   facet_choices <- stats::setNames(facet_vars, vapply(facet_vars, label_var, character(1)))
 
   logo_src <- NULL
-  if (!is.null(logo_png) && nzchar(logo_png) && file.exists(logo_png)) {
-    shiny::addResourcePath("reporte_logo", normalizePath(dirname(logo_png), winslash = "/"))
-    logo_src <- paste0("reporte_logo/", basename(logo_png))
+  if (!is.null(logo_png) && nzchar(logo_png)) {
+    # Si viene "www/xxx.png", normalizar a "xxx.png"
+    logo_src <- sub("^www/", "", logo_png)
   }
 
   # ---- Contexto compartido ----
