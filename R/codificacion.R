@@ -9,7 +9,6 @@
 NULL
 suppressPackageStartupMessages({
   library(openxlsx)
-  library(janitor)
 })
 
 `%||%` <- function(x,y) if (is.null(x) || (length(x)==1 && is.na(x))) y else x

@@ -24,7 +24,8 @@ Imports:
     stringi,
     stringr,
     tibble,
-    rlang
+    rlang,
+    janitor
 Suggests:
     testthat (>= 3.0.0),
     knitr,
