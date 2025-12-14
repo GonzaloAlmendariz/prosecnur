@@ -1,15 +1,15 @@
 # =============================================================================
-# Pestaña: Relación (Cruces) — versión minimalista/cliente
+# Pestaña: Relación (Cruces) — versión minimalista/cliente (SM mejorado)
 # - Selector: Sección + Variable (principal) y Sección + Variable (cruce)
 # - Cruce: internamente solo SO (no se comunica en UI)
-# - Sin "Opciones" (todo interno)
-# - SM con demasiadas opciones: solo tabla (no gráfico)
-# - Estratos sin datos: se omiten en el gráfico (no barras vacías)
-# - Fix: DT::withTags -> htmltools::withTags
+# - SM: NO facet/subplot -> chips/cards por opción, cada chip con barras por estrato
+# - SM: fill-only (se colorea SOLO el "Sí"), texto siempre blanco
+# - Estratos sin datos válidos: se omiten en cada chip
+# - Fix: htmltools::withTags
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# UI del módulo (MINIMAL)
+# UI del módulo (MINIMAL)  [CAMBIO: rel_plot_ui en vez de rel_plot fijo]
 # -----------------------------------------------------------------------------
 relacion_tab_ui <- function(id) {
   ns <- shiny::NS(id)
@@ -56,7 +56,7 @@ relacion_tab_ui <- function(id) {
             shiny::div(
               class = "cardbox",
               shiny::div(class = "cardbox-header", shiny::uiOutput(ns("rel_plot_header"))),
-              plotly::plotlyOutput(ns("rel_plot"), height = "520px")
+              shiny::uiOutput(ns("rel_plot_ui"))
             )
           )
         ),
@@ -99,12 +99,19 @@ relacion_tab_server <- function(
     orders_list = NULL,          # opcional
     labels_override = NULL       # opcional
 ) {
+
   shiny::moduleServer(id, function(input, output, session) {
 
     # =========================================================================
     # Parámetros internos (no UI)
     # =========================================================================
-    MAX_SM_PLOT <- 12L  # si SM tiene más opciones que esto, se omite gráfico
+    MAX_SM_CHIPS <- 14L   # máximo de opciones a graficar como chips/cards
+    BAR_HEIGHT   <- 52    # alto de barra por estrato (chip)
+    PCT_FSIZE    <- 12
+
+    # Colores fill-only (alineados a tu regla)
+    SM_COLOR_YES <- "#1C679D"
+    SM_COLOR_BG  <- "#EAF2FB"
 
     `%||%` <- get0("%||%", ifnotfound = function(x, y) if (!is.null(x)) x else y)
 
@@ -137,66 +144,32 @@ relacion_tab_server <- function(
     # =========================================================================
     # Helpers base
     # =========================================================================
-    get_pesos <- function(data, weight_col = "peso") {
-      if (!is.null(weight_col) && weight_col %in% names(data)) {
-        w <- suppressWarnings(as.numeric(data[[weight_col]]))
+    get_pesos <- function(df, weight_col = "peso") {
+      if (!is.null(weight_col) && weight_col %in% names(df)) {
+        w <- suppressWarnings(as.numeric(df[[weight_col]]))
         w[is.na(w) | !is.finite(w)] <- 0
         return(w)
       }
-      rep(1, nrow(data))
+      rep(1, nrow(df))
     }
 
-    .has_var_or_dummies <- function(data, var) {
-      if (!is.data.frame(data)) return(FALSE)
-      if (var %in% names(data)) return(TRUE)
+    .has_var_or_dummies <- function(df, var) {
+      if (!is.data.frame(df)) return(FALSE)
+      if (var %in% names(df)) return(TRUE)
       var_esc <- gsub("([\\W])", "\\\\\\1", var)
-      any(grepl(paste0("^", var_esc, "[/\\.]"), names(data)))
+      any(grepl(paste0("^", var_esc, "[/\\.]"), names(df)))
     }
 
-    tipo_pregunta <- function(var, survey = NULL, sm_vars_force = NULL, data = NULL) {
+    tipo_pregunta <- function(var, survey = NULL, sm_vars_force = NULL, df = NULL) {
       if (!is.null(sm_vars_force) && var %in% sm_vars_force) return("sm")
       if (!is.null(survey) && any(survey$name == var)) {
         tipos <- unique(na.omit(survey$type[survey$name == var]))
+        tipos <- tolower(as.character(tipos))
         if (any(grepl("^select_multiple(\\s|$)", tipos))) return("sm")
-        if (any(grepl("^select_one(\\s|$)", tipos)))      return("so")
+        if (any(grepl("^select_one(\\s|$)",      tipos))) return("so")
       }
-      if (!is.null(data) && .has_var_or_dummies(data, var) && !(var %in% names(data))) {
-        return("sm")
-      }
+      if (!is.null(df) && .has_var_or_dummies(df, var) && !(var %in% names(df))) return("sm")
       "so"
-    }
-
-    col_sm_compact <- function(data, var) {
-      v_orig <- paste0(var, "_ORIG")
-      if (v_orig %in% names(data)) return(v_orig)
-      if (var %in% names(data))    return(var)
-      NA_character_
-    }
-
-    sm_compact_to_long <- function(x, id, w) {
-      tibble::tibble(
-        id    = id,
-        valor = as.character(x),
-        w     = as.numeric(w)
-      ) |>
-        tidyr::separate_rows(valor, sep = "\\s*;\\s*", convert = FALSE) |>
-        dplyr::mutate(valor = trimws(valor)) |>
-        dplyr::filter(!is.na(valor) & nzchar(valor) & valor != "NA")
-    }
-
-    label_variable <- function(var, dic_vars = NULL, labels_override = NULL, data = NULL) {
-      if (!is.null(labels_override) && var %in% names(labels_override)) {
-        return(as.character(labels_override[[var]]))
-      }
-      if (!is.null(data) && var %in% names(data)) {
-        vlab <- attr(data[[var]], "label", exact = TRUE)
-        if (!is.null(vlab) && nzchar(as.character(vlab))) return(as.character(vlab))
-      }
-      if (!is.null(dic_vars) && all(c("name", "label") %in% names(dic_vars))) {
-        lab <- dic_vars$label[dic_vars$name == var]
-        if (length(lab) && !all(is.na(lab))) return(as.character(lab[1]))
-      }
-      as.character(var)
     }
 
     get_list_name <- function(var, survey = NULL) {
@@ -206,26 +179,69 @@ relacion_tab_server <- function(
       ln[1]
     }
 
-    get_categorias <- function(var,
-                               data,
-                               survey          = NULL,
-                               orders_list     = NULL,
-                               opciones_excluir = NULL) {
+    # -----------------------------------------------------------------------------
+    # Resolver SM (dummies + code->label) estilo “seguro”
+    # -----------------------------------------------------------------------------
+    .resolver_var_spec_safe <- function(var_madre, df) {
 
-      x <- if (var %in% names(data)) data[[var]] else NULL
-      lab_attr <- if (!is.null(x)) attr(x, "labels", exact = TRUE) else NULL
+      f <- get0("resolver_var_spec", mode = "function", ifnotfound = NULL)
+      if (!is.null(f)) {
+        out <- tryCatch(f(var_madre = var_madre, ctx = list(data = df, instrumento = instrumento), df = df),
+                        error = function(e) NULL)
+        if (is.list(out) && length(out$cols)) return(out)
+      }
+
+      # fallback simple:
+      var_esc <- gsub("([\\W])", "\\\\\\1", var_madre)
+      cols <- grep(paste0("^", var_esc, "\\."), names(df), value = TRUE)
+
+      surv <- instrumento$survey %||% NULL
+      ch   <- instrumento$choices %||% NULL
+
+      ln <- NA_character_
+      if (!is.null(surv) && all(c("name","list_name") %in% names(surv)) && var_madre %in% surv$name) {
+        ln <- as.character(surv$list_name[surv$name == var_madre][1])
+      }
+
+      map_code_to_label <- list()
+
+      if (!is.null(ch) && all(c("list_name","name") %in% names(ch)) && !is.na(ln) && nzchar(ln)) {
+        label_col <- if ("label" %in% names(ch)) "label" else {
+          cand <- grep("^label(::|$)", names(ch), value = TRUE)
+          if (length(cand)) cand[1] else NULL
+        }
+        if (!is.null(label_col) && label_col %in% names(ch)) {
+          ch_v <- ch[ch$list_name == ln, , drop = FALSE]
+          if (nrow(ch_v)) {
+            m <- stats::setNames(as.character(ch_v[[label_col]]), as.character(ch_v$name))
+            map_code_to_label <- as.list(m)
+          }
+        }
+      }
+
+      list(
+        var_madre = var_madre,
+        cols = cols,
+        map_code_to_label = map_code_to_label,
+        list_name = ln,
+        col_compact = NA_character_
+      )
+    }
+
+    # -----------------------------------------------------------------------------
+    # Categorías SO (cruce)
+    # -----------------------------------------------------------------------------
+    get_categorias_so <- function(var, df, survey = NULL, orders_list = NULL) {
+
+      x <- df[[var]]
+      lab_attr <- attr(x, "labels", exact = TRUE)
 
       ln <- get_list_name(var, survey)
-      codes  <- character(0)
-      labels <- character(0)
 
       obj <- NULL
       if (!is.null(orders_list)) {
-        if (var %in% names(orders_list)) {
-          obj <- orders_list[[var]]
-        } else if (!is.na(ln) && ln %in% names(orders_list)) {
-          obj <- orders_list[[ln]]
-        }
+        if (var %in% names(orders_list)) obj <- orders_list[[var]]
+        else if (!is.na(ln) && ln %in% names(orders_list)) obj <- orders_list[[ln]]
       }
 
       if (!is.null(obj)) {
@@ -234,7 +250,7 @@ relacion_tab_server <- function(
       } else if (!is.null(lab_attr) && length(lab_attr) > 0) {
         codes  <- names(lab_attr)
         labels <- as.character(unname(lab_attr))
-      } else if (!is.null(x)) {
+      } else {
         codes  <- sort(unique(na.omit(as.character(x))))
         labels <- codes
       }
@@ -243,119 +259,74 @@ relacion_tab_server <- function(
       codes  <- codes[ok]
       labels <- labels[ok]
 
-      if (!is.null(opciones_excluir) && length(opciones_excluir) > 0) {
-        ok2 <- !(labels %in% opciones_excluir)
-        codes  <- codes[ok2]
-        labels <- labels[ok2]
-      }
-
       list(codes = codes, labels = labels, list_name = ln)
     }
 
-    contar_por_opcion <- function(data, var, codes, tp, mask, weight_col = "peso") {
-      w <- get_pesos(data, weight_col)
+    # =========================================================================
+    # SM: validez + numerador por opción (denominador coherente)
+    # =========================================================================
+    .sm_valid_ids <- function(df, var_madre, cols_dummies = NULL, col_compact = NULL) {
 
-      if (tp == "so") {
-        v_codes <- as.character(data[[var]])
-        elig    <- mask & !is.na(v_codes) & nzchar(v_codes) & v_codes != "NA"
-        return(vapply(seq_along(codes), function(j) sum(w[elig & v_codes == codes[j]], na.rm = TRUE), numeric(1)))
+      if (!is.null(col_compact) && !is.na(col_compact) && col_compact %in% names(df)) {
+        x <- as.character(df[[col_compact]])
+        ok <- !is.na(x) & nzchar(x) & x != "NA"
+        return(which(ok))
       }
 
-      if (tp == "sm") {
-        colc <- col_sm_compact(data, var)
+      if (!is.null(cols_dummies) && length(cols_dummies)) {
+        cols_dummies <- cols_dummies[cols_dummies %in% names(df)]
+        if (!length(cols_dummies)) return(integer(0))
 
-        if (!is.na(colc)) {
-          long <- sm_compact_to_long(data[[colc]], id = seq_len(nrow(data)), w = w)
-          if (!nrow(long)) return(rep(0, length(codes)))
-          ids_mask <- which(mask)
-          long <- long[long$id %in% ids_mask & long$valor %in% codes, , drop = FALSE]
-          return(vapply(seq_along(codes), function(j) {
-            code_j <- codes[j]
-            ids_j  <- unique(long$id[long$valor == code_j])
-            sum(w[ids_j], na.rm = TRUE)
-          }, numeric(1)))
-        }
-
-        # dummies
-        if (!requireNamespace("stringr", quietly = TRUE)) return(rep(0, length(codes)))
-        subs <- grep(paste0("^", stringr::fixed(var), "[/\\.]"), names(data), value = TRUE)
-        if (!length(subs)) return(rep(0, length(codes)))
-        codes_dummy <- sub(paste0("^", var, "[/\\.]"), "", subs)
-
-        return(vapply(seq_along(codes), function(j) {
-          code_j   <- codes[j]
-          cols_j   <- subs[codes_dummy == code_j]
-          if (!length(cols_j)) return(0)
-
-          mat <- sapply(cols_j, function(col) {
-            v <- suppressWarnings(as.numeric(as.character(data[[col]])))
-            v == 1
-          })
-          if (!is.matrix(mat)) mat <- matrix(mat, ncol = 1)
-
-          elig_ids <- which(mask & rowSums(mat, na.rm = TRUE) > 0)
-          sum(w[elig_ids], na.rm = TRUE)
-        }, numeric(1)))
-      }
-
-      rep(0, length(codes))
-    }
-
-    denominador_validos <- function(data, var, codes, tp, mask, weight_col = "peso") {
-      w <- get_pesos(data, weight_col)
-
-      if (tp == "so") {
-        v_codes <- as.character(data[[var]])
-        elig <- mask &
-          !is.na(v_codes) &
-          nzchar(v_codes) &
-          v_codes != "NA" &
-          v_codes %in% codes
-        return(sum(w[elig], na.rm = TRUE))
-      }
-
-      if (tp == "sm") {
-        colc <- col_sm_compact(data, var)
-        if (!is.na(colc)) {
-          long <- sm_compact_to_long(data[[colc]], id = seq_len(nrow(data)), w = w)
-          if (!nrow(long)) return(0)
-          ids_mask <- which(mask)
-          long <- long[long$id %in% ids_mask & long$valor %in% codes, , drop = FALSE]
-          denom_ids <- unique(long$id)
-          return(sum(w[denom_ids], na.rm = TRUE))
-        }
-
-        if (!requireNamespace("stringr", quietly = TRUE)) return(0)
-        subs <- grep(paste0("^", stringr::fixed(var), "[/\\.]"), names(data), value = TRUE)
-        if (!length(subs)) return(0)
-        codes_dummy <- sub(paste0("^", var, "[/\\.]"), "", subs)
-        subs_keep   <- subs[codes_dummy %in% codes]
-        if (!length(subs_keep)) return(0)
-
-        mat <- sapply(subs_keep, function(col) {
-          v <- suppressWarnings(as.numeric(as.character(data[[col]])))
-          v == 1
+        mat <- sapply(cols_dummies, function(cc) {
+          v <- suppressWarnings(as.numeric(as.character(df[[cc]])))
+          v %in% c(0, 1)
         })
         if (!is.matrix(mat)) mat <- matrix(mat, ncol = 1)
 
-        elig_ids <- which(mask & rowSums(mat, na.rm = TRUE) > 0)
-        return(sum(w[elig_ids], na.rm = TRUE))
+        ok <- rowSums(mat, na.rm = TRUE) > 0
+        return(which(ok))
       }
 
-      0
+      integer(0)
     }
 
+    .sm_numerador_option <- function(df, var_madre, code, cols_dummies = NULL, col_compact = NULL) {
+
+      if (!is.null(col_compact) && !is.na(col_compact) && col_compact %in% names(df)) {
+        x <- as.character(df[[col_compact]])
+        ok <- !is.na(x) & nzchar(x) & x != "NA"
+        if (!any(ok)) return(integer(0))
+        vals <- strsplit(x[ok], "\\s*;\\s*")
+        ids_ok <- which(ok)
+        hit <- vapply(vals, function(v) any(trimws(v) == code), logical(1))
+        return(ids_ok[hit])
+      }
+
+      if (!is.null(cols_dummies) && length(cols_dummies)) {
+        # dummy esperado: var_madre.<code>
+        col <- paste0(var_madre, ".", code)
+        if (!col %in% names(df)) return(integer(0))
+        v <- suppressWarnings(as.numeric(as.character(df[[col]])))
+        return(which(!is.na(v) & v == 1))
+      }
+
+      integer(0)
+    }
+
+    # =========================================================================
+    # Plot SO x SO (igual a tu barra apilada por estrato)  [sin cambios mayores]
+    # =========================================================================
     .resolver_paleta_var <- function(var, instrumento, colores_apiladas_por_listname, opcion_levels) {
+
       surv <- instrumento$survey
       pal  <- NULL
 
       if (!is.null(colores_apiladas_por_listname) &&
           !is.null(surv) &&
           all(c("name", "list_name") %in% names(surv))) {
+
         ln <- surv$list_name[surv$name == var][1]
-        if (!is.na(ln) && ln %in% names(colores_apiladas_por_listname)) {
-          pal <- colores_apiladas_por_listname[[ln]]
-        }
+        if (!is.na(ln) && ln %in% names(colores_apiladas_por_listname)) pal <- colores_apiladas_por_listname[[ln]]
       }
 
       if (is.null(pal) || !length(pal)) {
@@ -371,56 +342,16 @@ relacion_tab_server <- function(
         return(pal2)
       }
 
-      fila <- instrumento$survey[instrumento$survey$name == var, , drop = FALSE]
-      list_var <- if (nrow(fila)) fila$list_name[1] else NA_character_
-
-      if (!is.null(instrumento$choices) &&
-          all(c("list_name", "name", "label") %in% names(instrumento$choices)) &&
-          !is.na(list_var) && nzchar(list_var) &&
-          !is.null(names(pal))) {
-
-        ch <- instrumento$choices[instrumento$choices$list_name == list_var, , drop = FALSE]
-        map_code_to_label <- stats::setNames(as.character(ch$label), as.character(ch$name))
-
-        idx <- names(pal) %in% names(map_code_to_label)
-        if (any(idx)) {
-          pal_lab <- stats::setNames(pal[idx], map_code_to_label[names(pal)[idx]])
-          if (!all(opcion_levels %in% names(pal_lab))) {
-            falt <- setdiff(opcion_levels, names(pal_lab))
-            extra <- grDevices::hcl.colors(max(3L, length(falt)), "Blues")
-            extra <- extra[seq_len(length(falt))]
-            pal_lab <- c(pal_lab, stats::setNames(extra, falt))
-          }
-          pal_lab <- pal_lab[opcion_levels]
-          names(pal_lab) <- opcion_levels
-          return(pal_lab)
-        }
-      }
-
       pal <- rep(pal, length.out = length(opcion_levels))
       names(pal) <- opcion_levels
       pal
     }
 
-    # =========================================================================
-    # Tabla (cuerpo) estilo reporte_cruces (semántica)
-    # =========================================================================
-    .build_cuerpo <- function(df, var_main, var_cruce) {
+    .plot_so_so <- function(df, var_main, var_cruce) {
+
       survey <- instrumento$survey %||% NULL
-      dic_vars <- NULL
-      if (!is.null(survey) && all(c("name","label") %in% names(survey))) {
-        dic_vars <- dplyr::select(survey, name, label)
-      }
 
-      tp_main <- tipo_pregunta(var_main, survey = survey, data = df)
-
-      cats_main <- get_categorias(
-        var          = var_main,
-        data         = df,
-        survey       = survey,
-        orders_list  = orders_list %||% instrumento$orders_list %||% NULL,
-        opciones_excluir = NULL
-      )
+      cats_main <- get_categorias_so(var_main, df, survey, orders_list %||% instrumento$orders_list %||% NULL)
       codes_row <- as.character(cats_main$codes)
       opciones  <- as.character(cats_main$labels)
 
@@ -431,163 +362,7 @@ relacion_tab_server <- function(
         opciones  <- opciones[keep]
       }
 
-      cats_cruce <- get_categorias(
-        var          = var_cruce,
-        data         = df,
-        survey       = survey,
-        orders_list  = orders_list %||% instrumento$orders_list %||% NULL,
-        opciones_excluir = NULL
-      )
-      estr_codes  <- as.character(cats_cruce$codes)
-      estr_labels <- as.character(cats_cruce$labels)
-
-      cuerpo <- tibble::tibble(Opciones = opciones)
-      denom_map <- list()
-
-      # Total
-      mask_total <- rep(TRUE, nrow(df))
-      N_total <- denominador_validos(df, var_main, codes_row, tp_main, mask_total, weight_col = weight_col)
-      n_total <- contar_por_opcion(df, var_main, codes_row, tp_main, mask_total, weight_col = weight_col)
-      pct_total <- if (N_total > 0) n_total / N_total else rep(0, length(n_total))
-
-      cuerpo <- dplyr::bind_cols(
-        cuerpo,
-        tibble::tibble(
-          Total__n   = as.numeric(n_total),
-          Total__pct = as.numeric(pct_total)
-        )
-      )
-      denom_map[["Total__n"]] <- N_total
-
-      # Por estrato
-      v_estr <- as.character(df[[var_cruce]])
-      for (j in seq_along(estr_labels)) {
-        key_j <- estr_codes[j]
-        mask_j <- !is.na(v_estr) & v_estr == key_j
-
-        n_vec <- contar_por_opcion(df, var_main, codes_row, tp_main, mask_j, weight_col = weight_col)
-        N_j   <- denominador_validos(df, var_main, codes_row, tp_main, mask_j, weight_col = weight_col)
-        pct <- if (N_j > 0) n_vec / N_j else rep(0, length(n_vec))
-
-        nm_n   <- paste0(var_cruce, "__", make.names(estr_labels[j]), "__n")
-        nm_pct <- paste0(var_cruce, "__", make.names(estr_labels[j]), "__pct")
-
-        cuerpo <- dplyr::bind_cols(
-          cuerpo,
-          tibble::tibble(!!nm_n := as.numeric(n_vec), !!nm_pct := as.numeric(pct))
-        )
-        denom_map[[nm_n]] <- N_j
-      }
-
-      # Fila Total
-      total_row <- as.list(rep(NA, ncol(cuerpo)))
-      names(total_row) <- names(cuerpo)
-      total_row[["Opciones"]] <- "Total"
-
-      n_cols   <- grep("__n$",   names(cuerpo))
-      pct_cols <- grep("__pct$", names(cuerpo))
-
-      for (k in n_cols) {
-        nm <- names(cuerpo)[k]
-        Nj <- denom_map[[nm]]
-        total_row[[k]] <- if (is.null(Nj)) NA_real_ else round(as.numeric(Nj), 0)
-      }
-      for (k in pct_cols) {
-        n_partner <- sub("__pct$", "__n", names(cuerpo)[k])
-        Nj <- suppressWarnings(as.numeric(total_row[[n_partner]]))
-        total_row[[k]] <- if (!is.na(Nj) && Nj > 0) 1.0 else 0.0
-      }
-
-      cuerpo <- dplyr::bind_rows(cuerpo, tibble::as_tibble(total_row))
-
-      cruce_lbl <- label_variable(var_cruce, dic_vars = dic_vars, labels_override = labels_override, data = df)
-
-      list(
-        cuerpo       = cuerpo,
-        tipo_main    = tp_main,
-        estr_labels  = estr_labels,
-        cruce_lbl    = cruce_lbl,
-        codes_main   = codes_row,
-        labels_main  = opciones,
-        estr_codes   = estr_codes
-      )
-    }
-
-    # =========================================================================
-    # Encabezado DT multi-nivel (fix withTags)
-    # =========================================================================
-    .dt_container_multihdr <- function(cuerpo, cruce_lbl, estr_labels) {
-
-      n_blocks <- 1L + length(estr_labels)     # Total + estratos
-      ncols    <- ncol(cuerpo)
-      exp_cols <- 1L + 2L * n_blocks
-
-      # Fallback seguro
-      if (is.na(ncols) || ncols != exp_cols) {
-        return(htmltools::withTags(
-          table(
-            class = "display nowrap compact",
-            thead(
-              tr(lapply(names(cuerpo), function(x) htmltools::tags$th(x)))
-            )
-          )
-        ))
-      }
-
-      # ---------- fila 2: Total + estratos ----------
-      fila2 <- c(
-        list(htmltools::tags$th(colspan = 2, "Total")),
-        lapply(
-          estr_labels,
-          function(lab) htmltools::tags$th(colspan = 2, as.character(lab))
-        )
-      )
-
-      # ---------- fila 3: n / % ----------
-      fila3 <- unlist(
-        replicate(n_blocks, list(
-          htmltools::tags$th("n"),
-          htmltools::tags$th("%")
-        ), simplify = FALSE),
-        recursive = FALSE
-      )
-
-      htmltools::withTags(
-        table(
-          class = "display nowrap compact",
-          thead(
-            # Fila 1: encabezado superior
-            tr(
-              htmltools::tags$th(rowspan = 3, ""),
-              htmltools::tags$th(colspan = ncols - 1, cruce_lbl)
-            ),
-            # Fila 2
-            tr(fila2),
-            # Fila 3
-            tr(fila3)
-          )
-        )
-      )
-    }
-
-    # =========================================================================
-    # Gráficos
-    # =========================================================================
-    .plot_so_so <- function(df, var_main, var_cruce) {
-      survey <- instrumento$survey %||% NULL
-
-      cats_main <- get_categorias(var_main, df, survey, orders_list %||% instrumento$orders_list %||% NULL, NULL)
-      codes_row <- as.character(cats_main$codes)
-      opciones  <- as.character(cats_main$labels)
-
-      if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0) {
-        codp <- as.character(codigos_perdidos)
-        keep <- !(codes_row %in% codp)
-        codes_row <- codes_row[keep]
-        opciones  <- opciones[keep]
-      }
-
-      cats_cruce <- get_categorias(var_cruce, df, survey, orders_list %||% instrumento$orders_list %||% NULL, NULL)
+      cats_cruce <- get_categorias_so(var_cruce, df, survey, orders_list %||% instrumento$orders_list %||% NULL)
       estr_codes  <- as.character(cats_cruce$codes)
       estr_labels <- as.character(cats_cruce$labels)
 
@@ -598,13 +373,12 @@ relacion_tab_server <- function(
       rows <- list()
 
       for (j in seq_along(estr_codes)) {
-        key_j <- estr_codes[j]
+        key_j  <- estr_codes[j]
         mask_j <- !is.na(v_cruce) & v_cruce == key_j
 
         elig <- mask_j & !is.na(v_main) & nzchar(v_main) & v_main != "NA" & (v_main %in% codes_row)
         N_j  <- sum(w[elig], na.rm = TRUE)
 
-        # ✅ estrato sin datos -> NO SE MUESTRA en gráfico
         if (is.na(N_j) || N_j <= 0) next
 
         for (i in seq_along(codes_row)) {
@@ -623,7 +397,8 @@ relacion_tab_server <- function(
       df_tab <- dplyr::bind_rows(rows)
       if (!nrow(df_tab)) {
         return(plotly::plot_ly() |>
-                 plotly::layout(annotations = list(list(text = "Sin datos para graficar.", showarrow = FALSE))))
+                 plotly::layout(annotations = list(list(text = "Sin datos para graficar.", showarrow = FALSE))) |>
+                 plotly::config(displayModeBar = FALSE, responsive = TRUE))
       }
 
       pal <- .resolver_paleta_var(
@@ -637,6 +412,7 @@ relacion_tab_server <- function(
       df_tab$estrato_label <- factor(df_tab$estrato_label, levels = unique(df_tab$estrato_label))
 
       p <- plotly::plot_ly()
+
       for (opt in opciones) {
         dfo <- df_tab[df_tab$opcion_label == opt, , drop = FALSE]
         if (!nrow(dfo)) next
@@ -656,7 +432,7 @@ relacion_tab_server <- function(
             y             = ~estrato_label,
             name          = opt,
             orientation   = "h",
-            text          = ~paste0(round(100 * pct, 1), "%"),
+            text          = ~paste0("<b>", round(100 * pct, 0), "%</b>"),
             textposition  = "inside",
             insidetextanchor = "middle",
             textfont      = list(color = "white", size = 11),
@@ -681,126 +457,354 @@ relacion_tab_server <- function(
         plotly::config(displayModeBar = FALSE, responsive = TRUE)
     }
 
-    .plot_sm_so <- function(df, var_main_sm, var_cruce_so) {
+    # =========================================================================
+    # Plot SM (chip) por opción x estratos, fill-only (Sí vs fondo)
+    # =========================================================================
+    .plot_sm_option_chip <- function(df, var_madre, code, opt_label, var_cruce,
+                                     cols_dummies = NULL, col_compact = NULL) {
+
       survey <- instrumento$survey %||% NULL
-
-      cats_sm <- get_categorias(var_main_sm, df, survey, orders_list %||% instrumento$orders_list %||% NULL, NULL)
-      codes_all <- as.character(cats_sm$codes)
-      labels_all <- as.character(cats_sm$labels)
-
-      if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0) {
-        codp <- as.character(codigos_perdidos)
-        keep <- !(codes_all %in% codp)
-        codes_all <- codes_all[keep]
-        labels_all <- labels_all[keep]
-      }
-
-      # ✅ demasiadas opciones -> NO GRAFICAR (solo tabla)
-      if (length(labels_all) > MAX_SM_PLOT) {
-        return(plotly::plot_ly() |>
-                 plotly::layout(annotations = list(list(
-                   text = "Gráfico no disponible para esta variable.",
-                   showarrow = FALSE
-                 ))))
-      }
-
-      cats_cruce <- get_categorias(var_cruce_so, df, survey, orders_list %||% instrumento$orders_list %||% NULL, NULL)
+      cats_cruce <- get_categorias_so(var_cruce, df, survey, orders_list %||% instrumento$orders_list %||% NULL)
       estr_codes  <- as.character(cats_cruce$codes)
       estr_labels <- as.character(cats_cruce$labels)
 
-      tp_sm <- "sm"
-      pal <- .resolver_paleta_var(
-        var = var_main_sm,
-        instrumento = instrumento,
-        colores_apiladas_por_listname = colores_apiladas_por_listname,
-        opcion_levels = unique(labels_all)
+      v_cruce <- as.character(df[[var_cruce]])
+      w <- get_pesos(df, weight_col)
+
+      rows <- list()
+
+      for (j in seq_along(estr_codes)) {
+        key_j  <- estr_codes[j]
+        mask_j <- !is.na(v_cruce) & v_cruce == key_j
+
+        # Denominador = SM válido en estrato
+        ids_valid_sm <- .sm_valid_ids(df, var_madre, cols_dummies = cols_dummies, col_compact = col_compact)
+        if (!length(ids_valid_sm)) next
+
+        ids_mask <- which(mask_j)
+        ids_denom <- intersect(ids_mask, ids_valid_sm)
+        if (!length(ids_denom)) next
+
+        N_j <- sum(w[ids_denom], na.rm = TRUE)
+        if (is.na(N_j) || N_j <= 0) next
+
+        # Numerador = marcó esta opción
+        ids_yes <- .sm_numerador_option(df, var_madre, code, cols_dummies = cols_dummies, col_compact = col_compact)
+        ids_yes <- intersect(ids_yes, ids_denom)
+
+        n_yes <- sum(w[ids_yes], na.rm = TRUE)
+        pct_y <- if (N_j > 0) n_yes / N_j else 0
+        pct_y <- max(0, min(1, pct_y))
+
+        rows[[length(rows) + 1]] <- data.frame(
+          estrato_label = estr_labels[j],
+          pct_yes = pct_y,
+          n_yes = n_yes,
+          N = N_j,
+          stringsAsFactors = FALSE
+        )
+      }
+
+      dfi <- dplyr::bind_rows(rows)
+
+      if (!nrow(dfi)) {
+        return(plotly::plot_ly(height = BAR_HEIGHT) |>
+                 plotly::layout(
+                   annotations = list(list(text = "Sin datos válidos.", showarrow = FALSE)),
+                   xaxis = list(visible = FALSE),
+                   yaxis = list(visible = FALSE),
+                   margin = list(l = 10, r = 10, t = 0, b = 0)
+                 ) |>
+                 plotly::config(displayModeBar = FALSE, responsive = TRUE))
+      }
+
+      # ordenar estratos según aparición
+      dfi$estrato_label <- factor(dfi$estrato_label, levels = unique(dfi$estrato_label))
+      dfi$pct_bg <- 1 - dfi$pct_yes
+
+      dfi$txt <- paste0("<b>", round(100 * dfi$pct_yes, 0), "%</b>")
+      dfi$hover <- sprintf(
+        "%s<br>%s: %s%%<br>n: %s<br>N: %s",
+        as.character(dfi$estrato_label),
+        opt_label,
+        round(100 * dfi$pct_yes, 1),
+        format(round(dfi$n_yes, 0), big.mark = ","),
+        format(round(dfi$N, 0), big.mark = ",")
       )
 
-      plots <- list()
+      p <- plotly::plot_ly(height = max(220, 70 + 32 * nrow(dfi)))
 
-      for (i in seq_along(codes_all)) {
-        code_i <- codes_all[i]
-        lab_i  <- labels_all[i]
-
-        rows <- list()
-        for (j in seq_along(estr_codes)) {
-          key_j <- estr_codes[j]
-          mask_j <- !is.na(df[[var_cruce_so]]) & as.character(df[[var_cruce_so]]) == key_j
-
-          N_j <- denominador_validos(df, var_main_sm, codes_all, tp_sm, mask_j, weight_col)
-          # ✅ estrato sin datos -> NO SE MUESTRA en gráfico
-          if (is.na(N_j) || N_j <= 0) next
-
-          n_vec <- contar_por_opcion(df, var_main_sm, codes = code_i, tp = tp_sm, mask = mask_j, weight_col = weight_col)
-          n_ij <- as.numeric(n_vec[1])
-          pct  <- n_ij / N_j
-
-          rows[[length(rows) + 1]] <- data.frame(
-            estrato_label = estr_labels[j],
-            pct = pct,
-            n   = n_ij,
-            N   = N_j,
-            stringsAsFactors = FALSE
-          )
-        }
-
-        dfi <- dplyr::bind_rows(rows)
-        if (!nrow(dfi)) next
-
-        dfi$estrato_label <- factor(dfi$estrato_label, levels = unique(dfi$estrato_label))
-        dfi$hover <- sprintf(
-          "%s<br>%s: %s%%<br>n: %s",
-          as.character(dfi$estrato_label),
-          lab_i,
-          round(100 * dfi$pct, 1),
-          format(round(dfi$n, 0), big.mark = ",")
+      # YES
+      p <- p |>
+        plotly::add_bars(
+          data             = dfi,
+          x                = ~pct_yes,
+          y                = ~estrato_label,
+          name             = "Sí",
+          orientation      = "h",
+          text             = ~txt,
+          textposition     = "inside",
+          insidetextanchor = "middle",
+          textfont         = list(color = "white", size = PCT_FSIZE),
+          customdata       = ~hover,
+          hovertemplate    = "%{customdata}<extra></extra>",
+          marker           = list(color = SM_COLOR_YES, line = list(width = 0))
         )
 
-        p_i <- plotly::plot_ly(
-          data = dfi,
-          x = ~pct,
-          y = ~estrato_label,
-          type = "bar",
+      # BG
+      p <- p |>
+        plotly::add_bars(
+          data        = dfi,
+          x           = ~pct_bg,
+          y           = ~estrato_label,
+          name        = " ",
           orientation = "h",
-          text = ~paste0(round(100 * pct, 1), "%"),
-          textposition = "inside",
-          insidetextanchor = "middle",
-          textfont = list(color = "white", size = 11),
-          marker = list(color = unname(pal[lab_i]), line = list(width = 0)),
-          customdata = ~hover,
-          hovertemplate = "%{customdata}<extra></extra>"
+          hoverinfo   = "skip",
+          marker      = list(color = SM_COLOR_BG, line = list(width = 0)),
+          showlegend  = FALSE
+        )
+
+      p |>
+        plotly::layout(
+          barmode = "stack",
+          xaxis = list(range = c(0, 1), showgrid = FALSE, zeroline = FALSE,
+                       showticklabels = FALSE, ticks = "", title = ""),
+          yaxis = list(title = "", automargin = TRUE, showgrid = FALSE, zeroline = FALSE),
+          margin = list(l = 170, r = 15, t = 8, b = 10),
+          showlegend = FALSE,
+          uniformtext = list(minsize = 10, mode = "hide")
         ) |>
-          plotly::layout(
-            title = list(text = .wrap_titulo_html(lab_i, width = 35), x = 0.02, xanchor = "left", font = list(size = 12)),
-            xaxis = list(range = c(0, 1), showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE, ticks = ""),
-            yaxis = list(title = "", automargin = TRUE, showgrid = FALSE, zeroline = FALSE),
-            margin = list(l = 150, r = 10, t = 38, b = 10),
-            showlegend = FALSE
-          ) |>
-          plotly::config(displayModeBar = FALSE, responsive = TRUE)
+        plotly::config(displayModeBar = FALSE, responsive = TRUE)
+    }
 
-        plots[[length(plots) + 1]] <- p_i
+    # =========================================================================
+    # TABLA: construcción coherente (SM con denominador válido)
+    # =========================================================================
+    .build_cuerpo <- function(df, var_main, var_cruce) {
+
+      survey <- instrumento$survey %||% NULL
+      tp_main <- tipo_pregunta(var_main, survey = survey, sm_vars_force = vars_sm_madres, df = df)
+
+      # Cruce (SO)
+      cats_cruce <- get_categorias_so(var_cruce, df, survey, orders_list %||% instrumento$orders_list %||% NULL)
+      estr_codes  <- as.character(cats_cruce$codes)
+      estr_labels <- as.character(cats_cruce$labels)
+
+      v_cruce <- as.character(df[[var_cruce]])
+      w <- get_pesos(df, weight_col)
+
+      # ---- filas (opciones) ----
+      if (tp_main == "so") {
+
+        cats_main <- get_categorias_so(var_main, df, survey, orders_list %||% instrumento$orders_list %||% NULL)
+        codes_row <- as.character(cats_main$codes)
+        labels_row <- as.character(cats_main$labels)
+
+        if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0 && length(codes_row)) {
+          codp <- as.character(codigos_perdidos)
+          keep <- !(codes_row %in% codp)
+          codes_row <- codes_row[keep]
+          labels_row <- labels_row[keep]
+        }
+
+        cuerpo <- tibble::tibble(Opciones = labels_row)
+        denom_map <- list()
+
+        # Total
+        v_main <- as.character(df[[var_main]])
+        elig_total <- !is.na(v_main) & nzchar(v_main) & v_main != "NA" & (v_main %in% codes_row)
+        N_total <- sum(w[elig_total], na.rm = TRUE)
+
+        n_total <- vapply(seq_along(codes_row), function(i) sum(w[elig_total & v_main == codes_row[i]], na.rm = TRUE), numeric(1))
+        pct_total <- if (N_total > 0) n_total / N_total else rep(0, length(n_total))
+
+        cuerpo <- dplyr::bind_cols(cuerpo, tibble::tibble(Total__n = n_total, Total__pct = pct_total))
+        denom_map[["Total__n"]] <- N_total
+
+        # Estratos
+        for (j in seq_along(estr_codes)) {
+          key_j <- estr_codes[j]
+          mask_j <- !is.na(v_cruce) & v_cruce == key_j
+
+          elig <- mask_j & elig_total
+          N_j <- sum(w[elig], na.rm = TRUE)
+          if (is.na(N_j) || N_j <= 0) {
+            n_vec <- rep(NA_real_, length(codes_row))
+            pct   <- rep(NA_real_, length(codes_row))
+          } else {
+            n_vec <- vapply(seq_along(codes_row), function(i) sum(w[elig & v_main == codes_row[i]], na.rm = TRUE), numeric(1))
+            pct   <- n_vec / N_j
+          }
+
+          nm_n   <- paste0(var_cruce, "__", make.names(estr_labels[j]), "__n")
+          nm_pct <- paste0(var_cruce, "__", make.names(estr_labels[j]), "__pct")
+
+          cuerpo <- dplyr::bind_cols(cuerpo, tibble::tibble(!!nm_n := n_vec, !!nm_pct := pct))
+          denom_map[[nm_n]] <- N_j
+        }
+
+      } else {
+
+        # ---- SM ----
+        spec <- .resolver_var_spec_safe(var_main, df)
+        cols <- spec$cols %||% character(0)
+
+        # codes desde dummies: var_main.<code>
+        dummy_codes <- sub(paste0("^", var_main, "\\."), "", cols)
+        dummy_codes <- dummy_codes[nzchar(dummy_codes)]
+
+        # label por code (choices)
+        map <- spec$map_code_to_label %||% list()
+        labels_row <- vapply(dummy_codes, function(cd) as.character(map[[cd]] %||% cd), character(1))
+        codes_row  <- dummy_codes
+
+        if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0 && length(codes_row)) {
+          codp <- as.character(codigos_perdidos)
+          keep <- !(codes_row %in% codp)
+          codes_row  <- codes_row[keep]
+          labels_row <- labels_row[keep]
+          cols       <- cols[sub(paste0("^", var_main, "\\."), "", cols) %in% codes_row]
+        }
+
+        cuerpo <- tibble::tibble(Opciones = labels_row)
+        denom_map <- list()
+
+        # Total denom = SM válido global
+        ids_valid <- .sm_valid_ids(df, var_main, cols_dummies = cols, col_compact = NA_character_)
+        N_total <- if (length(ids_valid)) sum(w[ids_valid], na.rm = TRUE) else 0
+
+        n_total <- vapply(seq_along(codes_row), function(i) {
+          ids_yes <- .sm_numerador_option(df, var_main, codes_row[i], cols_dummies = cols, col_compact = NA_character_)
+          ids_yes <- intersect(ids_yes, ids_valid)
+          sum(w[ids_yes], na.rm = TRUE)
+        }, numeric(1))
+
+        pct_total <- if (N_total > 0) n_total / N_total else rep(0, length(n_total))
+
+        cuerpo <- dplyr::bind_cols(cuerpo, tibble::tibble(Total__n = n_total, Total__pct = pct_total))
+        denom_map[["Total__n"]] <- N_total
+
+        # Estratos
+        for (j in seq_along(estr_codes)) {
+          key_j <- estr_codes[j]
+          mask_ids <- which(!is.na(v_cruce) & v_cruce == key_j)
+
+          ids_denom <- intersect(mask_ids, ids_valid)
+          N_j <- if (length(ids_denom)) sum(w[ids_denom], na.rm = TRUE) else 0
+
+          if (is.na(N_j) || N_j <= 0) {
+            n_vec <- rep(NA_real_, length(codes_row))
+            pct   <- rep(NA_real_, length(codes_row))
+          } else {
+            n_vec <- vapply(seq_along(codes_row), function(i) {
+              ids_yes <- .sm_numerador_option(df, var_main, codes_row[i], cols_dummies = cols, col_compact = NA_character_)
+              ids_yes <- intersect(ids_yes, ids_denom)
+              sum(w[ids_yes], na.rm = TRUE)
+            }, numeric(1))
+            pct <- n_vec / N_j
+          }
+
+          nm_n   <- paste0(var_cruce, "__", make.names(estr_labels[j]), "__n")
+          nm_pct <- paste0(var_cruce, "__", make.names(estr_labels[j]), "__pct")
+
+          cuerpo <- dplyr::bind_cols(cuerpo, tibble::tibble(!!nm_n := n_vec, !!nm_pct := pct))
+          denom_map[[nm_n]] <- N_j
+        }
       }
 
-      if (!length(plots)) {
-        return(plotly::plot_ly() |>
-                 plotly::layout(annotations = list(list(text="Sin datos para graficar.", showarrow = FALSE))))
+      # ---- fila Total (N por columna) ----
+      total_row <- as.list(rep(NA, ncol(cuerpo)))
+      names(total_row) <- names(cuerpo)
+      total_row[["Opciones"]] <- "Total"
+
+      n_cols   <- grep("__n$",   names(cuerpo))
+      pct_cols <- grep("__pct$", names(cuerpo))
+
+      for (k in n_cols) {
+        nm <- names(cuerpo)[k]
+        # denom_map guarda N del estrato para ese bloque
+        # (si NA/0, dejar NA)
+        Nj <- denom_map[[nm]]
+        total_row[[k]] <- if (is.null(Nj) || is.na(Nj) || Nj <= 0) NA_real_ else round(as.numeric(Nj), 0)
+      }
+      for (k in pct_cols) {
+        total_row[[k]] <- NA_real_
       }
 
-      # Subplot en 2 columnas
-      n_pl <- length(plots)
-      ncol <- 2
-      nrow <- ceiling(n_pl / ncol)
+      cuerpo <- dplyr::bind_rows(cuerpo, tibble::as_tibble(total_row))
 
-      plotly::subplot(
-        plots,
-        nrows   = nrow,
-        margin  = 0.03,
-        shareX  = TRUE,
-        titleX  = FALSE,
-        titleY  = TRUE
-      ) |>
-        plotly::layout(margin = list(l = 10, r = 10, t = 10, b = 10))
+      # label cruce
+      dic_vars <- NULL
+      if (!is.null(survey) && all(c("name","label") %in% names(survey))) {
+        dic_vars <- dplyr::select(survey, name, label)
+      }
+
+      label_variable <- function(var, dic_vars = NULL, labels_override = NULL, df = NULL) {
+        if (!is.null(labels_override) && var %in% names(labels_override)) return(as.character(labels_override[[var]]))
+        if (!is.null(df) && var %in% names(df)) {
+          vlab <- attr(df[[var]], "label", exact = TRUE)
+          if (!is.null(vlab) && nzchar(as.character(vlab))) return(as.character(vlab))
+        }
+        if (!is.null(dic_vars) && all(c("name","label") %in% names(dic_vars))) {
+          lab <- dic_vars$label[dic_vars$name == var]
+          if (length(lab) && !all(is.na(lab))) return(as.character(lab[1]))
+        }
+        as.character(var)
+      }
+
+      cruce_lbl <- label_variable(var_cruce, dic_vars = dic_vars, labels_override = labels_override, df = df)
+
+      list(
+        cuerpo       = cuerpo,
+        tipo_main    = tp_main,
+        estr_labels  = estr_labels,
+        cruce_lbl    = cruce_lbl
+      )
+    }
+
+    # =========================================================================
+    # Encabezado DT multi-nivel (fix withTags)
+    # =========================================================================
+    .dt_container_multihdr <- function(cuerpo, cruce_lbl, estr_labels) {
+
+      n_blocks <- 1L + length(estr_labels)     # Total + estratos
+      ncols    <- ncol(cuerpo)
+      exp_cols <- 1L + 2L * n_blocks
+
+      if (is.na(ncols) || ncols != exp_cols) {
+        return(htmltools::withTags(
+          table(
+            class = "display nowrap compact",
+            thead(
+              tr(lapply(names(cuerpo), function(x) htmltools::tags$th(x)))
+            )
+          )
+        ))
+      }
+
+      fila2 <- c(
+        list(htmltools::tags$th(colspan = 2, "Total")),
+        lapply(estr_labels, function(lab) htmltools::tags$th(colspan = 2, as.character(lab)))
+      )
+
+      fila3 <- unlist(
+        replicate(n_blocks, list(htmltools::tags$th("n"), htmltools::tags$th("%")), simplify = FALSE),
+        recursive = FALSE
+      )
+
+      htmltools::withTags(
+        table(
+          class = "display nowrap compact",
+          thead(
+            tr(
+              htmltools::tags$th(rowspan = 3, ""),
+              htmltools::tags$th(colspan = ncols - 1, cruce_lbl)
+            ),
+            tr(fila2),
+            tr(fila3)
+          )
+        )
+      )
     }
 
     # =========================================================================
@@ -828,7 +832,6 @@ relacion_tab_server <- function(
 
       vars_sec <- secciones_limpias[[sec]]
 
-      # Variable principal: SO + SM madres
       main_choices <- sort(unique(intersect(vars_sec, unique(c(vars_so, vars_sm_madres)))))
       if (!length(main_choices)) main_choices <- sort(unique(c(vars_so, vars_sm_madres)))
 
@@ -846,7 +849,6 @@ relacion_tab_server <- function(
 
       vars_sec <- secciones_limpias[[sec]]
 
-      # Cruce: internamente SOLO SO (sin decirlo)
       cruce_choices <- sort(unique(intersect(vars_sec, vars_so)))
       if (!length(cruce_choices)) cruce_choices <- sort(unique(vars_so))
 
@@ -857,12 +859,6 @@ relacion_tab_server <- function(
 
       shiny::updateSelectInput(session, "cruce_var", choices = cruce_lab, selected = cruce_choices[1] %||% "")
     }, ignoreInit = TRUE)
-
-    # Primera carga: forzar update de ambos selects
-    shiny::observeEvent(names(secciones_limpias), {
-      if (!is.null(input$main_seccion))  shiny::isolate(shiny::updateSelectInput(session, "main_seccion",  selected = input$main_seccion))
-      if (!is.null(input$cruce_seccion)) shiny::isolate(shiny::updateSelectInput(session, "cruce_seccion", selected = input$cruce_seccion))
-    }, once = TRUE)
 
     # =========================================================================
     # Header gráfico (minimal)
@@ -879,7 +875,7 @@ relacion_tab_server <- function(
     })
 
     # =========================================================================
-    # Reactives: objeto central
+    # Reactivo central
     # =========================================================================
     rel_obj <- shiny::reactive({
       shiny::req(input$main_var, input$cruce_var)
@@ -887,7 +883,6 @@ relacion_tab_server <- function(
       var_main  <- input$main_var
       var_cruce <- input$cruce_var
 
-      # seguridad: cruce debe ser SO (pero no se muestra en UI)
       if (!(var_cruce %in% vars_so)) {
         return(list(error = "No es posible cruzar con la selección actual."))
       }
@@ -896,18 +891,184 @@ relacion_tab_server <- function(
       if (var_cruce %in% names(df)) df <- df[!is.na(df[[var_cruce]]), , drop = FALSE]
       if (!nrow(df)) return(list(error = "Sin datos disponibles."))
 
-      out <- .build_cuerpo(df, var_main, var_cruce)
-      out$df <- df
-      out$var_main <- var_main
-      out$var_cruce <- var_cruce
-      out
+      survey <- instrumento$survey %||% NULL
+      tp_main <- tipo_pregunta(var_main, survey = survey, sm_vars_force = vars_sm_madres, df = df)
+
+      out_tab <- .build_cuerpo(df, var_main, var_cruce)
+
+      list(
+        df        = df,
+        var_main  = var_main,
+        var_cruce = var_cruce,
+        tipo_main = tp_main,
+        cuerpo    = out_tab$cuerpo,
+        cruce_lbl = out_tab$cruce_lbl,
+        estr_labels = out_tab$estr_labels,
+        error     = NULL
+      )
     })
 
     # =========================================================================
-    # Tabla
+    # UI dinámica del gráfico (SO: 1 plot / SM: chips)
+    # =========================================================================
+    output$rel_plot_ui <- shiny::renderUI({
+      obj <- rel_obj()
+      if (!is.null(obj$error)) {
+        return(shiny::div(style="padding:12px;color:#5f6b7a;", obj$error))
+      }
+
+      if (identical(obj$tipo_main, "so")) {
+        return(plotly::plotlyOutput(session$ns("rel_plot"), height = "520px"))
+      }
+
+      # SM -> contenedor de chips (cards)
+      # se renderizan plotlyOutputs individuales: rel_sm_plot_1, rel_sm_plot_2, ...
+      shiny::div(
+        style = "display:flex; flex-direction:column; gap:12px;",
+        shiny::uiOutput(session$ns("rel_sm_chips_ui"))
+      )
+    })
+
+    # =========================================================================
+    # Render de chips SM (UI)
+    # =========================================================================
+    output$rel_sm_chips_ui <- shiny::renderUI({
+      obj <- rel_obj()
+      if (!is.null(obj$error)) return(NULL)
+      if (!identical(obj$tipo_main, "sm")) return(NULL)
+
+      df <- obj$df
+      var_main <- obj$var_main
+
+      spec <- .resolver_var_spec_safe(var_main, df)
+      cols <- spec$cols %||% character(0)
+      if (!length(cols)) {
+        return(shiny::div(style="padding:12px;color:#5f6b7a;", "SM sin dummies disponibles."))
+      }
+
+      codes <- sub(paste0("^", var_main, "\\."), "", cols)
+      codes <- codes[nzchar(codes)]
+
+      # excluir perdidos
+      if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0) {
+        codp <- as.character(codigos_perdidos)
+        keep <- !(codes %in% codp)
+        codes <- codes[keep]
+      }
+
+      if (!length(codes)) {
+        return(shiny::div(style="padding:12px;color:#5f6b7a;", "SM sin opciones graficables."))
+      }
+
+      if (length(codes) > MAX_SM_CHIPS) {
+        return(shiny::div(style="padding:12px;color:#5f6b7a;",
+                          "Variable con demasiadas opciones para graficar en chips. (Ver tabla)"))
+      }
+
+      map <- spec$map_code_to_label %||% list()
+
+      shiny::div(
+        style = "display:flex; flex-direction:column; gap:12px;",
+
+        lapply(seq_along(codes), function(i) {
+
+          code_i <- codes[i]
+          lab_i  <- as.character(map[[code_i]] %||% code_i)
+
+          out_id <- paste0("rel_sm_plot_", i)
+
+          shiny::div(
+            style = paste0(
+              "border:1px solid #edf0f7;",
+              "border-radius:14px;",
+              "padding:10px 12px;",
+              "background:#ffffff;"
+            ),
+            shiny::div(
+              style = "font-size:12px; font-weight:400; color:#1C679D; margin:0 0 8px 0;",
+              lab_i
+            ),
+            plotly::plotlyOutput(session$ns(out_id), height = "260px")
+          )
+        })
+      )
+    })
+
+    # =========================================================================
+    # RenderPlotly: SO plot (único)
+    # =========================================================================
+    output$rel_plot <- plotly::renderPlotly({
+      obj <- rel_obj()
+      if (!is.null(obj$error)) {
+        return(plotly::plot_ly() |>
+                 plotly::layout(annotations = list(list(text = obj$error, showarrow = FALSE))) |>
+                 plotly::config(displayModeBar = FALSE, responsive = TRUE))
+      }
+
+      if (!identical(obj$tipo_main, "so")) return(NULL)
+
+      .plot_so_so(obj$df, obj$var_main, obj$var_cruce)
+    })
+
+    # =========================================================================
+    # RenderPlotly: SM chips (uno por opción)
+    # =========================================================================
+    shiny::observe({
+      obj <- rel_obj()
+      if (!is.null(obj$error)) return()
+      if (!identical(obj$tipo_main, "sm")) return()
+
+      df <- obj$df
+      var_main  <- obj$var_main
+      var_cruce <- obj$var_cruce
+
+      spec <- .resolver_var_spec_safe(var_main, df)
+      cols <- spec$cols %||% character(0)
+      if (!length(cols)) return()
+
+      codes <- sub(paste0("^", var_main, "\\."), "", cols)
+      codes <- codes[nzchar(codes)]
+
+      if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0) {
+        codp <- as.character(codigos_perdidos)
+        keep <- !(codes %in% codp)
+        codes <- codes[keep]
+      }
+
+      if (!length(codes)) return()
+      if (length(codes) > MAX_SM_CHIPS) return()
+
+      map <- spec$map_code_to_label %||% list()
+
+      for (i in seq_along(codes)) {
+        local({
+          ii <- i
+          code_i <- codes[ii]
+          lab_i  <- as.character(map[[code_i]] %||% code_i)
+          out_id <- paste0("rel_sm_plot_", ii)
+
+          output[[out_id]] <- plotly::renderPlotly({
+            .plot_sm_option_chip(
+              df = df,
+              var_madre = var_main,
+              code = code_i,
+              opt_label = lab_i,
+              var_cruce = var_cruce,
+              cols_dummies = cols,
+              col_compact  = NA_character_
+            )
+          })
+        })
+      }
+    })
+
+    # =========================================================================
+    # Tabla DT
     # =========================================================================
     output$rel_tabla <- DT::renderDataTable({
+
       obj <- rel_obj()
+
       if (!is.null(obj$error)) {
         return(DT::datatable(
           data.frame(Mensaje = obj$error),
@@ -920,14 +1081,13 @@ relacion_tab_server <- function(
             orderCellsTop = TRUE,
             scrollX   = TRUE,
             language  = list(url = "//cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json"),
-            columnDefs = list(
-              list(className = "dt-center", targets = "_all")
-            )
+            columnDefs = list(list(className = "dt-center", targets = "_all"))
           )
         ))
       }
 
       cuerpo <- obj$cuerpo
+
       container <- .dt_container_multihdr(
         cuerpo = cuerpo,
         cruce_lbl = obj$cruce_lbl,
@@ -957,30 +1117,6 @@ relacion_tab_server <- function(
       ) |>
         DT::formatRound(columns = which(is_n), digits = 0) |>
         DT::formatPercentage(columns = which(is_pct), digits = 1)
-    })
-
-    # =========================================================================
-    # Gráfico
-    # =========================================================================
-    output$rel_plot <- plotly::renderPlotly({
-      obj <- rel_obj()
-      if (!is.null(obj$error)) {
-        return(plotly::plot_ly() |>
-                 plotly::layout(annotations = list(list(text = obj$error, showarrow = FALSE))))
-      }
-
-      df        <- obj$df
-      var_main  <- obj$var_main
-      var_cruce <- obj$var_cruce
-
-      survey <- instrumento$survey %||% NULL
-      tp_main <- tipo_pregunta(var_main, survey = survey, data = df)
-
-      if (identical(tp_main, "so")) {
-        .plot_so_so(df, var_main, var_cruce)
-      } else {
-        .plot_sm_so(df, var_main, var_cruce)
-      }
     })
 
     invisible(NULL)

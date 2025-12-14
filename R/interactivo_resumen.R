@@ -1,9 +1,14 @@
 # =============================================================================
-# Tab 1: Resumen (UI + server) — v3.1 (perfil en sidebar, minimal, barras apiladas)
+# Tab 1: Resumen (UI + server) — v3.2-hotfix + SM fill-only
 # -----------------------------------------------------------------------------
-# Fixes v3:
-# - KPIs (donuts) renderizan desde el primer load (renderPlotly fuera de renderUI)
-# - Chip N centrado y con ancho consistente (estructura + CSS ya pegado)
+# - Se elimina `config=` en renderPlotly (no soportado en tu plotly).
+# - Modebar desactivada usando plotly::config() dentro del plot.
+# - Select_multiple en Resumen: una tarjeta por pregunta, con varias barras
+#   (una por opción dummy).
+# - Cada dummy SM ahora es UNA sola barra 0–100%:
+#   * Se pinta SOLO el % de "Sí" en #93C4EB (Pulso light blue)
+#   * Resto gris claro (fondo)
+#   * Texto % dentro si >=5%, si no -> a la derecha (outside)
 # =============================================================================
 #' @keywords internal
 #' @noRd
@@ -89,9 +94,14 @@
   # Parámetros del resumen
   # ---------------------------------------------------------------------------
   MAX_SO_ROWS <- 16L
-  SM_TOP_K    <- 6L
   BAR_HEIGHT  <- 64
   PCT_FSIZE   <- 13
+
+  # Colores SM fill-only
+  SM_COLOR_YES  <- "#1C679D"  # Sí (Pulso light blue)
+  SM_COLOR_BG   <- "#EAF2FB"  # Fondo (gris/azul muy claro)
+  SM_TEXT_OUT   <- "white"  # Texto cuando va afuera
+  SM_SUBTITLE   <- "#1C679D"  # Subtítulo por opción (Pulso blue)
 
   `%||%` <- get0("%||%", ifnotfound = function(x, y) if (!is.null(x)) x else y)
 
@@ -180,7 +190,7 @@
   })
 
   # ---------------------------------------------------------------------------
-  # Helpers tipo / categorías
+  # Helpers tipo / detección de SM
   # ---------------------------------------------------------------------------
   .has_var_or_dummies <- function(df, var) {
     if (!is.data.frame(df)) return(FALSE)
@@ -199,20 +209,6 @@
     }
     if (!is.null(df) && .has_var_or_dummies(df, var) && !(var %in% names(df))) return("sm")
     "so"
-  }
-
-  col_sm_compact <- function(df, var) {
-    v_orig <- paste0(var, "_ORIG")
-    if (v_orig %in% names(df)) return(v_orig)
-    if (var %in% names(df))    return(var)
-    NA_character_
-  }
-
-  sm_compact_to_long <- function(x, id) {
-    tibble::tibble(id = id, valor = as.character(x)) |>
-      tidyr::separate_rows(valor, sep = "\\s*;\\s*", convert = FALSE) |>
-      dplyr::mutate(valor = trimws(valor)) |>
-      dplyr::filter(!is.na(valor) & nzchar(valor) & valor != "NA")
   }
 
   get_categorias <- function(var, df, survey = NULL, orders_list = NULL, opciones_excluir = NULL) {
@@ -259,30 +255,35 @@
   }
 
   # ---------------------------------------------------------------------------
-  # Plot SO: barra apilada “Total” (texto blanco centrado)
+  # Plot SO: barra apilada “Total” (igual a tu estilo)
   # ---------------------------------------------------------------------------
   .plot_so_total <- function(df, var, paleta_colores) {
 
-    df2 <- df
-    if (!var %in% names(df2)) {
-      return(plotly::plot_ly(height = BAR_HEIGHT) |>
-               plotly::layout(annotations = list(list(text="Sin variable.", showarrow=FALSE))))
+    if (!var %in% names(df)) {
+      return(
+        plotly::plot_ly(height = BAR_HEIGHT) |>
+          plotly::layout(annotations = list(list(text="Sin variable.", showarrow=FALSE))) |>
+          plotly::config(displayModeBar = FALSE, responsive = TRUE)
+      )
     }
 
-    x <- as.character(df2[[var]])
+    x <- as.character(df[[var]])
     x <- x[!is.na(x) & nzchar(x) & x != "NA"]
     if (!length(x)) {
-      return(plotly::plot_ly(height = BAR_HEIGHT) |>
-               plotly::layout(annotations = list(list(text="Sin datos.", showarrow=FALSE))))
+      return(
+        plotly::plot_ly(height = BAR_HEIGHT) |>
+          plotly::layout(annotations = list(list(text="Sin datos.", showarrow=FALSE))) |>
+          plotly::config(displayModeBar = FALSE, responsive = TRUE)
+      )
     }
 
     tab <- as.data.frame(table(x), stringsAsFactors = FALSE)
     names(tab) <- c("code", "n")
-    tab$n <- as.numeric(tab$n)
+    tab$n   <- as.numeric(tab$n)
     tab$pct <- tab$n / sum(tab$n)
 
     map_code_to_label <- NULL
-    labs <- attr(df2[[var]], "labels", exact = TRUE)
+    labs <- attr(df[[var]], "labels", exact = TRUE)
     if (!is.null(labs) && length(labs) > 0) {
       map_code_to_label <- stats::setNames(as.character(unname(labs)), as.character(names(labs)))
     }
@@ -295,7 +296,8 @@
       tab$code
     }
 
-    if (!is.null(paleta_colores) && !is.null(names(paleta_colores)) && all(tab$label %in% names(paleta_colores))) {
+    if (!is.null(paleta_colores) && !is.null(names(paleta_colores)) &&
+        all(tab$label %in% names(paleta_colores))) {
       tab$label <- factor(tab$label, levels = names(paleta_colores))
       tab <- tab[order(tab$label), , drop = FALSE]
     } else {
@@ -314,7 +316,8 @@
       d <- tab[as.character(tab$label) == lab, , drop = FALSE]
       if (!nrow(d)) next
 
-      col <- if (!is.null(paleta_colores) && !is.null(names(paleta_colores)) && lab %in% names(paleta_colores)) {
+      col <- if (!is.null(paleta_colores) && !is.null(names(paleta_colores)) &&
+                 lab %in% names(paleta_colores)) {
         unname(paleta_colores[[lab]])
       } else NULL
 
@@ -338,8 +341,10 @@
     p |>
       plotly::layout(
         barmode = "stack",
-        xaxis = list(title="", range=c(0,1), showgrid=FALSE, zeroline=FALSE, showticklabels=FALSE, ticks=""),
-        yaxis = list(title="", showgrid=FALSE, zeroline=FALSE, showticklabels=FALSE, ticks=""),
+        xaxis = list(title="", range=c(0,1), showgrid=FALSE, zeroline=FALSE,
+                     showticklabels=FALSE, ticks=""),
+        yaxis = list(title="", showgrid=FALSE, zeroline=FALSE,
+                     showticklabels=FALSE, ticks=""),
         margin = list(l=10, r=10, t=0, b=0),
         showlegend = FALSE
       ) |>
@@ -347,140 +352,138 @@
   }
 
   # ---------------------------------------------------------------------------
-  # SM: Top-K + Otras + No marcado (completa 100% en personas con alguna mención)
+  # Plot SM dummy (fill-only):
+  # - UNA barra 0–100%
+  # - Se pinta SOLO el % de Sí (SM_COLOR_YES)
+  # - Resto SM_COLOR_BG
+  # - Texto % dentro si >=5%, si no fuera a la derecha
+  # - Hover: %sí + n_sí + N válidos
   # ---------------------------------------------------------------------------
-  .plot_sm_topk <- function(df, var, paleta_colores, top_k = 6L) {
+  .plot_sm_dummy_fill <- function(df, col_dummy,
+                                  col_yes = SM_COLOR_YES,
+                                  col_bg  = SM_COLOR_BG,
+                                  text_out_color = SM_TEXT_OUT,
+                                  pct_inside_threshold = 0.05) {
 
-    if (!.has_var_or_dummies(df, var)) {
-      return(plotly::plot_ly(height = BAR_HEIGHT) |>
-               plotly::layout(annotations = list(list(text="Sin variable.", showarrow=FALSE))))
-    }
-
-    colc <- col_sm_compact(df, var)
-    if (is.na(colc) || !colc %in% names(df)) {
-      return(plotly::plot_ly(height = BAR_HEIGHT) |>
-               plotly::layout(annotations = list(list(text="SM no disponible.", showarrow=FALSE))))
-    }
-
-    long <- sm_compact_to_long(df[[colc]], id = seq_len(nrow(df)))
-    if (!nrow(long)) {
-      return(plotly::plot_ly(height = BAR_HEIGHT) |>
-               plotly::layout(annotations = list(list(text="Sin menciones.", showarrow=FALSE))))
-    }
-
-    denom_ids <- sort(unique(long$id))
-    N <- length(denom_ids)
-    if (N <= 0) {
-      return(plotly::plot_ly(height = BAR_HEIGHT) |>
-               plotly::layout(annotations = list(list(text="Sin menciones.", showarrow=FALSE))))
-    }
-
-    counts <- as.data.frame(table(long$valor), stringsAsFactors = FALSE)
-    names(counts) <- c("code", "n")
-    counts$n <- as.numeric(counts$n)
-    counts$pct <- counts$n / N
-    counts <- counts[order(counts$pct, decreasing = TRUE), , drop = FALSE]
-
-    map_code_to_label <- NULL
-    labs <- if (var %in% names(df)) attr(df[[var]], "labels", exact = TRUE) else NULL
-    if (!is.null(labs) && length(labs) > 0) {
-      map_code_to_label <- stats::setNames(as.character(unname(labs)), as.character(names(labs)))
-    } else {
-      surv <- instrumento$survey
-      ch   <- instrumento$choices %||% NULL
-      if (!is.null(surv) && !is.null(ch) &&
-          all(c("name","list_name") %in% names(surv)) &&
-          all(c("list_name","name","label") %in% names(ch))) {
-        ln <- surv$list_name[surv$name == var][1]
-        if (!is.na(ln) && nzchar(ln)) {
-          ch_v <- ch[ch$list_name == ln, , drop = FALSE]
-          if (nrow(ch_v)) map_code_to_label <- stats::setNames(as.character(ch_v$label), as.character(ch_v$name))
-        }
-      }
-    }
-
-    counts$label <- if (!is.null(map_code_to_label)) {
-      out <- unname(map_code_to_label[counts$code])
-      out[is.na(out) | out==""] <- counts$code[is.na(out) | out==""]
-      out
-    } else {
-      counts$code
-    }
-
-    if (nrow(counts) > top_k) {
-      top  <- counts[seq_len(top_k), , drop = FALSE]
-      rest <- counts[-seq_len(top_k), , drop = FALSE]
-      counts <- rbind(
-        top,
-        data.frame(code="__otras__", n=sum(rest$n), pct=sum(rest$pct), label="Otras", stringsAsFactors = FALSE)
+    if (!col_dummy %in% names(df)) {
+      return(
+        plotly::plot_ly(height = BAR_HEIGHT) |>
+          plotly::layout(annotations = list(list(text="Sin dummy.", showarrow=FALSE)),
+                         xaxis = list(visible=FALSE), yaxis = list(visible=FALSE),
+                         margin = list(l=10,r=10,t=0,b=0)) |>
+          plotly::config(displayModeBar = FALSE, responsive = TRUE)
       )
     }
 
-    resto <- max(0, 1 - sum(counts$pct, na.rm = TRUE))
-    if (resto > 1e-8) {
-      counts <- rbind(
-        counts,
-        data.frame(code="__resto__", n=round(resto * N, 0), pct=resto, label="No marcado", stringsAsFactors = FALSE)
+    x <- df[[col_dummy]]
+
+    # Normalizar a 0/1 cuando sea posible
+    x2 <- suppressWarnings(as.numeric(as.character(x)))
+    if (all(is.na(x2)) && is.logical(x)) x2 <- as.numeric(x)
+
+    ok <- !is.na(x2) & x2 %in% c(0, 1)
+    x2 <- x2[ok]
+
+    if (!length(x2)) {
+      return(
+        plotly::plot_ly(height = BAR_HEIGHT) |>
+          plotly::layout(annotations = list(list(text="Sin datos.", showarrow=FALSE)),
+                         xaxis = list(visible=FALSE), yaxis = list(visible=FALSE),
+                         margin = list(l=10,r=10,t=0,b=0)) |>
+          plotly::config(displayModeBar = FALSE, responsive = TRUE)
       )
     }
 
-    counts$txt <- paste0("<b>", round(100 * counts$pct, 0), "%</b>")
-    counts$hover <- sprintf("%s: %s%%<br>n: %s",
-                            counts$label,
-                            round(100 * counts$pct, 1),
-                            format(round(counts$n,0), big.mark=","))
+    N     <- length(x2)
+    n_yes <- sum(x2 == 1)
+    pct_y <- n_yes / N
+    pct_r <- 1 - pct_y
 
-    cols <- paleta_colores
-    if (is.null(cols) || !length(cols)) {
-      cols <- grDevices::hcl.colors(max(3L, nrow(counts)), "Blues")
-      cols <- cols[seq_len(nrow(counts))]
-      names(cols) <- counts$label
+    # Segmentos (yes + background) para mantener estética "apilada"
+    seg <- data.frame(
+      seg   = c("yes", "bg"),
+      pct   = c(pct_y, pct_r),
+      n_yes = n_yes,
+      N     = N,
+      stringsAsFactors = FALSE
+    )
+
+    # Texto: solo en el segmento "yes"
+    pct_txt <- paste0("<b>", round(100 * pct_y, 0), "%</b>")
+    seg$text <- c(pct_txt, "")
+
+    # Posición texto según umbral
+    textpos_yes <- if (pct_y < pct_inside_threshold) "outside" else "inside"
+    textfont_yes <- if (pct_y < pct_inside_threshold) {
+      list(color = text_out_color, size = PCT_FSIZE)
     } else {
-      if (is.null(names(cols))) {
-        cols <- rep(cols, length.out = nrow(counts))
-        names(cols) <- counts$label
-      } else {
-        falt <- setdiff(counts$label, names(cols))
-        if (length(falt)) {
-          extra <- grDevices::hcl.colors(max(3L, length(falt)), "Blues")
-          extra <- extra[seq_len(length(falt))]
-          cols <- c(cols, stats::setNames(extra, falt))
-        }
-        cols <- cols[counts$label]
-        names(cols) <- counts$label
-      }
+      list(color = "white", size = PCT_FSIZE)
     }
+
+    # Hover solo en yes (en bg vacío)
+    seg$hover <- c(
+      sprintf("Sí: %s%%<br>n: %s<br>N: %s",
+              round(100 * pct_y, 1),
+              format(n_yes, big.mark=","),
+              format(N, big.mark=",")),
+      ""
+    )
 
     p <- plotly::plot_ly(height = BAR_HEIGHT)
 
-    for (lab in counts$label) {
-      d <- counts[counts$label == lab, , drop = FALSE]
-      p <- p |>
-        plotly::add_bars(
-          data             = d,
-          x                = ~pct,
-          y                = I("Total"),
-          name             = lab,
-          orientation      = "h",
-          text             = ~txt,
-          textposition     = "inside",
-          insidetextanchor = "middle",
-          textfont         = list(color = "white", size = PCT_FSIZE),
-          customdata       = ~hover,
-          hovertemplate    = "%{customdata}<extra></extra>",
-          marker           = list(color = unname(cols[[lab]]), line = list(width = 0))
-        )
-    }
+    # YES segment
+    p <- p |>
+      plotly::add_bars(
+        data             = seg[seg$seg == "yes", , drop=FALSE],
+        x                = ~pct,
+        y                = I("Total"),
+        orientation      = "h",
+        marker           = list(color = col_yes, line = list(width = 0)),
+        text             = ~text,
+        textposition     = textpos_yes,
+        insidetextanchor = "middle",
+        textfont         = textfont_yes,
+        customdata       = ~hover,
+        hovertemplate    = "%{customdata}<extra></extra>",
+        cliponaxis       = FALSE
+      )
+
+    # BG segment (sin texto ni hover)
+    p <- p |>
+      plotly::add_bars(
+        data        = seg[seg$seg == "bg", , drop=FALSE],
+        x           = ~pct,
+        y           = I("Total"),
+        orientation = "h",
+        marker      = list(color = col_bg, line = list(width = 0)),
+        hoverinfo   = "skip",
+        showlegend  = FALSE
+      )
 
     p |>
       plotly::layout(
         barmode = "stack",
-        xaxis = list(title="", range=c(0,1), showgrid=FALSE, zeroline=FALSE, showticklabels=FALSE, ticks=""),
-        yaxis = list(title="", showgrid=FALSE, zeroline=FALSE, showticklabels=FALSE, ticks=""),
-        margin = list(l=10, r=10, t=0, b=0),
+        xaxis = list(title="", range=c(0,1), showgrid=FALSE, zeroline=FALSE,
+                     showticklabels=FALSE, ticks=""),
+        yaxis = list(title="", showgrid=FALSE, zeroline=FALSE,
+                     showticklabels=FALSE, ticks=""),
+        margin = list(l=10, r=16, t=0, b=0), # un poco más de r para el texto outside
         showlegend = FALSE
       ) |>
       plotly::config(displayModeBar = FALSE, responsive = TRUE)
+  }
+
+  # ---------------------------------------------------------------------------
+  # Resolver spec SM (se espera en helpers)
+  # ---------------------------------------------------------------------------
+  .resolver_var_spec_safe <- function(var_madre, ctx, df) {
+    f <- get0("resolver_var_spec", mode = "function", ifnotfound = NULL)
+    if (is.null(f)) return(list(cols = character(0), map_code_to_label = list()))
+    out <- tryCatch(f(var_madre = var_madre, ctx = ctx, df = df),
+                    error = function(e) list(cols = character(0), map_code_to_label = list()))
+    if (is.null(out$cols)) out$cols <- character(0)
+    if (is.null(out$map_code_to_label)) out$map_code_to_label <- list()
+    out
   }
 
   # ---------------------------------------------------------------------------
@@ -492,7 +495,7 @@
   })
 
   # ---------------------------------------------------------------------------
-  # UI: resumen de sección (solo título + barra)
+  # UI: resumen de sección
   # ---------------------------------------------------------------------------
   output$section_summary_ui <- shiny::renderUI({
 
@@ -510,8 +513,15 @@
 
     surv <- instrumento$survey %||% NULL
 
-    vars_so <- vars_sec[vapply(vars_sec, function(v) tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "so", logical(1))]
-    vars_sm <- vars_sec[vapply(vars_sec, function(v) tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "sm", logical(1))]
+    vars_so <- vars_sec[vapply(vars_sec, function(v)
+      tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "so",
+      logical(1)
+    )]
+
+    vars_sm <- vars_sec[vapply(vars_sec, function(v)
+      tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "sm",
+      logical(1)
+    )]
 
     if (length(vars_so) > MAX_SO_ROWS) vars_so <- vars_so[seq_len(MAX_SO_ROWS)]
     vars_show <- c(vars_so, vars_sm)
@@ -523,16 +533,86 @@
     shiny::div(
       class = "section-summary",
       lapply(seq_along(vars_show), function(i) {
+
         v <- vars_show[i]
-        out_id <- paste0("sum_plot_", i)
+        tp <- tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df)
 
         lab <- .obtener_label_var(v, instrumento, data)
         lab_html <- .wrap_titulo_html(lab, width = 120)
 
+        # --- SO: 1 barra (como antes)
+        if (tp == "so") {
+          out_id <- paste0("sum_plot_", i)
+          return(
+            shiny::div(
+              class = "summary-row",
+              shiny::div(class="summary-row-title", shiny::HTML(lab_html)),
+              shiny::div(
+                class="summary-row-plot",
+                plotly::plotlyOutput(out_id, height = paste0(BAR_HEIGHT, "px"))
+              )
+            )
+          )
+        }
+
+        # --- SM: una tarjeta por pregunta, múltiples barras internas
+        spec <- .resolver_var_spec_safe(var_madre = v, ctx = ctx, df = df)
+        cols <- spec$cols %||% character(0)
+
+        if (!length(cols)) {
+          return(
+            shiny::div(
+              class = "summary-row",
+              shiny::div(class="summary-row-title", shiny::HTML(lab_html)),
+              shiny::div(style="font-size:12px;color:#5f6b7a;", "SM sin dummies disponibles.")
+            )
+          )
+        }
+
         shiny::div(
           class = "summary-row",
+
+          # Columna izquierda (título pregunta)
           shiny::div(class="summary-row-title", shiny::HTML(lab_html)),
-          shiny::div(class="summary-row-plot", plotly::plotlyOutput(out_id, height = paste0(BAR_HEIGHT, "px")))
+
+          # Columna derecha (IMPORTANTE: dejar crecer el alto)
+          shiny::div(
+            class = "summary-row-plot",
+            style = "height:auto; overflow:visible;",
+
+            shiny::div(
+              class = "sm-card-inner",
+              style = "display:flex; flex-direction:column; gap:12px; height:auto; overflow:visible;",
+
+              lapply(seq_along(cols), function(j) {
+                colj <- cols[j]
+
+                code <- sub(paste0("^", v, "\\."), "", colj)
+                opt_label <- spec$map_code_to_label[[code]] %||% code
+
+                out_id <- paste0("sum_plot_", i, "_", j)
+
+                shiny::div(
+                  class = "sm-option-block",
+                  style = "height:auto; overflow:visible;",
+
+                  shiny::div(
+                    class = "sm-option-title",
+                    style = paste0(
+                      "color:", SM_SUBTITLE, ";",
+                      "font-size:12px;",
+                      "font-weight:400;",
+                      "margin:0 0 6px 0;"
+                    ),
+                    opt_label
+                  ),
+
+                  # cada barra mantiene el mismo alto que SO
+                  plotly::plotlyOutput(out_id, height = paste0(BAR_HEIGHT, "px"))
+                )
+              })
+            )
+          )
         )
       })
     )
@@ -551,8 +631,15 @@
 
     surv <- instrumento$survey %||% NULL
 
-    vars_so <- vars_sec[vapply(vars_sec, function(v) tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "so", logical(1))]
-    vars_sm <- vars_sec[vapply(vars_sec, function(v) tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "sm", logical(1))]
+    vars_so <- vars_sec[vapply(vars_sec, function(v)
+      tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "so",
+      logical(1)
+    )]
+
+    vars_sm <- vars_sec[vapply(vars_sec, function(v)
+      tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "sm",
+      logical(1)
+    )]
 
     if (length(vars_so) > MAX_SO_ROWS) vars_so <- vars_so[seq_len(MAX_SO_ROWS)]
     vars_show <- c(vars_so, vars_sm)
@@ -561,16 +648,22 @@
       local({
         ii <- i
         v  <- vars_show[ii]
-        out_id <- paste0("sum_plot_", ii)
 
-        output[[out_id]] <- plotly::renderPlotly({
+        # ---- SO output (siempre definido, pero si no es SO retorna NULL)
+        out_so <- paste0("sum_plot_", ii)
+
+        output[[out_so]] <- plotly::renderPlotly({
           df2 <- data_filtrada()
           if (!nrow(df2)) {
-            return(plotly::plot_ly(height = BAR_HEIGHT) |>
-                     plotly::layout(annotations = list(list(text="Sin datos.", showarrow=FALSE))))
+            return(
+              plotly::plot_ly(height = BAR_HEIGHT) |>
+                plotly::layout(annotations = list(list(text="Sin datos.", showarrow=FALSE))) |>
+                plotly::config(displayModeBar = FALSE, responsive = TRUE)
+            )
           }
 
           tp <- tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df2)
+          if (tp != "so") return(NULL)
 
           cats <- get_categorias(
             var = v,
@@ -593,15 +686,51 @@
             )
           }
 
-          if (tp == "so") .plot_so_total(df2, v, paleta_colores = pal)
-          else           .plot_sm_topk(df2, v, paleta_colores = pal, top_k = SM_TOP_K)
+          .plot_so_total(df2, v, paleta_colores = pal)
         })
+
+        # ---- SM outputs por dummy (fill-only)
+        tp0 <- tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df)
+        if (tp0 == "sm") {
+
+          spec0 <- .resolver_var_spec_safe(var_madre = v, ctx = ctx, df = df)
+          cols0 <- spec0$cols %||% character(0)
+          if (!length(cols0)) return()
+
+          for (j in seq_along(cols0)) {
+            local({
+              jj   <- j
+              colj <- cols0[jj]
+              out_id <- paste0("sum_plot_", ii, "_", jj)
+
+              output[[out_id]] <- plotly::renderPlotly({
+                df2 <- data_filtrada()
+                if (!nrow(df2)) {
+                  return(
+                    plotly::plot_ly(height = BAR_HEIGHT) |>
+                      plotly::layout(annotations = list(list(text="Sin datos.", showarrow=FALSE))) |>
+                      plotly::config(displayModeBar = FALSE, responsive = TRUE)
+                  )
+                }
+
+                .plot_sm_dummy_fill(
+                  df = df2,
+                  col_dummy = colj,
+                  col_yes = SM_COLOR_YES,
+                  col_bg  = SM_COLOR_BG,
+                  text_out_color = SM_TEXT_OUT,
+                  pct_inside_threshold = 0.05
+                )
+              })
+            })
+          }
+        }
       })
     }
   })
 
   # ---------------------------------------------------------------------------
-  # KPI STATE (reactive) — clave para que donuts carguen al inicio
+  # KPI STATE (reactive) — se mantiene
   # ---------------------------------------------------------------------------
   kpi_state <- shiny::reactive({
     df <- data_filtrada()
@@ -656,22 +785,24 @@
   })
 
   # ---------------------------------------------------------------------------
-  # RenderPlotly KPIs — fuera del renderUI (fix carga inicial)
+  # RenderPlotly KPIs (sin config= en renderPlotly)
   # ---------------------------------------------------------------------------
   output$kpi_plot_1 <- plotly::renderPlotly({
     st <- kpi_state()
     if (!isTRUE(st$ok) || is.null(st$kpi_obj_1)) return(NULL)
-    st$kpi_obj_1$plot
+    st$kpi_obj_1$plot |>
+      plotly::config(displayModeBar = FALSE, responsive = TRUE)
   })
 
   output$kpi_plot_2 <- plotly::renderPlotly({
     st <- kpi_state()
     if (!isTRUE(st$ok) || is.null(st$kpi_obj_2)) return(NULL)
-    st$kpi_obj_2$plot
+    st$kpi_obj_2$plot |>
+      plotly::config(displayModeBar = FALSE, responsive = TRUE)
   })
 
   # ---------------------------------------------------------------------------
-  # KPI panel UI (sidebar)
+  # KPI panel UI (sidebar) — se mantiene
   # ---------------------------------------------------------------------------
   output$kpi_panel <- shiny::renderUI({
 
@@ -693,7 +824,8 @@
 
     st <- kpi_state()
     if (!isTRUE(st$ok)) {
-      return(shiny::div(style="font-size:12px;color:#5f6b7a;padding:10px;text-align:center;", st$msg %||% ""))
+      return(shiny::div(style="font-size:12px;color:#5f6b7a;padding:10px;text-align:center;",
+                        st$msg %||% ""))
     }
 
     shiny::div(

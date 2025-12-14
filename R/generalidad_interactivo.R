@@ -523,8 +523,291 @@
   list(plot = p, legend = legend_df, title_html = titulo_kpi)
 }
 
+.resolver_var_spec <- function(var_sel, ctx){
+
+  # ctx debe tener: data, instrumento, sm_cols_map, label_var
+  data <- ctx$data
+  inst <- ctx$instrumento
+
+  # 1) Si existe como columna -> SO (o una recod ya materializada)
+  if (var_sel %in% names(data)) {
+    return(list(
+      tipo      = "so",
+      var_madre = var_sel,
+      cols      = var_sel
+    ))
+  }
+
+  # 2) Si NO existe pero es madre SM -> usar mapa de dummies
+  if (!is.null(ctx$sm_cols_map) && var_sel %in% names(ctx$sm_cols_map)) {
+
+    cols <- ctx$sm_cols_map[[var_sel]]
+    cols <- cols[cols %in% names(data)]
+    if (!length(cols)) stop("SM madre sin dummies encontradas: ", var_sel, call. = FALSE)
+
+    # construir opciones (labels) desde instrumento$choices usando list_name de survey
+    surv <- inst$survey
+    choices <- inst$choices
+
+    fila <- surv[surv$name == var_sel, , drop = FALSE]
+    ln   <- if (nrow(fila)) as.character(fila$list_name[1]) else NA_character_
+
+    if (!is.na(ln) && nzchar(ln) &&
+        !is.null(choices) && all(c("list_name","name","label") %in% names(choices))) {
+
+      ch <- choices[choices$list_name == ln, , drop = FALSE]
+      # ojo: tus dummies suelen terminar en ".<code>"
+      # entonces se usa `name` como code (p.ej. "70") y label como opción
+      map_code_to_label <- stats::setNames(as.character(ch$label), as.character(ch$name))
+
+    } else {
+      map_code_to_label <- NULL
+    }
+
+    return(list(
+      tipo      = "sm",
+      var_madre = var_sel,
+      cols      = cols,
+      map_code_to_label = map_code_to_label
+    ))
+  }
+
+  stop("No se pudo resolver variable seleccionada: ", var_sel, call. = FALSE)
+}
+
+.plot_dummy_yesno <- function(x, label_opcion) {
+
+  x <- x[!is.na(x)]
+  if (!length(x)) {
+    return(plotly::plot_ly(height = BAR_HEIGHT) |>
+             plotly::layout(
+               annotations = list(list(text="Sin datos", showarrow=FALSE)),
+               margin = list(l=10, r=10, t=0, b=0)
+             ) |>
+             plotly::config(displayModeBar = FALSE)
+    )
+  }
+
+  n_si <- sum(x == 1)
+  n_no <- sum(x == 0)
+  tot  <- n_si + n_no
+
+  tab <- data.frame(
+    resp = c("Sí","No"),
+    pct  = c(n_si, n_no) / tot
+  )
+
+  p <- plotly::plot_ly(height = BAR_HEIGHT) |>
+    plotly::add_bars(
+      data = tab,
+      x = ~pct,
+      y = I("Total"),
+      orientation = "h",
+      marker = list(
+        color = c("#1B679D", "#E5ECF6"),
+        line = list(width = 0)
+      ),
+      text = paste0("<b>", round(100 * tab$pct, 0), "%</b>"),
+      textposition = "inside",
+      insidetextanchor = "middle",
+      textfont = list(color="white", size=PCT_FSIZE),
+      hoverinfo = "skip"
+    ) |>
+    plotly::layout(
+      barmode = "stack",
+      xaxis = list(range=c(0,1), visible=FALSE),
+      yaxis = list(visible=FALSE),
+      margin = list(l=10, r=10, t=0, b=0),
+      showlegend = FALSE
+    ) |>
+    plotly::config(displayModeBar = FALSE)
+
+  p
+}
+
+
+# =============================================================================
+# resolver_var_spec()
 # -----------------------------------------------------------------------------
-# Registry de pestañas (NUEVO)
+# Helper para variables select_multiple "madre" que en la data viven como dummies
+# (p.ej. p106_recod.1, p106_recod.2, ...) y/o como compacta (_ORIG o madre).
+#
+# Retorna:
+# - cols: vector de dummies disponibles (ordenadas)
+# - map_code_to_label: named list (code -> label) para subtítulos UI
+# - var_madre: nombre de la madre (tal cual se pidió)
+# - list_name: list_name del XLSForm si existe
+# - col_compact: columna compacta detectada si existe (p.ej. p106_recod_ORIG)
+# =============================================================================
+resolver_var_spec <- function(var_madre, ctx, df = NULL) {
+
+  `%||%` <- get0("%||%", ifnotfound = function(x, y) if (!is.null(x)) x else y)
+
+  # data: priorizar df si viene (p.ej. data_filtrada()), si no usar ctx$data
+  data <- df %||% ctx$data
+  inst <- ctx$instrumento
+
+  if (is.null(data) || !is.data.frame(data)) {
+    return(list(
+      var_madre = var_madre,
+      cols = character(0),
+      map_code_to_label = list(),
+      list_name = NA_character_,
+      col_compact = NA_character_
+    ))
+  }
+
+  # ------------------------------------------------------------
+  # 1) Detectar dummies disponibles
+  # ------------------------------------------------------------
+  var_esc <- gsub("([\\W])", "\\\\\\1", var_madre)
+  pat_dum <- paste0("^", var_esc, "\\.")
+  cols <- grep(pat_dum, names(data), value = TRUE)
+
+  # ------------------------------------------------------------
+  # 2) Detectar columna compacta (madre o _ORIG) si existe
+  # ------------------------------------------------------------
+  col_compact <- NA_character_
+  cand1 <- paste0(var_madre, "_ORIG")
+  if (cand1 %in% names(data)) {
+    col_compact <- cand1
+  } else if (var_madre %in% names(data)) {
+    col_compact <- var_madre
+  }
+
+  # ------------------------------------------------------------
+  # 3) Obtener list_name y diccionario code->label desde inst
+  # ------------------------------------------------------------
+  surv <- inst$survey %||% NULL
+  ch   <- inst$choices %||% NULL
+
+  list_name <- NA_character_
+  if (!is.null(surv) && all(c("name","list_name") %in% names(surv)) && var_madre %in% surv$name) {
+    list_name <- as.character(surv$list_name[surv$name == var_madre][1])
+    if (is.na(list_name) || !nzchar(list_name)) list_name <- NA_character_
+  }
+
+  map_code_to_label <- NULL
+
+  # 3a) preferir choices del instrumento
+  if (!is.null(ch) && all(c("list_name","name") %in% names(ch))) {
+    # label puede ser "label" o "label::Spanish (ES)" etc.
+    label_col <- NULL
+    if ("label" %in% names(ch)) {
+      label_col <- "label"
+    } else {
+      lab_candidates <- grep("^label(::|$)", names(ch), value = TRUE)
+      if (length(lab_candidates)) label_col <- lab_candidates[1]
+    }
+
+    if (!is.na(list_name) && nzchar(list_name) && !is.null(label_col) && label_col %in% names(ch)) {
+      ch_v <- ch[ch$list_name == list_name, , drop = FALSE]
+      if (nrow(ch_v)) {
+        map_code_to_label <- stats::setNames(as.character(ch_v[[label_col]]), as.character(ch_v$name))
+      }
+    }
+  }
+
+  # 3b) fallback: labels del atributo si existe alguna dummy con labels
+  if (is.null(map_code_to_label)) {
+    # buscar en madre si existe, si no en primera dummy
+    cand_attr <- NULL
+    if (!is.na(col_compact) && col_compact %in% names(data)) cand_attr <- col_compact
+    if (is.null(cand_attr) && length(cols)) cand_attr <- cols[1]
+
+    if (!is.null(cand_attr) && cand_attr %in% names(data)) {
+      labs <- attr(data[[cand_attr]], "labels", exact = TRUE)
+      if (!is.null(labs) && length(labs) > 0) {
+        map_code_to_label <- stats::setNames(as.character(unname(labs)), as.character(names(labs)))
+      }
+    }
+  }
+
+  if (is.null(map_code_to_label)) map_code_to_label <- character(0)
+
+  # ------------------------------------------------------------
+  # 4) Orden de opciones (codes) y reordenamiento de dummies
+  # ------------------------------------------------------------
+  # helper: extraer code desde dummy "p106_recod.70" -> "70"
+  dummy_code <- function(x) sub(paste0("^", var_madre, "\\."), "", x)
+
+  dummy_codes <- if (length(cols)) dummy_code(cols) else character(0)
+
+  # si hay compacta, intentar ordenar por aparición/choices
+  codes_order <- character(0)
+
+  # 4a) si existe diccionario, usar su orden
+  if (length(map_code_to_label) > 0) {
+    codes_order <- as.character(names(map_code_to_label))
+  }
+
+  # 4b) si no, pero hay compacta, derivar codes existentes en data (split ;)
+  if (!length(codes_order) && !is.na(col_compact) && col_compact %in% names(data)) {
+    x <- as.character(data[[col_compact]])
+    x <- x[!is.na(x) & nzchar(x) & x != "NA"]
+    if (length(x)) {
+      vals <- unlist(strsplit(x, "\\s*;\\s*"), use.names = FALSE)
+      vals <- trimws(vals)
+      vals <- vals[!is.na(vals) & nzchar(vals) & vals != "NA"]
+      codes_order <- unique(vals)
+    }
+  }
+
+  # 4c) si no, usar codes de dummies
+  if (!length(codes_order) && length(dummy_codes)) {
+    codes_order <- unique(dummy_codes)
+  }
+
+  # ordenar con heurística numérica si aplica
+  if (length(codes_order)) {
+    suppressWarnings({
+      num <- as.numeric(codes_order)
+    })
+    if (!all(is.na(num))) {
+      # mezcla numérica: ordenar numéricos primero, luego alfanuméricos
+      ord <- order(is.na(num), num, codes_order)
+      codes_order <- codes_order[ord]
+    } else {
+      codes_order <- sort(codes_order)
+    }
+  }
+
+  # Reordenar cols según codes_order
+  if (length(cols) && length(codes_order)) {
+    ord_idx <- match(dummy_codes, codes_order)
+    # los no encontrados al final
+    ord_idx[is.na(ord_idx)] <- max(ord_idx, na.rm = TRUE) + seq_len(sum(is.na(ord_idx)))
+    cols <- cols[order(ord_idx)]
+  }
+
+  # ------------------------------------------------------------
+  # 5) Asegurar que map_code_to_label cubra todos los codes visibles
+  # ------------------------------------------------------------
+  if (length(dummy_codes)) {
+    falt <- setdiff(dummy_codes, names(map_code_to_label))
+    if (length(falt)) {
+      extra <- stats::setNames(falt, falt)
+      map_code_to_label <- c(map_code_to_label, extra)
+    }
+  }
+
+  # devolver como LIST para acceso [[code]] fácil
+  map_list <- as.list(map_code_to_label)
+
+  list(
+    var_madre = var_madre,
+    cols = cols,
+    map_code_to_label = map_list,
+    list_name = list_name,
+    col_compact = col_compact
+  )
+}
+
+
+
+
+# -----------------------------------------------------------------------------
+# Registry de pestañas
 # -----------------------------------------------------------------------------
 
 .make_tabs_registry <- function(ctx, tabs = c("resumen", "relacion", "base_datos")) {
@@ -701,8 +984,24 @@ reporte_interactivo <- function(
   kpi_vars <- unique(kpi_vars[kpi_vars %in% names(data)])
   if (length(kpi_vars) > 2L) kpi_vars <- kpi_vars[1:2]
 
-  # secciones
-  secciones_limpias <- lapply(secciones, function(v) v[v %in% names(data)])
+  # secciones: mantener vars que existan como columna
+  # O mantener SM madres si tienen hijas en sm_cols_map
+  secciones_limpias <- lapply(secciones, function(vs) {
+
+    # las que sí existen como columnas (SO típicamente)
+    keep <- vs[vs %in% names(data)]
+
+    # las que NO existen como columna, pero sí son SM madres con hijas
+    falt <- setdiff(vs, keep)
+    if (length(falt)) {
+      falt_sm <- falt[falt %in% names(sm_cols_map)]
+      falt_sm <- falt_sm[vapply(falt_sm, function(v) length(sm_cols_map[[v]]) > 0, logical(1))]
+      keep <- c(keep, falt_sm)
+    }
+
+    unique(keep)
+  })
+
   secciones_limpias <- secciones_limpias[vapply(secciones_limpias, length, integer(1)) > 0]
   if (!length(secciones_limpias)) {
     stop("Ninguna sección de `secciones` tiene variables presentes en `data`.", call. = FALSE)
@@ -1463,6 +1762,28 @@ reporte_interactivo <- function(
 /* 4) IMPORTANTÍSIMO: si antes dejaste esto en “visible”, lo anulamos aquí */
 .sidebarPanel .cardbox{
   overflow: hidden !important;     /* el contenedor general no debe dejar “flotar” cosas */
+}
+
+/* ============================================================
+   FIX RESUMEN: Select_multiple con múltiples barras
+   - No rompe SO (solo aplica cuando existe .sm-card-inner)
+   ============================================================ */
+.summary-row-plot:has(.sm-card-inner){
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.sm-card-inner{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.sm-option-block{
+  height: auto !important;
+  overflow: visible !important;
 }
 
   "))
