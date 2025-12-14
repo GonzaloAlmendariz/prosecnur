@@ -3,12 +3,7 @@
 #          (convención: TRUE en el flag = inconsistencia)
 # ============================================================
 
-suppressPackageStartupMessages({
-  library(dplyr)
-  library(stringr)
-  library(tibble)
-  library(rlang)
-})
+
 
 # --- helper interno, al principio del archivo si no existe aún ---
 .is_num_like <- function(tablas, hoja, var){

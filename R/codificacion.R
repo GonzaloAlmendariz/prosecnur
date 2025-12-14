@@ -7,9 +7,6 @@
 #' @keywords internal
 #' @name ppra_flujo_hibrido
 NULL
-suppressPackageStartupMessages({
-  library(openxlsx)
-})
 
 `%||%` <- function(x,y) if (is.null(x) || (length(x)==1 && is.na(x))) y else x
 nzchr   <- function(x) is.character(x) && length(x)==1 && !is.na(x) && nzchar(x)
@@ -2586,11 +2583,6 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
 
 # ------ 6) Exportador a Excel con formato -----------------------------------
 
-suppressPackageStartupMessages({
-  library(openxlsx)
-  library(dplyr)
-  library(rlang)
-})
 
 `%||%` <- function(x, y) if (is.null(x) || (length(x) == 1 && is.na(x))) y else x
 

@@ -2,14 +2,6 @@
 # Exportar Plan de Limpieza a Excel — versión “pro” y editable (Ajustado)
 # =====================================================================
 
-suppressPackageStartupMessages({
-  library(openxlsx)
-  library(dplyr)
-  library(stringr)
-  library(tibble)
-  library(purrr)
-})
-
 `%||%` <- function(a, b) if (is.null(a) || (length(a)==1 && is.na(a))) b else a
 
 # ---------- Paletas / niveles ----------

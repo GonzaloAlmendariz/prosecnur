@@ -1,15 +1,6 @@
 # =============================================================================
 # ppra_adaptar_instrumento
 # =============================================================================
-
-suppressPackageStartupMessages({
-  library(readxl)
-  library(dplyr)
-  library(stringr)
-  library(tidyr)
-  library(tibble)
-})
-
 `%||%` <- function(a,b) if (is.null(a) || (length(a)==1 && is.na(a))) b else a
 
 # ---------- helpers básicos ---------------------------------------------------

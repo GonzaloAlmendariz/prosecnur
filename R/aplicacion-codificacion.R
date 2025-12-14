@@ -3,10 +3,6 @@
 # (con armonización de clave para joins: evita _index double vs character)
 # =============================================================================
 
-suppressPackageStartupMessages({
-  library(readxl); library(dplyr); library(stringr); library(purrr); library(tidyr); library(tibble)
-})
-
 `%||%` <- function(a,b) if (is.null(a) || (length(a)==1 && is.na(a))) b else a
 nz      <- function(x) !is.na(x) & nzchar(trimws(as.character(x)))
 

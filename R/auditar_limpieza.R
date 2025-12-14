@@ -7,9 +7,6 @@
 #' @export
 auditar_regla <- function(ev, ids, verbose = TRUE){
 
-  suppressPackageStartupMessages({
-    library(dplyr); library(purrr); library(tibble)
-  })
 
   # Traer bloque por regla (asume que trae 'casos' como list-col)
   aud <- prosecnur::reporte_bloques(ev, ids = ids)

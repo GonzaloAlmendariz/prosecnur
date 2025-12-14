@@ -2,14 +2,6 @@
 # Generador del Plan de Limpieza (G-aware y repeat-aware)
 # Convención: TRUE en `Procesamiento` = hay inconsistencia
 
-suppressPackageStartupMessages({
-  library(dplyr)
-  library(purrr)
-  library(stringr)
-  library(tidyr)
-  library(tibble)
-  library(rlang)
-})
 
 # =============================================================================
 # Utilidades básicas

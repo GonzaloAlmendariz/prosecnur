@@ -23,9 +23,17 @@ Imports:
     readxl,
     stringi,
     stringr,
+    tidyr,
     tibble,
     rlang,
-    janitor
+    openxlsx,
+    janitor,
+    shiny,
+    plotly,
+    DT, 
+    ggplot2,
+    haven, 
+    cowplot
 Suggests:
     testthat (>= 3.0.0),
     knitr,

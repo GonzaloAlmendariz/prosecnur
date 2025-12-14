@@ -8,10 +8,6 @@
 #   - export_cleaning_plan() [export_plan.R] (opcional, recomendado)
 # ------------------------------------------------------------------------------
 
-suppressPackageStartupMessages({
-  library(dplyr)
-})
-
 #' Construir plan de limpieza desde un XLSForm
 #'
 #' @param ruta_xlsform Ruta al archivo XLSForm (.xlsx).
