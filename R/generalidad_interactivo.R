@@ -11,6 +11,14 @@
 # Helpers internos (IGUAL que tu archivo)
 # -----------------------------------------------------------------------------
 
+.wrap_y <- function(x, width = 35) {
+  x <- as.character(x)
+  if (requireNamespace("stringr", quietly = TRUE)) {
+    x <- stringr::str_wrap(x, width = width)
+  }
+  gsub("\n", "<br>", x, fixed = TRUE)  # plotly interpreta <br>
+}
+
 .resolver_paleta_var <- function(var,
                                  instrumento,
                                  colores_apiladas_por_listname,
@@ -1785,6 +1793,107 @@ reporte_interactivo <- function(
   height: auto !important;
   overflow: visible !important;
 }
+
+
+/* Respiración general arriba */
+body{
+  padding-top: 14px;
+}
+
+/* Topbar: más aire y menos sensación de “pegado” */
+.topbar{
+  padding: 18px 18px;         /* antes 14px 16px */
+  margin-bottom: 16px;         /* antes 14px */
+}
+
+/* Título un poco más relajado (sin aplastarlo) */
+.topbar-title{
+  padding-top: 2px;
+}
+
+/* Contenedor nav: darle aire */
+.navbar{
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  margin-bottom: 18px !important;
+}
+
+/* UL de tabs: que parezca barra moderna */
+.navbar .navbar-nav{
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #e6e9f2;
+  border-radius: 18px;
+  box-shadow: 0 14px 34px rgba(0, 36, 87, 0.06);
+}
+
+/* Cada tab como “pill” */
+.navbar .navbar-nav > li > a{
+  border-radius: 999px !important;
+  padding: 10px 14px !important;
+  font-weight: 800;
+  color: #002457 !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+}
+
+/* Hover elegante */
+.navbar .navbar-nav > li > a:hover{
+  background: rgba(0, 36, 87, 0.06) !important;
+  border-color: rgba(0, 36, 87, 0.12) !important;
+}
+
+/* Tab activa: pill sólida suave */
+.navbar .navbar-nav > .active > a,
+.navbar .navbar-nav > .active > a:focus,
+.navbar .navbar-nav > .active > a:hover{
+  background: rgba(0, 36, 87, 0.10) !important;
+  border-color: rgba(0, 36, 87, 0.22) !important;
+  color: #002457 !important;
+}
+
+/* El navbar NO debe tener padding propio */
+.navbar{
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* Alinear pestañas con sidebar */
+.navbar .navbar-nav{
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}
+
+/* Match exacto con sidebar */
+.navbar .navbar-nav{
+  padding-left: 10px;   /* prueba 10–12 si quieres microajuste */
+}
+
+.col-sm-3, .col-sm-9{
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+/* ====== Alineación navbar con sidebar ====== */
+
+/* El navbar no debe empujar el contenido */
+.navbar{
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* El UL de pestañas empieza donde empieza el sidebar */
+.navbar .navbar-nav{
+  margin-left: 0 !important;
+  padding-left: 10px;   /* mismo padding que columnas */
+  padding-right: 10px;
+}
+
 
   "))
     ),

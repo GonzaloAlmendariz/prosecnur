@@ -192,7 +192,7 @@
       if (es_sm) "NOMINAL" else "—"
     }
 
-    tipo <- if (es_so) "Selección única" else if (es_sm) "Selección múltiple (conjunto)" else "Variable codificada"
+    tipo <- if (es_so) "Selección única" else if (es_sm) "Selección múltiple" else "Variable codificada"
 
     shiny::tagList(
       shiny::div(class="dicc-kv",

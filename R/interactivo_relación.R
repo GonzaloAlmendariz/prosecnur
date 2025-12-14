@@ -385,7 +385,7 @@ relacion_tab_server <- function(
           code_i <- codes_row[i]
           n_ij <- sum(w[elig & v_main == code_i], na.rm = TRUE)
           rows[[length(rows) + 1]] <- data.frame(
-            estrato_label = estr_labels[j],
+            estrato_label = .wrap_y(estr_labels[j], width = 50),
             opcion_label  = opciones[i],
             pct = n_ij / N_j,
             n   = n_ij,
@@ -450,7 +450,7 @@ relacion_tab_server <- function(
                          showticklabels = FALSE, ticks = ""),
           yaxis   = list(title = "", automargin = TRUE, showgrid = FALSE, zeroline = FALSE, ticks = ""),
           legend  = list(orientation = "h", x = 0.5, xanchor = "center", y = -0.12),
-          margin  = list(l = 170, r = 25, t = 10, b = 55),
+          margin  = list(l = 120, r = 25, t = 10, b = 55),
           hovermode  = "closest",
           transition = list(duration = 450, easing = "cubic-in-out")
         ) |>
@@ -497,7 +497,7 @@ relacion_tab_server <- function(
         pct_y <- max(0, min(1, pct_y))
 
         rows[[length(rows) + 1]] <- data.frame(
-          estrato_label = estr_labels[j],
+          estrato_label = .wrap_y(estr_labels[j], width = 50),
           pct_yes = pct_y,
           n_yes = n_yes,
           N = N_j,
@@ -570,7 +570,7 @@ relacion_tab_server <- function(
           xaxis = list(range = c(0, 1), showgrid = FALSE, zeroline = FALSE,
                        showticklabels = FALSE, ticks = "", title = ""),
           yaxis = list(title = "", automargin = TRUE, showgrid = FALSE, zeroline = FALSE),
-          margin = list(l = 170, r = 15, t = 8, b = 10),
+          margin = list(l = 120, r = 15, t = 8, b = 10),
           showlegend = FALSE,
           uniformtext = list(minsize = 10, mode = "hide")
         ) |>
@@ -629,8 +629,8 @@ relacion_tab_server <- function(
           elig <- mask_j & elig_total
           N_j <- sum(w[elig], na.rm = TRUE)
           if (is.na(N_j) || N_j <= 0) {
-            n_vec <- rep(NA_real_, length(codes_row))
-            pct   <- rep(NA_real_, length(codes_row))
+            n_vec <- rep(0, length(codes_row))
+            pct   <- rep(0, length(codes_row))
           } else {
             n_vec <- vapply(seq_along(codes_row), function(i) sum(w[elig & v_main == codes_row[i]], na.rm = TRUE), numeric(1))
             pct   <- n_vec / N_j
@@ -693,8 +693,8 @@ relacion_tab_server <- function(
           N_j <- if (length(ids_denom)) sum(w[ids_denom], na.rm = TRUE) else 0
 
           if (is.na(N_j) || N_j <= 0) {
-            n_vec <- rep(NA_real_, length(codes_row))
-            pct   <- rep(NA_real_, length(codes_row))
+            n_vec <- rep(0, length(codes_row))
+            pct   <- rep(0, length(codes_row))
           } else {
             n_vec <- vapply(seq_along(codes_row), function(i) {
               ids_yes <- .sm_numerador_option(df, var_main, codes_row[i], cols_dummies = cols, col_compact = NA_character_)
@@ -725,10 +725,16 @@ relacion_tab_server <- function(
         # denom_map guarda N del estrato para ese bloque
         # (si NA/0, dejar NA)
         Nj <- denom_map[[nm]]
-        total_row[[k]] <- if (is.null(Nj) || is.na(Nj) || Nj <= 0) NA_real_ else round(as.numeric(Nj), 0)
+        total_row[[k]] <- if (is.null(Nj) || is.na(Nj)) NA_real_ else round(as.numeric(Nj), 0)
       }
       for (k in pct_cols) {
-        total_row[[k]] <- NA_real_
+        nm_pct <- names(cuerpo)[k]
+        nm_n   <- sub("__pct$", "__n", nm_pct)
+
+        Nj <- denom_map[[nm_n]]
+
+        # Convención: fila Total (%) = 100% si ese bloque tiene N > 0, si no 0%
+        total_row[[k]] <- if (is.null(Nj) || is.na(Nj) || Nj <= 0) 0 else 1
       }
 
       cuerpo <- dplyr::bind_rows(cuerpo, tibble::as_tibble(total_row))
