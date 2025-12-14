@@ -7,7 +7,10 @@
 #' @keywords internal
 #' @name ppra_flujo_hibrido
 NULL
-suppressPackageStartupMessages({library(tidyverse); library(openxlsx); library(janitor)})
+suppressPackageStartupMessages({
+  library(openxlsx)
+  library(janitor)
+})
 
 `%||%` <- function(x,y) if (is.null(x) || (length(x)==1 && is.na(x))) y else x
 nzchr   <- function(x) is.character(x) && length(x)==1 && !is.na(x) && nzchar(x)
