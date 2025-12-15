@@ -137,6 +137,14 @@ resolver_parent_limpio <- function(df){
 resolve_parent_clean <- function(df) resolver_parent_limpio(df)
 
 
+.norm_list_name <- function(x){
+  x <- trimws(as.character(x))
+  x <- tolower(x)
+  x <- gsub("\\s+", "_", x)
+  x <- gsub("[^a-z0-9_]", "_", x)
+  x
+}
+
 
 #' Detectar la mejor columna de label en español (con fallback a "label")
 #'
@@ -218,8 +226,11 @@ choices_es_tbl <- function(inst){
   # asegurar list_norm
   if (!"list_norm" %in% names(ch)) {
     ln <- if ("list_name" %in% names(ch)) ch$list_name else NA_character_
-    list_norm <- tolower(gsub("[^a-z0-9_]", "_", gsub("\\s+","_", as.character(ln))))
-    ch$list_norm <- list_norm
+    ln_chr <- tolower(trimws(as.character(ln)))
+    ch$list_norm <- gsub(
+      "[^a-z0-9_]", "_",
+      gsub("\\s+", "_", ln_chr)
+    )
   }
 
   tibble::tibble(
@@ -1607,7 +1618,12 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
   fam$text_col_eff[ fam$tipo == "text" & (is.na(fam$text_col_eff) | !nzchar(fam$text_col_eff)) ] <- fam$parent_col[ fam$tipo == "text" ]
 
   # set de textos asignados como hijas por alguna SO/SM con use=TRUE
-  text_cols_asignadas <- unique(na.omit(fam$text_col[fam$use & fam$tipo %in% c("select_one","select_multiple")]))
+  text_cols_asignadas <- unique(
+    fam$text_col[
+      (acc_so | acc_sm) &
+        !is.na(fam$text_col) & nzchar(fam$text_col)
+    ]
+  )
 
   # TEXTO finales: solo las 'text' cuya EFECTIVA NO esté asignada como hija
   acc_tx <- fam$use & fam$tipo == "text" & !(fam$text_col_eff %in% text_cols_asignadas)
@@ -1619,7 +1635,7 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
   fam_ok$text_col[ fam_ok$tipo == "text" ] <- fam_ok$text_col_eff[ fam_ok$tipo == "text" ]
 
   # --- adopciones pero ya no afecta el cálculo de 'text'
-  adopt_rows <- fam[fam$use & fam$tipo %in% c("select_one","select_multiple"), , drop = FALSE]
+  adopt_rows <- fam[acc_so | acc_sm, , drop = FALSE]
   adopciones <- tibble::tibble(
     text_col              = text_cols_asignadas,
     adoptada_por_parent   = adopt_rows$parent_col[ match(text_cols_asignadas, adopt_rows$text_col) ] %||% NA_character_,
