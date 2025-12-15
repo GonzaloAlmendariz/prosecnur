@@ -1055,575 +1055,597 @@ reporte_interactivo <- function(
   ui <- shiny::fluidPage(
 
     shiny::tags$head(
+
+      # ============================================================
+      # CSS
+      # ============================================================
       shiny::tags$style(shiny::HTML("
-    /* ====== Base ====== */
-    body { background: #f5f6fa; color: #1f2933; }
-    .container-fluid { max-width: 1400px; }
 
-    /* ====== Tipografía ====== */
-    h2, h3, h4 { font-weight: 800; color: #002457; }
-    .title { font-weight: 900; color: #002457; }
-
-    /* ====== Sidebar ====== */
-    .well, .sidebarPanel {
-      background: #ffffff !important;
-      border: 1px solid #e6e9f2 !important;
-      border-radius: 16px !important;
-      box-shadow: 0 12px 28px rgba(0, 36, 87, 0.06);
-    }
-    .sidebar h3 { margin-top: 0; color: #002457; }
-    .sidebar p  { color: #5f6b7a; font-size: 13px; }
-    .sidebar hr { border-top: 1px solid #edf0f7; }
-
-    /* ====== Inputs ====== */
-    .selectize-input, .form-control {
-      border-radius: 12px !important;
-      border: 1px solid #e6e9f2 !important;
-      box-shadow: none !important;
-      font-size: 13px;
-    }
-    .selectize-input.focus, .form-control:focus {
-      border-color: #002457 !important;
-      box-shadow: 0 0 0 3px rgba(0, 36, 87, 0.15) !important;
-    }
-
-    /* ====== Botones ====== */
-    .btn {
-      border-radius: 12px !important;
-      border: 1px solid #e6e9f2 !important;
-      background: #ffffff !important;
-      font-weight: 700;
-      color: #002457 !important;
-    }
-    .btn:hover {
-      background: rgba(0, 36, 87, 0.05) !important;
-      border-color: #002457 !important;
-    }
-
-    /* ====== Cards ====== */
-    .cardbox {
-      background: #ffffff;
-      border: 1px solid #e6e9f2;
-      border-radius: 18px;
-      box-shadow: 0 14px 34px rgba(0, 36, 87, 0.07);
-      padding: 12px;
-    }
-
-    /* ====== Layout spacing ====== */
-    .row { margin-left: -10px; margin-right: -10px; }
-    .col-sm-6, .col-sm-12, .col-sm-9, .col-sm-3 { padding-left: 10px; padding-right: 10px; }
-
-    /* ====== Header con logo ====== */
-    .topbar{
-      background:#ffffff;
-      border:1px solid #e6e9f2;
-      border-radius:18px;
-      box-shadow:0 14px 34px rgba(0, 36, 87, 0.07);
-      padding:14px 16px;
-      margin-bottom:14px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:14px;
-    }
-    .topbar-title{
-      font-size:26px;
-      font-weight:900;
-      color:#002457;
-      line-height:1.1;
-      flex: 1 1 auto;
-    }
-    .topbar-logo{
-      height:52px;
-      max-width:240px;
-      object-fit:contain;
-      display:block;
-      flex: 0 0 auto;
-    }
-
-    /* ====== Card header (editorial) ====== */
-    .cardbox-header{
-      padding:10px 12px 6px 12px;
-      border-bottom:1px solid #edf0f7;
-      margin:-12px -12px 10px -12px;
-    }
-    .cardbox-title{
-      font-size:18px;
-      font-weight:900;
-      color:#002457;
-      line-height:1.15;
-      margin:0;
-    }
-    .cardbox-subtitle{
-      margin-top:4px;
-      font-size:12px;
-      color:#5f6b7a;
-    }
-
-    /* ====== Plotly ====== */
-    .plot-container, .svg-container { width: 100% !important; }
-    .plotly .main-svg { overflow: visible !important; }
-
-    /* ====== DataTable: look más “ejecutivo” ====== */
-    table.dataTable { border-collapse: collapse !important; }
-    table.dataTable thead th{
-      background:#f1f3f9;
-      color:#002457;
-      font-weight:800;
-      border-bottom: 1px solid #dfe5f2 !important;
-      border-right: 1px solid #dfe5f2 !important;
-    }
-    table.dataTable tbody td{
-      font-size:12px;
-      color:#1f2933;
-      border-bottom: 1px solid #edf0f7 !important;
-      border-right: 1px solid #edf0f7 !important;
-    }
-    table.dataTable tbody tr:hover td{
-      background: #fafbff !important;
-    }
-
-    /* ====== Toggle (switch) elegante: Códigos <-> Etiquetas ====== */
-    .toggle-row{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      margin-top: 10px;
-      margin-bottom: 10px;
-    }
-    .toggle-label{
-      font-size: 12px;
-      color: #5f6b7a;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 52px;
-      height: 28px;
-      flex: 0 0 auto;
-    }
-    .switch input { display:none; }
-    .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #e6e9f2;
-      transition: .25s;
-      border-radius: 999px;
-      border: 1px solid #dfe5f2;
-    }
-    .slider:before {
-      position: absolute;
-      content: \"\";
-      height: 22px;
-      width: 22px;
-      left: 3px;
-      bottom: 2.5px;
-      background-color: white;
-      transition: .25s;
-      border-radius: 50%;
-      box-shadow: 0 6px 14px rgba(0,0,0,0.12);
-    }
-    input:checked + .slider {
-      background-color: rgba(0, 36, 87, 0.20);
-      border-color: rgba(0, 36, 87, 0.35);
-    }
-    input:checked + .slider:before {
-      transform: translateX(23px);
-    }
-
-    /* ====== Diccionario ====== */
-    .dicc-kv{
-      display:grid;
-      grid-template-columns: 92px 1fr;
-      gap: 6px 10px;
-      font-size: 12px;
-      color: #1f2933;
-    }
-    .dicc-k{
-      color: #5f6b7a;
-      font-weight: 800;
-    }
-    .dicc-v{
-      color: #1f2933;
-      font-weight: 600;
-      word-break: break-word;
-    }
-
-    /* DataTable fijo + wrap */
-    table.dataTable { table-layout: fixed !important; width: 100% !important; }
-    table.dataTable thead th, table.dataTable tbody td{
-      white-space: normal !important;
-      word-wrap: break-word !important;
-      overflow-wrap: anywhere !important;
-    }
-
-    /* ====== KPI BLOCK (Perfil) ====== */
-    .kpi-block{
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-      padding-bottom: 6px;
-    }
-
-    .kpi-block-title{
-      font-size:14px;
-      font-weight:900;
-      color:#002457;
-      line-height:1.15;
-      margin:0;
-    }
-
-    .kpi-block-subtitle{
-      margin-top:4px;
-      font-size:12px;
-      color:#5f6b7a;
-    }
-
-    .kpi-n-chip{
-      width:100%;
-      padding:10px 12px;
-      border:1px solid #edf0f7;
-      border-radius:14px;
-      background:#fafbff;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-    }
-
-    .kpi-n-text{
-      font-size:18px;
-      font-weight:900;
-      color:#002457;
-      letter-spacing:0.01em;
-    }
-
-    /* Donuts como “pareja” */
-    .kpi-grid{
-      display:flex;
-      gap:12px;
-      width:100%;
-      align-items:stretch;
-    }
-
-    .kpi-cell{
-      flex:1 1 0;
-      border:1px solid #edf0f7;
-      border-radius:16px;
-      padding:8px 8px 10px 8px;
-      background:#ffffff;
-    }
-
-    /* Leyenda más secundaria */
-    .kpi-legend{
-      margin-top:6px;
-      display:flex;
-      flex-wrap:wrap;
-      gap:4px 10px;
-      justify-content:center;
-      font-size:10px;
-      color:#5f6b7a;
-      line-height:1.15;
-    }
-
-    .kpi-legend-item{
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-    }
-
-    .kpi-legend-swatch{
-      display:inline-block;
-      width:10px;
-      height:10px;
-      border-radius:3px;
-    }
-
-    /* ====== KPI cell: evitar desbordes del título ====== */
-    .kpi-cell{
-      overflow: hidden;
-    }
-
-    /* plotly title dentro del KPI: wrap fuerte */
-    .kpi-cell .plotly .gtitle,
-    .kpi-cell .plotly .g-gtitle,
-    .kpi-cell .plotly text{
-      white-space: normal !important;
-    }
-
-    .kpi-cell .plotly{
-      overflow: hidden !important;
-    }
-
-    /* Título encima del donut (wrap real, centrado) */
-    .kpi-donut-title{
-      font-size: 14px;
-      font-weight: 900;
-      color: #002457;
-      text-align: center;
-      line-height: 1.15;
-      margin: 4px 6px 2px 6px;
-      white-space: normal;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
-
-    /* KPI cell: layout vertical controlado */
-    .kpi-cell{
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      justify-content: flex-start;
-    }
-
-    /* Centrar encabezados y celdas en DataTable */
-    table.dataTable thead th { text-align: center !important; vertical-align: middle !important; }
-    table.dataTable tbody td { text-align: center !important; vertical-align: middle !important; }
-
-    /* ====== PERFIL (nuevo layout horizontal) ====== */
-    .kpi-profile-row{
-      display:flex;
-      gap:12px;
-      align-items:stretch;
-    }
-
-    /* Columna izquierda: N (cuasi-cuadrado) */
-    .kpi-n-card{
-      flex: 0 0 42%;
-      min-width: 320px;
-      border:1px solid #edf0f7;
-      border-radius:16px;
-      background:#ffffff;
-      padding:12px;
-      display:flex;
-      flex-direction:column;
-      justify-content:center;
-    }
-
-    /* Título “Perfil de la muestra” arriba del N */
-    .kpi-n-card .kpi-block-title{
-      margin:0 0 8px 0;
-    }
-
-    /* Chip de N más protagonista */
-    .kpi-n-chip{
-      padding:18px 14px;
-      border-radius:16px;
-    }
-    .kpi-n-text{
-      font-size:22px;
-    }
-
-    /* Columna derecha: dos donuts */
-    .kpi-donuts{
-      flex: 1 1 auto;
-      display:flex;
-      gap:12px;
-      align-items:stretch;
-    }
-
-    /* Cada donut mantiene estética actual */
-    .kpi-donuts .kpi-cell{
-      flex:1 1 0;
-      min-width: 260px;
-    }
-
-    /* ====== RESUMEN SECCIÓN: lista de filas ====== */
-    .section-summary{
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-    }
-
-    /* Cada fila editorial */
-    .summary-row{
-      border:1px solid #edf0f7;
-      border-radius:16px;
-      background:#ffffff;
-      padding:10px 12px;
-      box-shadow: 0 10px 22px rgba(0, 36, 87, 0.04);
-    }
-
-    /* Título de la fila (wrap fuerte) */
-    .summary-row-title{
-      font-size:13px;
-      font-weight:900;
-      color:#002457;
-      line-height:1.2;
-      margin:0 0 6px 0;
-      overflow-wrap:anywhere;
-    }
-
-    /* Subtítulo (SO vs SM) */
-    .summary-row-subtitle{
-      font-size:11px;
-      color:#5f6b7a;
-      font-weight:700;
-      margin:0 0 8px 0;
-    }
-
-    /* Contenedor del plot: alto fijo para consistencia */
-    .summary-row-plot{
-      height:84px;
-      overflow:hidden;
-    }
-
-    /* ====== Plotly: texto dentro de barras ====== */
-    .plotly text{
-      font-weight:800 !important;
-    }
-
-    /* Evita recortes raros de svg */
-    .plotly .main-svg{
-      overflow: visible !important;
-    }
-
-    /* ====== Plotly hover: look limpio ====== */
-    .plotly .hoverlayer .hovertext{
-      font-family: Arial, sans-serif !important;
-      border-radius: 10px !important;
-    }
-
-    /* ====== DT centrado total ====== */
-    table.dataTable thead th,
-    table.dataTable tbody td{
-      text-align:center !important;
-      vertical-align:middle !important;
-    }
-
-    /* Sidebar KPI stack: todo estira al mismo ancho */
-    .kpi-sidebar-stack{
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      align-items: stretch;   /* clave: mismo ancho */
-      width: 100%;
-      box-sizing: border-box;
-    }
-
-    /* Los 3 bloques deben tener el mismo ancho */
-    .kpi-n-card,
-    .kpi-cell{
-      width: 100%;
-      box-sizing: border-box;
-    }
-
-    /* N centrado y sin “sobresalirse” */
-    .kpi-n-card{
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      padding: 12px 10px;
-      border-radius: 12px;
-      overflow: hidden;       /* por si el texto es largo */
-    }
-
-    /* Texto N */
-    .kpi-n-text{
-      font-weight: 700;
-      font-size: 16px;
-      line-height: 1.2;
-      max-width: 100%;
-      white-space: normal;
-      word-break: break-word;
-    }
-
-    /* Donut title centrado (si no lo estaba) */
-    .kpi-donut-title{
-      text-align: center;
-    }
-
-
-    /* ============================================================
-       ====== PATCH FINAL KPI SIDEBAR (NO ROMPER NADA) ======
-       - Corrige el overflow horrible del N (min-width / flex-basis).
-       - Asegura mismo ancho real en sidebar.
-       - Evita que Plotly empuje el layout.
-       ============================================================ */
-
-    /* El contenedor card no deja salir nada (solo en sidebar ayuda muchísimo) */
-    .sidebarPanel .cardbox{ overflow:hidden; }
-
-    /* Cuando el perfil está en modo sidebar vertical,
-       se anulan las decisiones “horizontales” que lo revientan. */
-    .kpi-sidebar-stack .kpi-profile-row{ display:block !important; }
-    .kpi-sidebar-stack .kpi-donuts{ display:block !important; }
-
-    /* Mata los min-width/42% que causan el desborde en pantallas chicas */
-    .kpi-sidebar-stack .kpi-n-card{
-      flex: 0 0 auto !important;
-      min-width: 0 !important;
-      width: 100% !important;
-      max-width: 100% !important;
-      box-sizing: border-box !important;
-      align-items: center !important;
-      justify-content: center !important;
-      padding: 12px 12px !important;
-      border-radius: 16px !important;
-    }
-
-    /* El chip N debe medir lo mismo que las cards (y nunca “salirse”) */
-    .kpi-sidebar-stack .kpi-n-chip{
-      width: 100% !important;
-      max-width: 100% !important;
-      box-sizing: border-box !important;
-      margin: 0 !important;
-      justify-content: center !important;
-    }
-
-    .kpi-sidebar-stack .kpi-n-text{
-      width: 100% !important;
-      text-align: center !important;
-      max-width: 100% !important;
-      white-space: normal !important;
-      word-break: break-word !important;
-      font-weight: 900 !important;
-      font-size: 18px !important;
-    }
-
-    /* KPI cards: mismo ancho y sin empujar */
-    .kpi-sidebar-stack .kpi-cell{
-      width: 100% !important;
-      max-width: 100% !important;
-      min-width: 0 !important;
-      box-sizing: border-box !important;
-      margin: 0 !important;
-    }
-
-    /* Plotly dentro del sidebar: nunca exceder el contenedor */
-    .kpi-sidebar-stack .plotly.html-widget,
-    .kpi-sidebar-stack .plot-container,
-    .kpi-sidebar-stack .svg-container{
-      width: 100% !important;
-      max-width: 100% !important;
-    }
-
-    /* Si algún SVG/capa intenta desbordar, se corta en el KPI */
-    .kpi-sidebar-stack .kpi-cell{ overflow:hidden !important; }
-
-    /* ============================================================
-   PATCH EXTRA: evitar KPIs “comprimidos” en sidebar
-   (no rompe nada: solo estabiliza altura/auto-size de Plotly)
+/* ============================================================
+   ====== Base ======
    ============================================================ */
+body { background: #f5f6fa; color: #1f2933; }
+.container-fluid { max-width: 1400px; }
 
-/* Asegura que cada KPI tenga aire suficiente */
-.kpi-sidebar-stack .kpi-cell{
-  min-height: 310px;        /* title + donut + leyenda */
-  padding: 10px 10px 12px 10px;
-  gap: 6px;                 /* si el browser soporta gap en flex */
+/* ============================================================
+   ====== Tipografía ======
+   ============================================================ */
+h2, h3, h4 { font-weight: 800; color: #002457; }
+.title { font-weight: 900; color: #002457; }
+
+/* ============================================================
+   ====== Sidebar ======
+   ============================================================ */
+.well, .sidebarPanel {
+  background: #ffffff !important;
+  border: 1px solid #e6e9f2 !important;
+  border-radius: 16px !important;
+  box-shadow: 0 12px 28px rgba(0, 36, 87, 0.06);
+}
+.sidebar h3 { margin-top: 0; color: #002457; }
+.sidebar p  { color: #5f6b7a; font-size: 13px; }
+.sidebar hr { border-top: 1px solid #edf0f7; }
+
+/* ============================================================
+   ====== Inputs ======
+   ============================================================ */
+.selectize-input, .form-control {
+  border-radius: 12px !important;
+  border: 1px solid #e6e9f2 !important;
+  box-shadow: none !important;
+  font-size: 13px;
+}
+.selectize-input.focus, .form-control:focus {
+  border-color: #002457 !important;
+  box-shadow: 0 0 0 3px rgba(0, 36, 87, 0.15) !important;
 }
 
-/* Fuerza la altura REAL del contenedor Shiny del widget */
+/* ============================================================
+   ====== Botones ======
+   ============================================================ */
+.btn {
+  border-radius: 12px !important;
+  border: 1px solid #e6e9f2 !important;
+  background: #ffffff !important;
+  font-weight: 700;
+  color: #002457 !important;
+}
+.btn:hover {
+  background: rgba(0, 36, 87, 0.05) !important;
+  border-color: #002457 !important;
+}
+
+/* ============================================================
+   ====== Cards ======
+   ============================================================ */
+.cardbox {
+  background: #ffffff;
+  border: 1px solid #e6e9f2;
+  border-radius: 18px;
+  box-shadow: 0 14px 34px rgba(0, 36, 87, 0.07);
+  padding: 12px;
+}
+
+/* ============================================================
+   ====== Layout spacing ======
+   ============================================================ */
+.row { margin-left: -10px; margin-right: -10px; }
+.col-sm-6, .col-sm-12, .col-sm-9, .col-sm-3 { padding-left: 10px; padding-right: 10px; }
+
+/* ============================================================
+   ====== Header con logo ======
+   ============================================================ */
+.topbar{
+  background:#ffffff;
+  border:1px solid #e6e9f2;
+  border-radius:18px;
+  box-shadow:0 14px 34px rgba(0, 36, 87, 0.07);
+  padding:14px 16px;
+  margin-bottom:14px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+}
+.topbar-title{
+  font-size:26px;
+  font-weight:900;
+  color:#002457;
+  line-height:1.1;
+  flex: 1 1 auto;
+}
+.topbar-logo{
+  height:52px;
+  max-width:240px;
+  object-fit:contain;
+  display:block;
+  flex: 0 0 auto;
+}
+
+/* ============================================================
+   ====== Card header (editorial) ======
+   ============================================================ */
+.cardbox-header{
+  padding:10px 12px 6px 12px;
+  border-bottom:1px solid #edf0f7;
+  margin:-12px -12px 10px -12px;
+}
+.cardbox-title{
+  font-size:18px;
+  font-weight:900;
+  color:#002457;
+  line-height:1.15;
+  margin:0;
+}
+.cardbox-subtitle{
+  margin-top:4px;
+  font-size:12px;
+  color:#5f6b7a;
+}
+
+/* ============================================================
+   ====== Plotly ======
+   ============================================================ */
+.plot-container, .svg-container { width: 100% !important; }
+.plotly .main-svg { overflow: visible !important; }
+
+/* ============================================================
+   ====== DataTable: look más “ejecutivo” ======
+   ============================================================ */
+table.dataTable { border-collapse: collapse !important; }
+table.dataTable thead th{
+  background:#f1f3f9;
+  color:#002457;
+  font-weight:800;
+  border-bottom: 1px solid #dfe5f2 !important;
+  border-right: 1px solid #dfe5f2 !important;
+}
+table.dataTable tbody td{
+  font-size:12px;
+  color:#1f2933;
+  border-bottom: 1px solid #edf0f7 !important;
+  border-right: 1px solid #edf0f7 !important;
+}
+table.dataTable tbody tr:hover td{
+  background: #fafbff !important;
+}
+
+/* ============================================================
+   ====== Toggle (switch) elegante: Códigos <-> Etiquetas ======
+   ============================================================ */
+.toggle-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+.toggle-label{
+  font-size: 12px;
+  color: #5f6b7a;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 52px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+.switch input { display:none; }
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #e6e9f2;
+  transition: .25s;
+  border-radius: 999px;
+  border: 1px solid #dfe5f2;
+}
+.slider:before {
+  position: absolute;
+  content: \"\";
+  height: 22px;
+  width: 22px;
+  left: 3px;
+  bottom: 2.5px;
+  background-color: white;
+  transition: .25s;
+  border-radius: 50%;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.12);
+}
+input:checked + .slider {
+  background-color: rgba(0, 36, 87, 0.20);
+  border-color: rgba(0, 36, 87, 0.35);
+}
+input:checked + .slider:before {
+  transform: translateX(23px);
+}
+
+/* ============================================================
+   ====== Diccionario ======
+   ============================================================ */
+.dicc-kv{
+  display:grid;
+  grid-template-columns: 92px 1fr;
+  gap: 6px 10px;
+  font-size: 12px;
+  color: #1f2933;
+}
+.dicc-k{
+  color: #5f6b7a;
+  font-weight: 800;
+}
+.dicc-v{
+  color: #1f2933;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+/* ============================================================
+   DataTable fijo + wrap
+   ============================================================ */
+table.dataTable { table-layout: fixed !important; width: 100% !important; }
+table.dataTable thead th, table.dataTable tbody td{
+  white-space: normal !important;
+  word-wrap: break-word !important;
+  overflow-wrap: anywhere !important;
+}
+
+/* ============================================================
+   ====== KPI BLOCK (Perfil) ======
+   ============================================================ */
+.kpi-block{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  padding-bottom: 6px;
+}
+
+.kpi-block-title{
+  font-size:14px;
+  font-weight:900;
+  color:#002457;
+  line-height:1.15;
+  margin:0;
+}
+
+.kpi-block-subtitle{
+  margin-top:4px;
+  font-size:12px;
+  color:#5f6b7a;
+}
+
+.kpi-n-chip{
+  width:100%;
+  padding:10px 12px;
+  border:1px solid #edf0f7;
+  border-radius:14px;
+  background:#fafbff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.kpi-n-text{
+  font-size:18px;
+  font-weight:900;
+  color:#002457;
+  letter-spacing:0.01em;
+}
+
+/* Donuts como “pareja” */
+.kpi-grid{
+  display:flex;
+  gap:12px;
+  width:100%;
+  align-items:stretch;
+}
+
+.kpi-cell{
+  flex:1 1 0;
+  border:1px solid #edf0f7;
+  border-radius:16px;
+  padding:8px 8px 10px 8px;
+  background:#ffffff;
+}
+
+/* Leyenda más secundaria */
+.kpi-legend{
+  margin-top:6px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px 10px;
+  justify-content:center;
+  font-size:10px;
+  color:#5f6b7a;
+  line-height:1.15;
+}
+
+.kpi-legend-item{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+
+.kpi-legend-swatch{
+  display:inline-block;
+  width:10px;
+  height:10px;
+  border-radius:3px;
+}
+
+/* ====== KPI cell: evitar desbordes del título ====== */
+.kpi-cell{
+  overflow: hidden;
+}
+
+/* plotly title dentro del KPI: wrap fuerte */
+.kpi-cell .plotly .gtitle,
+.kpi-cell .plotly .g-gtitle,
+.kpi-cell .plotly text{
+  white-space: normal !important;
+}
+
+.kpi-cell .plotly{
+  overflow: hidden !important;
+}
+
+/* Título encima del donut (wrap real, centrado) */
+.kpi-donut-title{
+  font-size: 14px;
+  font-weight: 900;
+  color: #002457;
+  text-align: center;
+  line-height: 1.15;
+  margin: 4px 6px 2px 6px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* KPI cell: layout vertical controlado */
+.kpi-cell{
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+/* Centrar encabezados y celdas en DataTable */
+table.dataTable thead th { text-align: center !important; vertical-align: middle !important; }
+table.dataTable tbody td { text-align: center !important; vertical-align: middle !important; }
+
+/* ============================================================
+   ====== PERFIL (nuevo layout horizontal) ======
+   ============================================================ */
+.kpi-profile-row{
+  display:flex;
+  gap:12px;
+  align-items:stretch;
+}
+
+/* Columna izquierda: N (cuasi-cuadrado) */
+.kpi-n-card{
+  flex: 0 0 42%;
+  min-width: 320px;
+  border:1px solid #edf0f7;
+  border-radius:16px;
+  background:#ffffff;
+  padding:12px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+}
+
+/* Título “Perfil de la muestra” arriba del N */
+.kpi-n-card .kpi-block-title{
+  margin:0 0 8px 0;
+}
+
+/* Chip de N más protagonista */
+.kpi-n-chip{
+  padding:18px 14px;
+  border-radius:16px;
+}
+.kpi-n-text{
+  font-size:22px;
+}
+
+/* Columna derecha: dos donuts */
+.kpi-donuts{
+  flex: 1 1 auto;
+  display:flex;
+  gap:12px;
+  align-items:stretch;
+}
+
+/* Cada donut mantiene estética actual */
+.kpi-donuts .kpi-cell{
+  flex:1 1 0;
+  min-width: 260px;
+}
+
+/* ============================================================
+   ====== RESUMEN SECCIÓN: lista de filas ======
+   ============================================================ */
+.section-summary{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+/* Cada fila editorial */
+.summary-row{
+  border:1px solid #edf0f7;
+  border-radius:16px;
+  background:#ffffff;
+  padding:10px 12px;
+  box-shadow: 0 10px 22px rgba(0, 36, 87, 0.04);
+}
+
+/* Título de la fila (wrap fuerte) */
+.summary-row-title{
+  font-size:13px;
+  font-weight:900;
+  color:#002457;
+  line-height:1.2;
+  margin:0 0 6px 0;
+  overflow-wrap:anywhere;
+}
+
+/* Subtítulo (SO vs SM) */
+.summary-row-subtitle{
+  font-size:11px;
+  color:#5f6b7a;
+  font-weight:700;
+  margin:0 0 8px 0;
+}
+
+/* Contenedor del plot: alto fijo para consistencia */
+.summary-row-plot{
+  height:84px;
+  overflow:hidden;
+}
+
+/* ====== Plotly: texto dentro de barras ====== */
+.plotly text{
+  font-weight:800 !important;
+}
+
+/* Evita recortes raros de svg */
+.plotly .main-svg{
+  overflow: visible !important;
+}
+
+/* ====== Plotly hover: look limpio ====== */
+.plotly .hoverlayer .hovertext{
+  font-family: Arial, sans-serif !important;
+  border-radius: 10px !important;
+}
+
+/* ====== DT centrado total ====== */
+table.dataTable thead th,
+table.dataTable tbody td{
+  text-align:center !important;
+  vertical-align:middle !important;
+}
+
+/* ============================================================
+   Sidebar KPI stack: todo estira al mismo ancho
+   ============================================================ */
+.kpi-sidebar-stack{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Los 3 bloques deben tener el mismo ancho */
+.kpi-n-card,
+.kpi-cell{
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* N centrado y sin “sobresalirse” */
+.kpi-n-card{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px 10px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Texto N */
+.kpi-n-text{
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.2;
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Donut title centrado */
+.kpi-donut-title{
+  text-align: center;
+}
+
+/* ============================================================
+   ====== PATCH FINAL KPI SIDEBAR (NO ROMPER NADA) ======
+   ============================================================ */
+.sidebarPanel .cardbox{ overflow:hidden; }
+.kpi-sidebar-stack .kpi-profile-row{ display:block !important; }
+.kpi-sidebar-stack .kpi-donuts{ display:block !important; }
+
+.kpi-sidebar-stack .kpi-n-card{
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 12px 12px !important;
+  border-radius: 16px !important;
+}
+
+.kpi-sidebar-stack .kpi-n-chip{
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  justify-content: center !important;
+}
+
+.kpi-sidebar-stack .kpi-n-text{
+  width: 100% !important;
+  text-align: center !important;
+  max-width: 100% !important;
+  white-space: normal !important;
+  word-break: break-word !important;
+  font-weight: 900 !important;
+  font-size: 18px !important;
+}
+
+.kpi-sidebar-stack .kpi-cell{
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+}
+
+.kpi-sidebar-stack .plotly.html-widget,
+.kpi-sidebar-stack .plot-container,
+.kpi-sidebar-stack .svg-container{
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.kpi-sidebar-stack .kpi-cell{ overflow:hidden !important; }
+
+/* ============================================================
+   PATCH EXTRA: evitar KPIs “comprimidos” en sidebar
+   ============================================================ */
+.kpi-sidebar-stack .kpi-cell{
+  min-height: 310px;
+  padding: 10px 10px 12px 10px;
+  gap: 6px;
+}
+
 #kpi_plot_1, #kpi_plot_2{
   height: 210px !important;
   min-height: 210px !important;
 }
 
-/* Fuerza la altura del contenedor interno de Plotly */
 #kpi_plot_1 .plot-container,
 #kpi_plot_2 .plot-container,
 #kpi_plot_1 .svg-container,
@@ -1632,15 +1654,13 @@ reporte_interactivo <- function(
   min-height: 210px !important;
 }
 
-/* Evita que el widget “se estire raro” o se encoja en flex */
 .kpi-sidebar-stack .plotly.html-widget{
   width: 100% !important;
   max-width: 100% !important;
   flex: 0 0 auto !important;
 }
 
-/* IMPORTANTE: para donuts, permitir overflow visible del SVG,
-   porque recortar aquí los hace verse “aplastados” */
+/* IMPORTANTE: para donuts, permitir overflow visible del SVG */
 .kpi-sidebar-stack .kpi-cell{
   overflow: visible !important;
 }
@@ -1652,17 +1672,12 @@ reporte_interactivo <- function(
 
 /* ============================================================
    FIX: leyenda KPI no se corta (sidebar)
-   - La card permite scroll suave SOLO si la leyenda crece mucho.
-   - El donut mantiene su alto fijo.
    ============================================================ */
-
-/* La card ya no “corta” el contenido inferior */
 .kpi-sidebar-stack .kpi-cell{
   overflow: visible !important;
-  padding-bottom: 14px !important;  /* aire para la leyenda */
+  padding-bottom: 14px !important;
 }
 
-/* La leyenda puede ocupar más líneas sin recortarse */
 .kpi-sidebar-stack .kpi-legend{
   margin-top: 8px !important;
   padding-bottom: 6px !important;
@@ -1670,13 +1685,11 @@ reporte_interactivo <- function(
   white-space: normal !important;
 }
 
-/* Si la leyenda se vuelve muy larga: scroll interno en vez de corte */
 .kpi-sidebar-stack .kpi-cell .kpi-legend{
-  max-height: 90px;       /* ajusta 70–120 según te guste */
+  max-height: 90px;
   overflow-y: auto;
 }
 
-/* Mantener el donut estable */
 #kpi_plot_1, #kpi_plot_2{
   height: 210px !important;
   min-height: 210px !important;
@@ -1694,19 +1707,15 @@ reporte_interactivo <- function(
 }
 
 /* ===== KPI sidebar: más alto real + nada de recorte ===== */
-
-/* 1) No recortar dentro de la card del KPI */
 .kpi-sidebar-stack .kpi-cell{
   overflow: visible !important;
   padding-bottom: 14px !important;
 }
 
-/* 2) Asegurar que el plotlyOutput respete el alto nuevo */
 #kpi_plot_1, #kpi_plot_2{
   height: 260px !important;
   min-height: 260px !important;
 }
-
 #kpi_plot_1 .plot-container,
 #kpi_plot_2 .plot-container,
 #kpi_plot_1 .svg-container,
@@ -1715,7 +1724,6 @@ reporte_interactivo <- function(
   min-height: 260px !important;
 }
 
-/* 3) La leyenda puede ocupar 2–3 líneas sin cortarse */
 .kpi-sidebar-stack .kpi-legend{
   margin-top: 8px !important;
   padding-bottom: 8px !important;
@@ -1723,33 +1731,24 @@ reporte_interactivo <- function(
   white-space: normal !important;
 }
 
-/* 4) Si el contenedor general del sidebar está cortando (muy común) */
 .sidebarPanel .cardbox{
   overflow: visible !important;
 }
 
 /* ============================================================
    ====== PATCH KPI SIDEBAR v2 (leyenda DENTRO y completa) ======
-   - La leyenda NO debe salir del bloque.
-   - El bloque debe tener altura suficiente para donut + leyenda.
-   - El plot se hace un poco más bajo para “dejar aire” abajo.
    ============================================================ */
-
-/* 1) El KPI card SÍ contiene (no deja que la leyenda se salga) */
 .kpi-sidebar-stack .kpi-cell{
-  overflow: hidden !important;     /* clave: todo queda dentro del borde */
+  overflow: hidden !important;
   height: auto !important;
-  min-height: 340px !important;    /* ajusta si tu leyenda es muy larga */
-  padding-bottom: 14px !important; /* aire para leyenda */
+  min-height: 340px !important;
+  padding-bottom: 14px !important;
 }
 
-/* 2) El plot dentro del KPI se hace un poco más bajo */
 #kpi_plot_1, #kpi_plot_2{
   height: 220px !important;
   min-height: 220px !important;
 }
-
-/* Asegura que plotly respete el alto */
 #kpi_plot_1 .plot-container,
 #kpi_plot_2 .plot-container,
 #kpi_plot_1 .svg-container,
@@ -1758,7 +1757,6 @@ reporte_interactivo <- function(
   min-height: 220px !important;
 }
 
-/* 3) Leyenda: dentro, con padding y wrap */
 .kpi-sidebar-stack .kpi-legend{
   margin-top: 8px !important;
   padding: 0 8px 10px 8px !important;
@@ -1767,14 +1765,12 @@ reporte_interactivo <- function(
   justify-content: center !important;
 }
 
-/* 4) IMPORTANTÍSIMO: si antes dejaste esto en “visible”, lo anulamos aquí */
 .sidebarPanel .cardbox{
-  overflow: hidden !important;     /* el contenedor general no debe dejar “flotar” cosas */
+  overflow: hidden !important;
 }
 
 /* ============================================================
    FIX RESUMEN: Select_multiple con múltiples barras
-   - No rompe SO (solo aplica cuando existe .sm-card-inner)
    ============================================================ */
 .summary-row-plot:has(.sm-card-inner){
   height: auto !important;
@@ -1794,24 +1790,21 @@ reporte_interactivo <- function(
   overflow: visible !important;
 }
 
+/* ============================================================
+   Respiración general arriba
+   ============================================================ */
+body{ padding-top: 14px; }
 
-/* Respiración general arriba */
-body{
-  padding-top: 14px;
-}
-
-/* Topbar: más aire y menos sensación de “pegado” */
+/* Topbar: más aire */
 .topbar{
-  padding: 18px 18px;         /* antes 14px 16px */
-  margin-bottom: 16px;         /* antes 14px */
+  padding: 18px 18px;
+  margin-bottom: 16px;
 }
+.topbar-title{ padding-top: 2px; }
 
-/* Título un poco más relajado (sin aplastarlo) */
-.topbar-title{
-  padding-top: 2px;
-}
-
-/* Contenedor nav: darle aire */
+/* ============================================================
+   Contenedor nav: darle aire
+   ============================================================ */
 .navbar{
   background: transparent !important;
   border: none !important;
@@ -1819,7 +1812,7 @@ body{
   margin-bottom: 18px !important;
 }
 
-/* UL de tabs: que parezca barra moderna */
+/* UL de tabs: barra moderna */
 .navbar .navbar-nav{
   display: flex;
   gap: 8px;
@@ -1832,7 +1825,7 @@ body{
   box-shadow: 0 14px 34px rgba(0, 36, 87, 0.06);
 }
 
-/* Cada tab como “pill” */
+/* Tab como “pill” */
 .navbar .navbar-nav > li > a{
   border-radius: 999px !important;
   padding: 10px 14px !important;
@@ -1842,13 +1835,13 @@ body{
   border: 1px solid transparent !important;
 }
 
-/* Hover elegante */
+/* Hover */
 .navbar .navbar-nav > li > a:hover{
   background: rgba(0, 36, 87, 0.06) !important;
   border-color: rgba(0, 36, 87, 0.12) !important;
 }
 
-/* Tab activa: pill sólida suave */
+/* Activo: pill sólida suave */
 .navbar .navbar-nav > .active > a,
 .navbar .navbar-nav > .active > a:focus,
 .navbar .navbar-nav > .active > a:hover{
@@ -1857,7 +1850,7 @@ body{
   color: #002457 !important;
 }
 
-/* El navbar NO debe tener padding propio */
+/* Navbar sin padding propio */
 .navbar{
   padding-left: 0 !important;
   padding-right: 0 !important;
@@ -1871,7 +1864,7 @@ body{
 
 /* Match exacto con sidebar */
 .navbar .navbar-nav{
-  padding-left: 10px;   /* prueba 10–12 si quieres microajuste */
+  padding-left: 10px;
 }
 
 .col-sm-3, .col-sm-9{
@@ -1879,25 +1872,286 @@ body{
   padding-right: 10px;
 }
 
-/* ====== Alineación navbar con sidebar ====== */
+/* ============================================================
+   PATCH NAV + TOPBAR (sin romper pestañas)
+   ============================================================ */
+body{ padding-top: 10px; }
 
-/* El navbar no debe empujar el contenido */
+.topbar{
+  margin-top: 6px;
+  padding: 16px 18px;
+}
+
+.topbar-title{
+  font-size: 28px;
+  line-height: 1.12;
+}
+.topbar-logo{
+  margin-right: 2px;
+}
+
 .navbar{
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  margin-bottom: 14px !important;
+  min-height: auto !important;
+}
+
+.navbar > .container-fluid{
   padding-left: 0 !important;
   padding-right: 0 !important;
 }
 
-/* El UL de pestañas empieza donde empieza el sidebar */
-.navbar .navbar-nav{
+.navbar .nav{
   margin-left: 0 !important;
-  padding-left: 10px;   /* mismo padding que columnas */
-  padding-right: 10px;
 }
 
+.navbar .nav > li > a{
+  color: #002457 !important;
+  font-weight: 900 !important;
+  font-size: 14px;
+  padding: 10px 14px !important;
+  margin-right: 6px;
+  border-radius: 12px;
+  border-bottom: 3px solid transparent;
+  background: transparent !important;
+}
 
-  "))
+.navbar .nav > li > a:hover{
+  background: rgba(0, 36, 87, 0.05) !important;
+  border-bottom-color: rgba(0, 36, 87, 0.18);
+}
+
+.navbar .nav > li.active > a,
+.navbar .nav > li.active > a:hover,
+.navbar .nav > li.active > a:focus{
+  background: rgba(0, 36, 87, 0.08) !important;
+  border-bottom-color: #002457 !important;
+  color: #002457 !important;
+  box-shadow: none !important;
+}
+
+.navbar .nav{
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e6e9f2;
+}
+
+.container-fluid{
+  padding-left: 15px;
+  padding-right: 15px;
+}
+
+.navbar > .container-fluid{
+  padding-left: 15px !important;
+  padding-right: 15px !important;
+}
+
+/* ============================================================
+   NAVBAR COMO TOGGLE (Apple-ish) + SIN LÍNEA AZUL
+   ============================================================ */
+.navbar{
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  margin-bottom: 14px !important;
+  min-height: auto !important;
+}
+
+.navbar > .container-fluid{
+  padding-left: 15px !important;
+  padding-right: 15px !important;
+}
+
+.navbar .nav{
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+}
+
+.navbar .nav.navbar-nav{
+  position: relative;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(230, 233, 242, 0.85);
+  border: 1px solid #e6e9f2;
+  box-shadow: 0 10px 22px rgba(0, 36, 87, 0.06);
+}
+
+.navbar .nav.navbar-nav::before{
+  content: \"\";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  height: calc(100% - 6px);
+  width: var(--pill-w, 0px);
+  transform: translateX(var(--pill-x, 0px));
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 36, 87, 0.10);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.10);
+  transition: transform 220ms cubic-bezier(.2,.9,.2,1),
+              width 220ms cubic-bezier(.2,.9,.2,1);
+  z-index: 0;
+}
+
+.navbar .nav > li{
+  position: relative;
+  z-index: 1;
+}
+
+.navbar .nav > li > a{
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+
+  color: #002457 !important;
+  font-weight: 900 !important;
+  font-size: 13px;
+  padding: 8px 14px !important;
+  border-radius: 999px;
+  line-height: 1;
+}
+
+.navbar .nav > li > a:hover{
+  background: rgba(0, 36, 87, 0.06) !important;
+}
+
+.navbar .nav > li.active > a,
+.navbar .nav > li.active > a:hover,
+.navbar .nav > li.active > a:focus{
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.navbar .nav > li.active > a{
+  color: #002457 !important;
+}
+
+.navbar .nav > li > a{
+  border-bottom: 0 !important;
+}
+
+")),
+
+      # ============================================================
+      # JS (NUEVO, robusto): asegura que el pill siga al tab activo
+      # ============================================================
+      shiny::tags$script(shiny::HTML("
+(function(){
+  function getNav(){
+    return document.querySelector('.navbar .nav.navbar-nav') ||
+           document.querySelector('.navbar .nav'); // fallback
+  }
+
+  function getActiveLink(nav){
+    if(!nav) return null;
+    return nav.querySelector('li.active > a') ||
+           nav.querySelector('li.active a') ||
+           nav.querySelector('a[aria-selected=\"true\"]');
+  }
+
+  function updatePill(){
+    var nav = getNav();
+    if(!nav) return;
+
+    // Solo tiene sentido si el CSS del pill existe (navbar-nav::before)
+    // Igual calculamos siempre, no rompe nada.
+    var active = getActiveLink(nav);
+    if(!active) return;
+
+    var navRect = nav.getBoundingClientRect();
+    var aRect   = active.getBoundingClientRect();
+
+    // Posición relativa
+    var x = (aRect.left - navRect.left);
+    var w = aRect.width;
+
+    nav.style.setProperty('--pill-x', x + 'px');
+    nav.style.setProperty('--pill-w', w + 'px');
+  }
+
+  function bindNavClicks(){
+    // Si el cambio de tab se da por click, recalculamos al toque
+    document.addEventListener('click', function(e){
+      var a = e.target && (e.target.closest ? e.target.closest('.navbar a') : null);
+      if(!a) return;
+
+      // Dejamos que Bootstrap/Shiny cambien la clase active, luego recalculamos
+      setTimeout(updatePill, 0);
+      setTimeout(updatePill, 50);
+      setTimeout(updatePill, 120);
+    }, true);
+  }
+
+  function observeActiveChanges(){
+    var nav = getNav();
+    if(!nav || !window.MutationObserver) return;
+
+    var obs = new MutationObserver(function(muts){
+      // Si cambió clase/atributos dentro del nav, recalculamos
+      var should = muts.some(function(m){
+        return m.type === 'attributes' || m.type === 'childList';
+      });
+      if(should){
+        // micro-debounce
+        window.requestAnimationFrame(updatePill);
+      }
+    });
+
+    obs.observe(nav, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['class','style','aria-selected']
+    });
+  }
+
+  // 1) Primer render
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(updatePill, 80);
+    setTimeout(updatePill, 200);
+    bindNavClicks();
+    observeActiveChanges();
+  });
+
+  // 2) Si Bootstrap emite evento al cambiar tab (algunas versiones sí)
+  document.addEventListener('shown.bs.tab', function(){
+    setTimeout(updatePill, 0);
+  });
+
+  // 3) Cuando Shiny actualiza UI (tabs dinámicas / re-render)
+  if(window.Shiny){
+    // cada vez que Shiny “da valor” a algo, puede haberse movido el layout
+    document.addEventListener('shiny:value', function(){
+      setTimeout(updatePill, 0);
+      setTimeout(updatePill, 80);
+    });
+
+    // cuando Shiny termina de hacer binding del DOM
+    document.addEventListener('shiny:connected', function(){
+      setTimeout(updatePill, 120);
+    });
+  }
+
+  // 4) Resize
+  window.addEventListener('resize', function(){
+    updatePill();
+  });
+
+})();
+"))
+
+
     ),
 
+    # ============================================================
+    # Header
+    # ============================================================
     shiny::div(
       class = "topbar",
       shiny::div(class = "topbar-title", titulo),
@@ -1909,7 +2163,9 @@ body{
       )
     ),
 
-    # ✅ navbar dinámica SIN args nombrados para tabPanels (evita buildTabset error)
+    # ============================================================
+    # Navbar dinámico
+    # ============================================================
     do.call(
       shiny::navbarPage,
       c(
@@ -1918,6 +2174,7 @@ body{
       )
     )
   )
+
 
   # ------------------------------- SERVER ------------------------------------
   server <- function(input, output, session) {
