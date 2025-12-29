@@ -9,7 +9,7 @@ render_bloques_kable(
   max_casos = 10,
   mostrar_aleatorios_si_cero = 0,
   fallback_df = NULL,
-  cols_id = c("_uuid", "_index", "Codigo pulso", "Código pulso"),
+  cols_id = c("_uuid", "_index", "Pulso_code", "Codigo pulso", "Código pulso"),
   cols_interes = NULL,
   seed = NULL,
   alto_resumen = "280px",
@@ -20,45 +20,6 @@ render_bloques_kable(
   usar_mapeo = FALSE
 )
 }
-\arguments{
-\item{bloques}{\code{tibble} de \code{reporte_bloques()} (columna lista \code{casos} requerida).}
-
-\item{max_casos}{Máximo de filas a mostrar por bloque.}
-
-\item{mostrar_aleatorios_si_cero}{N filas aleatorias si el bloque no tiene casos (0 = ninguna).}
-
-\item{fallback_df}{\code{data.frame} alterno para muestrear si \code{mostrar_aleatorios_si_cero > 0}.}
-
-\item{cols_id}{Columnas preferidas a mostrar primero.}
-
-\item{cols_interes}{Columnas adicionales a intentar incluir en \code{casos}.}
-
-\item{seed}{Semilla para muestreos reproducibles.}
-
-\item{alto_resumen, ancho_resumen}{Tamaño del contenedor scroll del resumen.}
-
-\item{alto_casos, ancho_casos}{Tamaño del contenedor scroll de los casos.}
-
-\item{map_clean_to_original}{data.frame con \code{clean} y \code{original} (mapeo opcional visual).}
-
-\item{usar_mapeo}{Si \code{TRUE}, aplica el mapeo anterior en los nombres mostrados.}
-}
-\value{
-\code{invisible(NULL)}; imprime HTML en el visor.
-}
 \description{
-Imprime:
-\itemize{
-\item Un \strong{resumen} por regla (id, tabla, variables, n y \%),
-\item Una \strong{tabla de casos} (hasta \code{max_casos} filas).
-}
-}
-\details{
-Funciona con estudios con una sola hoja o con \strong{repeats}.
-}
-\examples{
-\dontrun{
-b <- reporte_bloques(ev, solo_relevantes = TRUE)
-render_bloques_kable(b, max_casos = 15)
-}
+Renderizar bloques en HTML (kableExtra)
 }

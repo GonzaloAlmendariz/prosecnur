@@ -2,11 +2,11 @@
 % Please edit documentation in R/evaluacion_data.R
 \name{.san_label}
 \alias{.san_label}
-\title{Saneador de etiquetas (objetivo, etc.)}
+\title{Saneador de etiquetas}
 \usage{
 .san_label(s)
 }
 \description{
-Saneador de etiquetas (objetivo, etc.)
+Saneador de etiquetas
 }
 \keyword{internal}

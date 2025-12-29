@@ -4,12 +4,14 @@
 \alias{auditar_regla}
 \title{Auditar reglas: nombre, objetivo, expresión y casos}
 \usage{
-auditar_regla(ev, ids, verbose = TRUE)
+auditar_regla(ev, ids, inst = NULL, verbose = TRUE)
 }
 \arguments{
 \item{ev}{Objeto de evaluar_consistencia()}
 
 \item{ids}{Vector de IDs de regla (p.ej. c("INSE_025","ATRI_001"))}
+
+\item{inst}{Instrumento. Si es NULL se intenta usar ev$inst.}
 
 \item{verbose}{Si TRUE imprime por regla (formato texto plano)}
 }

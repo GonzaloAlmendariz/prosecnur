@@ -907,13 +907,15 @@ observaciones_regla <- function(evaluacion,
   codigo_alias <- c("Codigo pulso","Código pulso","Codigo_pulso","codigo_pulso","codigo.pulso")
   codigo_col <- codigo_alias[codigo_alias %in% names(df)][1] %||% NULL
 
-  keep <- unique(na.omit(c("_uuid","_id", codigo_col, var1, var2, var3,
-                           paste0(var1,"_label"), paste0(var2,"_label"), paste0(var3,"_label"))))
+  keep <- unique(na.omit(c(
+    "_uuid","_id","_index",
+    codigo_col,
+    var1, var2, var3,
+    paste0(var1,"_label"), paste0(var2,"_label"), paste0(var3,"_label")
+  )))
   keep <- keep[keep %in% names(df)]
-  if (!length(keep)) keep <- intersect(c("_uuid","_id"), names(df))
+  if (!length(keep)) keep <- intersect(c("_uuid","_id","_index"), names(df))
   out <- tibble::as_tibble(df[inc, keep, drop = FALSE])
-  if (isTRUE(incluir_flag)) out[[flag_name]] <- df[[flag_name]][inc]
-  out
 }
 
 # -------------------------------------------------------------------
@@ -948,8 +950,11 @@ total_inconsistencias <- function(evaluacion) {
 
 # -------------------------------------------------------------------
 # Render de bloques (kable/HTML) y construcción de bloques
+# - Metodología nueva: variables de apertura vienen de inst$meta$groups_detail$relevant_vars
+#   (mapeo regla -> grupo via prefijo en inst$meta$section_map)
 # -------------------------------------------------------------------
 
+`%||%` <- function(a,b) if (is.null(a) || (length(a)==1 && is.na(a))) b else a
 
 # coalesce que ignora columnas ausentes
 .safe_coalesce <- function(df, cols, fill = NA_character_) {
@@ -969,7 +974,7 @@ total_inconsistencias <- function(evaluacion) {
   df
 }
 
-#' Saneador de etiquetas (objetivo, etc.)
+#' Saneador de etiquetas
 #' @keywords internal
 .san_label <- function(s) {
   s <- as.character(s %||% "")
@@ -979,32 +984,121 @@ total_inconsistencias <- function(evaluacion) {
   trimws(gsub("\\s+", " ", s, perl = TRUE))
 }
 
-# Helpers
-`%||%` <- function(a,b) if (is.null(a) || (length(a)==1 && is.na(a))) b else a
-coalesce2 <- function(...) Reduce(dplyr::coalesce, list(...))
+# helper: resolver tabla desde evaluacion$datos_tablas por nombre (case-insensitive)
+.get_tabla_eval <- function(evaluacion, tabla){
+  nms <- names(evaluacion$datos_tablas %||% list())
+  if (!length(nms)) return(NULL)
+
+  tab_norm <- as.character(tabla %||% "(principal)")
+  tab_norm <- if (tolower(tab_norm) %in% c("(principal)","principal","main")) "principal" else tab_norm
+
+  j <- match(tolower(tab_norm), tolower(nms))
+  if (!is.na(j)) return(evaluacion$datos_tablas[[nms[j]]])
+
+  NULL
+}
+
+.enrich_casos_with_vars <- function(casos, base_df, vars){
+  if (!is.data.frame(casos) || !nrow(casos)) return(casos)
+  if (!is.data.frame(base_df) || !nrow(base_df)) return(casos)
+  if (!length(vars)) return(casos)
+
+  vars <- unique(vars)
+  vars <- vars[vars %in% names(base_df)]
+  if (!length(vars)) return(casos)
+
+  # elegir llave común (orden de preferencia)
+  keys <- c("_uuid","_id","_index")
+  key  <- keys[keys %in% names(casos) & keys %in% names(base_df)][1] %||% NA_character_
+  if (is.na(key)) return(casos)
+
+  # evitar duplicar cols ya presentes en casos
+  vars2 <- setdiff(vars, names(casos))
+  if (!length(vars2)) return(casos)
+
+  dplyr::left_join(
+    casos,
+    dplyr::select(base_df, dplyr::all_of(c(key, vars2))),
+    by = key
+  )
+}
+
+# --- NUEVO: construir “diccionario de secciones” desde inst ---
+.inst_section_dict <- function(inst){
+  sm <- inst$meta$section_map
+  gd <- inst$meta$groups_detail
+
+  # prefijo -> grupo
+  prefix_to_group <- stats::setNames(sm$group_name, sm$prefix)
+
+  # grupo -> relevant expression (texto)
+  group_to_relevant_expr <- stats::setNames(sm$group_relevant, sm$group_name)
+
+  # grupo -> relevant_vars (lista) desde groups_detail (ya viene parseado)
+  gd_key <- match(sm$group_name, gd$gname)
+  rel_vars_list <- vector("list", nrow(sm))
+  for (i in seq_len(nrow(sm))) {
+    j <- gd_key[i]
+    rel_vars_list[[i]] <- if (!is.na(j)) gd$relevant_vars[[j]] else character(0)
+  }
+  group_to_vars <- stats::setNames(rel_vars_list, sm$group_name)
+
+  list(
+    prefix_to_group = prefix_to_group,
+    group_to_relevant_expr = group_to_relevant_expr,
+    group_to_vars = group_to_vars
+  )
+}
+
+# --- NUEVO: regla -> grupo por prefijo (DETA_, ACCE_, etc.)
+.inst_group_from_id <- function(id_regla, dict){
+  id <- as.character(id_regla %||% "")
+  if (!nzchar(id)) return(NA_character_)
+  prefs <- names(dict$prefix_to_group)
+  prefs <- prefs[nzchar(prefs)]
+  if (!length(prefs)) return(NA_character_)
+  hit <- prefs[startsWith(id, prefs)]
+  if (!length(hit)) return(NA_character_)
+  hit <- hit[which.max(nchar(hit))]
+  unname(dict$prefix_to_group[[hit]])
+}
+
+# --- NUEVO: vars apertura esperadas según inst (por regla)
+.inst_apertura_vars_for_rule <- function(id_regla, dict){
+  g <- .inst_group_from_id(id_regla, dict)
+  if (is.na(g) || !nzchar(g)) return(character(0))
+  v <- dict$group_to_vars[[g]] %||% character(0)
+  v <- as.character(v)
+  v[nzchar(v)]
+}
+
+# --- NUEVO: “condicion de apertura” (texto) según inst, para mostrar en render si se quiere
+.inst_apertura_expr_for_rule <- function(id_regla, dict){
+  g <- .inst_group_from_id(id_regla, dict)
+  if (is.na(g) || !nzchar(g)) return(NA_character_)
+  as.character(dict$group_to_relevant_expr[[g]] %||% NA_character_)
+}
 
 #' Construir bloques por regla (resumen + casos)
 #'
-#' Une \code{evaluacion$resumen} con \code{evaluacion$reglas_meta} para cada regla
-#' y agrega una columna \code{casos} con las filas inconsistentes (vía
-#' \code{observaciones_regla()}) de la **tabla correcta**. Robusto a repeats.
+#' Metodología nueva:
+#' - Las variables usadas para abrir la sección se toman del instrumento (inst),
+#'   usando inst$meta$groups_detail$relevant_vars.
+#' - Se agregan a casos con join seguro contra evaluacion$datos_tablas.
 #'
-#' @param evaluacion Lista devuelta por \code{evaluar_consistencia()}.
-#' @param familias Vector de filtros regex aplicados sobre \code{Tipo}.
-#' @param ids Vector de \code{id_regla} o \code{nombre_regla} a mantener.
-#' @param solo_relevantes Si `TRUE`, conserva sólo reglas con \code{n_inconsistencias > 0}.
-#' @param incluir_solo_inconsistentes Si `TRUE`, no construye \code{casos} cuando n=0.
-#' @param incluir_reglas_sin_casos Si `FALSE`, descarta reglas sin filas en \code{casos}.
-#' @param contar_na_como_inconsistencia Si `TRUE`, los NA cuentan como inconsistencia al construir \code{casos}.
-#' @param ordenar Criterio: \code{"n_desc"} o \code{"id_asc"}.
-#' @return `tibble` con metadatos de regla + columna lista `casos`.
+#' @param evaluacion Lista devuelta por evaluar_consistencia().
+#' @param inst Objeto instrumento (inst) leído por tu lector.
+#' @param familias Vector de filtros regex aplicados sobre Tipo.
+#' @param ids Vector de id_regla o nombre_regla a mantener.
+#' @param solo_relevantes Si TRUE, conserva sólo reglas con n_inconsistencias > 0.
+#' @param incluir_solo_inconsistentes Si TRUE, no construye casos cuando n=0.
+#' @param incluir_reglas_sin_casos Si FALSE, descarta reglas sin filas en casos.
+#' @param contar_na_como_inconsistencia Si TRUE, NA cuenta al construir casos.
+#' @param ordenar "n_desc" o "id_asc".
+#' @return tibble con metadatos + columna lista casos.
 #' @export
-#' @examples
-#' \dontrun{
-#' bloques <- reporte_bloques(evaluacion = ev, solo_relevantes = TRUE)
-#' str(bloques$casos[[1]])
-#' }
 reporte_bloques <- function(evaluacion,
+                            inst,
                             familias = NULL,
                             ids = NULL,
                             solo_relevantes = FALSE,
@@ -1016,12 +1110,15 @@ reporte_bloques <- function(evaluacion,
   ordenar <- match.arg(ordenar)
   stopifnot(is.list(evaluacion),
             all(c("resumen","reglas_meta","datos_tablas") %in% names(evaluacion)))
+  stopifnot(is.list(inst), !is.null(inst$meta))
+
+  dict_inst <- .inst_section_dict(inst)
 
   res  <- evaluacion$resumen
   meta <- evaluacion$reglas_meta
   if (!nrow(res)) return(tibble::tibble())
 
-  # --- Filtros opcionales (ser tolerantes si 'tipo_observacion' no está) ---
+  # --- Filtros opcionales ---
   if (!"tipo_observacion" %in% names(res) && "Tipo" %in% names(res)) {
     res$tipo_observacion <- res$Tipo
   }
@@ -1042,19 +1139,20 @@ reporte_bloques <- function(evaluacion,
   # --- Join metadatos ---
   bloques <- dplyr::left_join(res, meta, by = c("id_regla","nombre_regla"))
 
-  # --- Asegurar columnas antes de usarlas (clave para evitar el error) ---
+  # --- Asegurar columnas antes de normalizar ---
   need_chr <- c(
     "tabla","tabla.x","tabla.y","Hoja base",
     "seccion","seccion.x","seccion.y",
     "categoria","categoria.x","categoria.y",
     "tipo_observacion","tipo_observacion.x","tipo_observacion.y","Tipo",
-    "objetivo","Objetivo"
+    "objetivo","Objetivo",
+    "procesamiento"
   )
   for (nm in need_chr) {
     if (!nm %in% names(bloques)) bloques[[nm]] <- NA_character_
   }
 
-  # --- Normalización de columnas canónicas ---
+  # --- Normalización canónica ---
   bloques <- dplyr::mutate(
     bloques,
     tabla            = dplyr::coalesce(.data$tabla, .data$tabla.x, .data$tabla.y, .data$`Hoja base`, "(principal)"),
@@ -1064,70 +1162,76 @@ reporte_bloques <- function(evaluacion,
     objetivo         = dplyr::coalesce(.data$objetivo, .data$Objetivo)
   )
 
-  # --- Construir lista de casos por regla ---
+  # --- NUEVO: cond. de apertura desde inst (texto) ---
+  #     (solo para mostrar/depurar; no es necesario para el join)
+  bloques$condicion_apertura <- vapply(
+    bloques$id_regla,
+    function(id) .inst_apertura_expr_for_rule(id, dict_inst),
+    character(1)
+  )
+
+  # --- NUEVO: vars de apertura desde inst (lista) ---
+  bloques$vars_apertura <- lapply(
+    bloques$id_regla,
+    function(id) .inst_apertura_vars_for_rule(id, dict_inst)
+  )
+
+  # --- Construir casos por regla + enriquecer con vars apertura ---
   bloques$casos <- lapply(seq_len(nrow(bloques)), function(i) {
-    if (!incluir_solo_inconsistentes && (bloques$n_inconsistencias[i] %||% 0L) == 0L) {
+
+    if (isTRUE(incluir_solo_inconsistentes) && (bloques$n_inconsistencias[i] %||% 0L) == 0L) {
       return(tibble::tibble())
     }
-    observaciones_regla(
+
+    casos <- observaciones_regla(
       evaluacion = evaluacion,
       regla = bloques$id_regla[i],
       por = "id_regla",
       incluir_flag = FALSE,
       contar_na_como_inconsistencia = contar_na_como_inconsistencia
     )
+
+    if (!is.data.frame(casos) || !nrow(casos)) return(casos)
+
+    base_df <- .get_tabla_eval(evaluacion, bloques$tabla[i])
+    if (is.null(base_df)) return(casos)
+
+    # vars apertura (inst) filtradas a las que realmente existen en base_df
+    must <- bloques$vars_apertura[[i]] %||% character(0)
+    must <- unique(as.character(must))
+    must <- must[nzchar(must)]
+    must <- must[must %in% names(base_df)]
+    if (!length(must)) return(casos)
+
+    # opcional: intentar *_label si existieran en base_df
+    must_plus <- unique(c(must, paste0(must, "_label")))
+
+    .enrich_casos_with_vars(casos, base_df, must_plus)
   })
 
   if (!incluir_reglas_sin_casos) {
-    keep <- vapply(bloques$casos, function(df) nrow(df) > 0, TRUE)
+    keep <- vapply(bloques$casos, function(df) is.data.frame(df) && nrow(df) > 0, TRUE)
     bloques <- bloques[keep, , drop = FALSE]
   }
 
-  # --- Orden final y selección de columnas visibles "limpias" ---
+  # --- Orden final ---
   if (identical(ordenar, "n_desc")) {
     bloques <- dplyr::arrange(bloques, dplyr::desc(.data$n_inconsistencias), .data$id_regla)
   } else {
     bloques <- dplyr::arrange(bloques, .data$id_regla)
   }
 
-  # dejamos columnas canónicas primero; las _x/_y quedan para depurar si quieres
-  # (si prefieres ocultarlas del todo, agrega un select(-any_of(...)))
   bloques
 }
 
-
 #' Renderizar bloques en HTML (kableExtra)
-#'
-#' Imprime:
-#' - Un **resumen** por regla (id, tabla, variables, n y %),
-#' - Una **tabla de casos** (hasta \code{max_casos} filas).
-#'
-#' Funciona con estudios con una sola hoja o con **repeats**.
-#'
-#' @param bloques `tibble` de \code{reporte_bloques()} (columna lista `casos` requerida).
-#' @param max_casos Máximo de filas a mostrar por bloque.
-#' @param mostrar_aleatorios_si_cero N filas aleatorias si el bloque no tiene casos (0 = ninguna).
-#' @param fallback_df `data.frame` alterno para muestrear si \code{mostrar_aleatorios_si_cero > 0}.
-#' @param cols_id Columnas preferidas a mostrar primero.
-#' @param cols_interes Columnas adicionales a intentar incluir en \code{casos}.
-#' @param seed Semilla para muestreos reproducibles.
-#' @param alto_resumen,ancho_resumen Tamaño del contenedor scroll del resumen.
-#' @param alto_casos,ancho_casos Tamaño del contenedor scroll de los casos.
-#' @param map_clean_to_original data.frame con `clean` y `original` (mapeo opcional visual).
-#' @param usar_mapeo Si `TRUE`, aplica el mapeo anterior en los nombres mostrados.
-#' @return `invisible(NULL)`; imprime HTML en el visor.
 #' @export
-#' @examples
-#' \dontrun{
-#' b <- reporte_bloques(ev, solo_relevantes = TRUE)
-#' render_bloques_kable(b, max_casos = 15)
-#' }
 render_bloques_kable <- function(
     bloques,
     max_casos = 10,
     mostrar_aleatorios_si_cero = 0,
     fallback_df = NULL,
-    cols_id = c("_uuid","_index","Codigo pulso","Código pulso"),
+    cols_id = c("_uuid","_index","Pulso_code","Codigo pulso","Código pulso"),
     cols_interes = NULL,
     seed = NULL,
     alto_resumen = "280px",
@@ -1166,21 +1270,9 @@ render_bloques_kable <- function(
 
     cab_id <- paste0("[", b$id_regla %||% "", "]")
 
-    # fallbacks robustos
-    objetivo <- .san_label(
-      dplyr::coalesce(
-        b$objetivo %||% NA_character_,
-        b$Objetivo %||% NA_character_
-      )
-    )
-    tipo <- .san_label(
-      dplyr::coalesce(
-        b$tipo_observacion %||% NA_character_,
-        b$Tipo %||% NA_character_,
-        b$tipo %||% NA_character_,
-        b$categoria %||% NA_character_
-      )
-    )
+    objetivo <- .san_label(dplyr::coalesce(b$objetivo %||% NA_character_, b$Objetivo %||% NA_character_))
+    tipo     <- .san_label(dplyr::coalesce(b$tipo_observacion %||% NA_character_, b$Tipo %||% NA_character_,
+                                           b$tipo %||% NA_character_, b$categoria %||% NA_character_))
 
     header_html <-
       htmltools::tagList(
@@ -1198,6 +1290,7 @@ render_bloques_kable <- function(
     resumen_raw <- tibble::tibble(
       `Id regla`   = b$id_regla %||% NA_character_,
       `Tabla`      = (b$tabla %||% b$`Hoja base`) %||% "(principal)",
+      `Sección`    = b$seccion %||% NA_character_,
       `Variable 1` = b$variable_1 %||% NA_character_,
       `Etiqueta 1` = if (nz(lab1)) lab1 else NA_character_,
       `Variable 2` = b$variable_2 %||% NA_character_,
@@ -1207,6 +1300,7 @@ render_bloques_kable <- function(
       `# inconsist.` = b$n_inconsistencias %||% 0L,
       `%`           = if (!is.na(b$porcentaje)) sprintf("%.1f%%", 100*b$porcentaje) else NA_character_
     )
+
     cols_chk  <- c("Variable 2","Etiqueta 2","Variable 3","Etiqueta 3")
     drop_cols <- vapply(resumen_raw[cols_chk], function(col) all(is.na(col) | trimws(as.character(col))==""), logical(1))
     keep_cols <- c(setdiff(names(resumen_raw), cols_chk[drop_cols]))
@@ -1232,15 +1326,21 @@ render_bloques_kable <- function(
       }
     }
 
+    # NUEVO: columnas deseadas incluyen vars_apertura (ya deberían venir en casos si hubo join)
+    apertura_vars <- b$vars_apertura[[1]] %||% character(0)
+
     desired_cols <- unique(na.omit(c(
       cols_id, b$variable_1, b$variable_2, b$variable_3,
       paste0(b$variable_1, "_label"),
       paste0(b$variable_2, "_label"),
       paste0(b$variable_3, "_label"),
+      apertura_vars,
+      paste0(apertura_vars, "_label"),
       cols_interes
     )))
+
     keep <- intersect(desired_cols, names(casos))
-    if (!length(keep)) keep <- intersect(c("_uuid","_id"), names(casos))
+    if (!length(keep)) keep <- intersect(c("_uuid","_id","_index"), names(casos))
     if (!length(keep)) keep <- head(names(casos), 6)
 
     casos_show <- casos[, keep, drop = FALSE]
@@ -1271,7 +1371,6 @@ render_bloques_kable <- function(
       )
     } else htmltools::HTML("")
 
-    # Un “card” por regla
     cards[[i]] <- htmltools::tagList(
       htmltools::tags$div(style = "margin:18px 0; border-top:1px solid #ddd; padding-top:14px"),
       header_html,

@@ -6,6 +6,7 @@
 \usage{
 reporte_bloques(
   evaluacion,
+  inst,
   familias = NULL,
   ids = NULL,
   solo_relevantes = FALSE,
@@ -16,33 +17,32 @@ reporte_bloques(
 )
 }
 \arguments{
-\item{evaluacion}{Lista devuelta por \code{evaluar_consistencia()}.}
+\item{evaluacion}{Lista devuelta por evaluar_consistencia().}
 
-\item{familias}{Vector de filtros regex aplicados sobre \code{Tipo}.}
+\item{inst}{Objeto instrumento (inst) leído por tu lector.}
 
-\item{ids}{Vector de \code{id_regla} o \code{nombre_regla} a mantener.}
+\item{familias}{Vector de filtros regex aplicados sobre Tipo.}
 
-\item{solo_relevantes}{Si \code{TRUE}, conserva sólo reglas con \code{n_inconsistencias > 0}.}
+\item{ids}{Vector de id_regla o nombre_regla a mantener.}
 
-\item{incluir_solo_inconsistentes}{Si \code{TRUE}, no construye \code{casos} cuando n=0.}
+\item{solo_relevantes}{Si TRUE, conserva sólo reglas con n_inconsistencias > 0.}
 
-\item{incluir_reglas_sin_casos}{Si \code{FALSE}, descarta reglas sin filas en \code{casos}.}
+\item{incluir_solo_inconsistentes}{Si TRUE, no construye casos cuando n=0.}
 
-\item{contar_na_como_inconsistencia}{Si \code{TRUE}, los NA cuentan como inconsistencia al construir \code{casos}.}
+\item{incluir_reglas_sin_casos}{Si FALSE, descarta reglas sin filas en casos.}
 
-\item{ordenar}{Criterio: \code{"n_desc"} o \code{"id_asc"}.}
+\item{contar_na_como_inconsistencia}{Si TRUE, NA cuenta al construir casos.}
+
+\item{ordenar}{"n_desc" o "id_asc".}
 }
 \value{
-\code{tibble} con metadatos de regla + columna lista \code{casos}.
+tibble con metadatos + columna lista casos.
 }
 \description{
-Une \code{evaluacion$resumen} con \code{evaluacion$reglas_meta} para cada regla
-y agrega una columna \code{casos} con las filas inconsistentes (vía
-\code{observaciones_regla()}) de la \strong{tabla correcta}. Robusto a repeats.
-}
-\examples{
-\dontrun{
-bloques <- reporte_bloques(evaluacion = ev, solo_relevantes = TRUE)
-str(bloques$casos[[1]])
+Metodología nueva:
+\itemize{
+\item Las variables usadas para abrir la sección se toman del instrumento (inst),
+usando inst$meta$groups_detail$relevant_vars.
+\item Se agregan a casos con join seguro contra evaluacion$datos_tablas.
 }
 }
