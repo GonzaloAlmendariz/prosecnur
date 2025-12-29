@@ -470,18 +470,25 @@ ppra_so_parent <- function(df, parent, path_instrumento, path_plantilla,
 
 # ====================== SO (hijo) ==============================================
 resolve_child_recod_col <- function(parent, colnames_tpl, text_col = NULL){
-  nm <- trimws(colnames_tpl)
+  nm  <- trimws(colnames_tpl)
+  nml <- tolower(nm)
+
+  # 1) Si familias da text_col: <text_col>_recod
   if (!is.null(text_col) && nzchar(text_col)) {
-    target <- paste0(text_col, "_recod")
-    j <- which(tolower(nm) == tolower(target))
+    target <- tolower(paste0(text_col, "_recod"))
+    j <- which(nml == target)
     if (length(j)) return(nm[j[1]])
   }
+
+  # 2) Si existe <parent>_recod
+  targetp <- tolower(paste0(parent, "_recod"))
+  j <- which(nml == targetp)
+  if (length(j)) return(nm[j[1]])
+
+  # 3) Fallback: parent/..._recod o parent_..._recod
   rx <- paste0("^(?:", parent, "([_/]).+_recod)$")
   cand <- nm[grepl(rx, nm, ignore.case = TRUE, perl = TRUE)]
   if (!length(cand)) return(NA_character_)
-  cand_base <- sub("(?i)_recod$", "", cand, perl = TRUE)
-  have_base <- tolower(cand_base) %in% tolower(nm)
-  if (any(have_base)) return(cand[which(have_base)[1]])
   cand[1]
 }
 
@@ -511,8 +518,20 @@ ppra_so_child <- function(df, parent, path_plantilla, path_familias = NULL, path
                 repeat_sheet=NULL, repeat_df=NULL, repeat_cols_to_color=character(0)))
   }
 
+  # --- text_col desde familias (si existe) ---
   text_col <- ppra_get_textcol_from_familias(path_familias, parent)
-  src <- resolve_child_recod_col(parent, names(tpl), text_col = text_col)
+
+  # --- si NO hay familias: inferir la hija desde plantilla (EVIDENCIA: 1 solo *_recod) ---
+  recod_cols <- names(tpl)[grepl("(?i)_recod$", names(tpl), perl = TRUE)]
+  if (!nz(text_col) && length(recod_cols) == 1) {
+    # la columna recod en plantilla es la "src"
+    src <- recod_cols[1]
+    # y el text_col es su base
+    text_col <- sub("(?i)_recod$", "", src, perl = TRUE)
+  } else {
+    src <- resolve_child_recod_col(parent, names(tpl), text_col = text_col)
+  }
+
   if (is.na(src)) {
     message("[SO-hijo] No hallé hija *_recod para '", parent, "'.")
     return(list(df=df, new_col=character(0),
@@ -522,28 +541,24 @@ ppra_so_child <- function(df, parent, path_plantilla, path_familias = NULL, path
   tmp <- .safe_left_join_by(df_work[, c(kd), drop = FALSE], tpl[, c(kd, src), drop = FALSE], kd)
   val <- trimws(as.character(tmp[[src]])); val[val==""] <- NA_character_
 
-  alias  <- sub(paste0("^", parent, "([_/])"), "", sub("(?i)_recod$","", src, perl = TRUE))
-  out_col <- paste0(parent, "_", alias, "_recod")
+  # --- salida: siempre la columna del texto recodificado ---
+  out_col <- paste0(text_col, "_recod")
+  anchor  <- if (nz(text_col) && (text_col %in% names(df_work))) text_col else parent
 
   if (identical(where$source, "main")) {
     if (!(out_col %in% names(df))) df[[out_col]] <- NA_character_
     i <- which(!is.na(val)); if (length(i)) df[[out_col]][i] <- val[i]
-    df <- insert_right_of(df, parent, out_col)
-    return(list(
-      df = df, new_col = out_col,
-      repeat_sheet = NULL, repeat_df = NULL, repeat_cols_to_color = character(0)
-    ))
+    df <- insert_right_of(df, anchor, out_col)
+    return(list(df=df, new_col=out_col,
+                repeat_sheet=NULL, repeat_df=NULL, repeat_cols_to_color=character(0)))
   } else {
     if (!(out_col %in% names(df_work))) df_work[[out_col]] <- NA_character_
     j <- which(!is.na(val)); if (length(j)) df_work[[out_col]][j] <- val[j]
-    df_work <- insert_right_of(df_work, parent, out_col)
-    return(list(
-      df = df, new_col = character(0),
-      repeat_sheet = where$sheet, repeat_df = df_work, repeat_cols_to_color = out_col
-    ))
+    df_work <- insert_right_of(df_work, anchor, out_col)
+    return(list(df=df, new_col=character(0),
+                repeat_sheet=where$sheet, repeat_df=df_work, repeat_cols_to_color=out_col))
   }
 }
-
 # ====================== INTEGER ================================================
 ppra_integer_recod <- function(df, parent, path_plantilla,
                                path_familias = NULL, path_datos = NULL){

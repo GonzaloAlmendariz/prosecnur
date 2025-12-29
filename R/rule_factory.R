@@ -210,6 +210,31 @@ wrap_numeric_in_comparisons <- function(rhs, survey){
   out
 }
 
+# -----------------------------------------------------------------------------
+# Evitar autorreferencia en gates de grupo
+# -----------------------------------------------------------------------------
+# Si el relevant del grupo (G_r) menciona a la misma variable que se está
+# auditando, se ignora ese gate para esa variable.
+#
+# Esto evita reglas circulares del tipo:
+#   "Consent se evalúa solo si Consent == 'Yes'"
+#
+# Caso típico: variables ubicadas dentro de grupos cuyo relevant depende
+# de la propia variable (edge case del constructor).
+.gate_sin_autorreferencia <- function(G_r, var, survey_names) {
+
+  G_r <- as_chr1(G_r %||% "")
+  if (!nzchar(G_r)) return(G_r)
+
+  deps <- .drivers_from_expr(G_r, survey_names)
+
+  if (var %in% deps) {
+    return("")
+  }
+
+  G_r
+}
+
 # =============================================================================
 # Labels
 # =============================================================================
@@ -330,19 +355,24 @@ nivel_scope <- function(tabla) if (identical(tabla, "(principal)")) 0L else 1L
   isTRUE(section_map$is_repeat[idx])
 }
 
-# recomputa group_name desde metadata (si viene)
 .recompute_group_name_from_meta <- function(survey, groups_detail){
   if (!nrow(survey) || is.null(groups_detail) || !nrow(groups_detail)) {
     if (!"group_name" %in% names(survey)) survey$group_name <- NA_character_
     return(survey)
   }
-  gd <- groups_detail %>% transmute(
+
+  # asegurar columna destino
+  if (!"group_name" %in% names(survey)) survey$group_name <- NA_character_
+
+  gd <- groups_detail %>% dplyr::transmute(
     gname     = as.character(gname),
     begin_row = as.integer(begin_row),
     end_row   = as.integer(end_row),
     depth     = as.integer(depth)
   )
+
   if (!"q_order" %in% names(survey)) survey$q_order <- seq_len(nrow(survey))
+
   idx <- integer(nrow(survey))
   for (i in seq_len(nrow(survey))) {
     qo <- suppressWarnings(as.integer(survey$q_order[i]))
@@ -350,7 +380,13 @@ nivel_scope <- function(tabla) if (identical(tabla, "(principal)")) 0L else 1L
     if (length(cand)) cand <- cand[which.max(gd$depth[cand])] else cand <- 0L
     idx[i] <- cand
   }
-  survey$group_name <- ifelse(idx > 0L, gd$gname[idx], NA_character_)
+
+  new_g <- ifelse(idx > 0L, gd$gname[idx], NA_character_)
+
+  # solo rellenar si group_name está vacío/NA
+  keep <- !is.na(survey$group_name) & nzchar(trimws(as.character(survey$group_name)))
+  survey$group_name <- ifelse(keep, survey$group_name, new_g)
+
   survey
 }
 
@@ -554,6 +590,12 @@ build_relevant_g <- function(survey, section_map, meta, choices, gmap) {
     G_r   <- as_chr1(if (nrow(G_row)) G_row$G_expr[[1]]   else "")
     G_h   <- as_chr1(if (nrow(G_row)) G_row$G_humano[[1]] else "")
 
+    # --- FIX (edge case): si el gate del grupo usa la misma variable, se ignora ---
+    # Evita reglas circulares del tipo: "Consent se evalúa solo si Consent == 'Yes'".
+    G_r <- .gate_sin_autorreferencia(G_r, var = var, survey_names = survey$name)
+    # -----------------------------------------------------------------------------
+
+
     # Condición relevant específica de la pregunta
     rel_parsed <- relevant_a_r_y_humano(as_chr1(row$relevant %||% ""), survey, choices, meta)
     REL_r <- as_chr1(rel_parsed$expr_r)
@@ -574,7 +616,6 @@ build_relevant_g <- function(survey, section_map, meta, choices, gmap) {
 
     secc_label <- .section_label(gname, section_map)
 
-    # --- NUEVA REDACCIÓN HUMANA ---
     # Texto humano para condición DEBE
     apertura_debe <- if (nz1(G_h) || nz1(REL_h)) {
       if (nz1(G_h) && nz1(REL_h)) {
@@ -1275,8 +1316,26 @@ generar_plan_limpieza <- function(
       },
       relevant = gsub("\\s+", " ", trimws(coalesce(.data$relevant, "")))
     )
+
+  dbg_before <- survey %>%
+    dplyr::filter(.data$name %in% c("ExpOpinion","Satisfactionqualication")) %>%
+    dplyr::select(name, q_order, .qord, type, group_name)
+
   survey <- .recompute_group_name_from_meta(survey, x$meta$groups_detail)
-  if (!"group_name" %in% names(survey)) survey$group_name <- NA_character_
+
+  dbg_after <- survey %>%
+    dplyr::filter(.data$name %in% c("ExpOpinion","Satisfactionqualication")) %>%
+    dplyr::select(name, q_order, .qord, type, group_name) %>%
+    dplyr::rename(group_name_after = group_name)
+
+  dbg_join <- dbg_before %>%
+    dplyr::rename(group_name_before = group_name) %>%
+    dplyr::left_join(dbg_after, by = c("name","q_order",".qord","type"))
+
+  if (any(dbg_join$group_name_before != dbg_join$group_name_after, na.rm = TRUE)) {
+    message("[DEBUG] group_name cambió en variables críticas:")
+    print(dbg_join, n = Inf)
+  }
 
   section_map <- (x$meta$section_map %||% tibble(group_name=character(), group_label=character(), prefix=character(), is_repeat=logical())) %>%
     mutate(group_name = as.character(group_name),
