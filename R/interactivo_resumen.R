@@ -150,7 +150,7 @@
     if (!is.null(surv) && all(c("name", "list_name") %in% names(surv)) &&
         !is.null(ch)   && all(c("list_name","name","label") %in% names(ch))) {
 
-      ln <- surv$list_name[surv$name == v][1]
+      ln <- .get_list_name_safe(surv, v)
       if (!is.na(ln) && nzchar(ln)) {
         ch_v <- ch[ch$list_name == ln, , drop = FALSE]
         if (nrow(ch_v)) {
@@ -218,7 +218,7 @@
 
     ln <- NA_character_
     if (!is.null(survey) && all(c("name","list_name") %in% names(survey))) {
-      ln <- as.character(survey$list_name[survey$name == var][1])
+      ln <- .get_list_name_safe(survey, var)
     }
 
     codes  <- character(0)
@@ -368,9 +368,11 @@
     if (!col_dummy %in% names(df)) {
       return(
         plotly::plot_ly(height = BAR_HEIGHT) |>
-          plotly::layout(annotations = list(list(text="Sin dummy.", showarrow=FALSE)),
-                         xaxis = list(visible=FALSE), yaxis = list(visible=FALSE),
-                         margin = list(l=10,r=10,t=0,b=0)) |>
+          plotly::layout(
+            annotations = list(list(text="Sin dummy.", showarrow=FALSE)),
+            xaxis = list(visible=FALSE), yaxis = list(visible=FALSE),
+            margin = list(l=10,r=10,t=0,b=0)
+          ) |>
           plotly::config(displayModeBar = FALSE, responsive = TRUE)
       )
     }
@@ -387,9 +389,11 @@
     if (!length(x2)) {
       return(
         plotly::plot_ly(height = BAR_HEIGHT) |>
-          plotly::layout(annotations = list(list(text="Sin datos.", showarrow=FALSE)),
-                         xaxis = list(visible=FALSE), yaxis = list(visible=FALSE),
-                         margin = list(l=10,r=10,t=0,b=0)) |>
+          plotly::layout(
+            annotations = list(list(text="Sin datos.", showarrow=FALSE)),
+            xaxis = list(visible=FALSE), yaxis = list(visible=FALSE),
+            margin = list(l=10,r=10,t=0,b=0)
+          ) |>
           plotly::config(displayModeBar = FALSE, responsive = TRUE)
       )
     }
@@ -397,9 +401,49 @@
     N     <- length(x2)
     n_yes <- sum(x2 == 1)
     pct_y <- n_yes / N
+
+    # ------------------------------------------------------------
+    # CASO 0%: NO colorear "yes", solo fondo + texto "0%" afuera
+    # ------------------------------------------------------------
+    if (pct_y == 0) {
+      p <- plotly::plot_ly(height = BAR_HEIGHT) |>
+        plotly::add_bars(
+          x           = 1,
+          y           = I("Total"),
+          orientation = "h",
+          marker      = list(color = col_bg, line = list(width = 0)),
+          hoverinfo   = "skip",
+          showlegend  = FALSE
+        ) |>
+        plotly::layout(
+          barmode = "stack",
+          xaxis = list(title="", range=c(0,1), showgrid=FALSE, zeroline=FALSE,
+                       showticklabels=FALSE, ticks=""),
+          yaxis = list(title="", showgrid=FALSE, zeroline=FALSE,
+                       showticklabels=FALSE, ticks=""),
+          margin = list(l=10, r=26, t=0, b=0),  # margen der para el "0%"
+          showlegend = FALSE,
+          annotations = list(list(
+            x = 1, y = "Total",
+            xref = "x", yref = "y",
+            text = "<b>0%</b>",
+            showarrow = FALSE,
+            xanchor = "left",
+            align = "left",
+            xshift = 6,
+            font = list(color = text_out_color, size = PCT_FSIZE)
+          ))
+        ) |>
+        plotly::config(displayModeBar = FALSE, responsive = TRUE)
+
+      return(p)
+    }
+
+    # ------------------------------------------------------------
+    # Caso normal (>0): barra yes + resto bg
+    # ------------------------------------------------------------
     pct_r <- 1 - pct_y
 
-    # Segmentos (yes + background) para mantener estética "apilada"
     seg <- data.frame(
       seg   = c("yes", "bg"),
       pct   = c(pct_y, pct_r),
@@ -408,11 +452,9 @@
       stringsAsFactors = FALSE
     )
 
-    # Texto: solo en el segmento "yes"
     pct_txt <- paste0("<b>", round(100 * pct_y, 0), "%</b>")
     seg$text <- c(pct_txt, "")
 
-    # Posición texto según umbral
     textpos_yes <- if (pct_y < pct_inside_threshold) "outside" else "inside"
     textfont_yes <- if (pct_y < pct_inside_threshold) {
       list(color = text_out_color, size = PCT_FSIZE)
@@ -420,7 +462,6 @@
       list(color = "white", size = PCT_FSIZE)
     }
 
-    # Hover solo en yes (en bg vacío)
     seg$hover <- c(
       sprintf("Sí: %s%%<br>n: %s<br>N: %s",
               round(100 * pct_y, 1),
@@ -431,7 +472,6 @@
 
     p <- plotly::plot_ly(height = BAR_HEIGHT)
 
-    # YES segment
     p <- p |>
       plotly::add_bars(
         data             = seg[seg$seg == "yes", , drop=FALSE],
@@ -448,7 +488,6 @@
         cliponaxis       = FALSE
       )
 
-    # BG segment (sin texto ni hover)
     p <- p |>
       plotly::add_bars(
         data        = seg[seg$seg == "bg", , drop=FALSE],
@@ -467,14 +506,14 @@
                      showticklabels=FALSE, ticks=""),
         yaxis = list(title="", showgrid=FALSE, zeroline=FALSE,
                      showticklabels=FALSE, ticks=""),
-        margin = list(l=10, r=16, t=0, b=0), # un poco más de r para el texto outside
+        margin = list(l=10, r=16, t=0, b=0),
         showlegend = FALSE
       ) |>
       plotly::config(displayModeBar = FALSE, responsive = TRUE)
   }
 
   # ---------------------------------------------------------------------------
-  # Resolver spec SM (se espera en helpers)
+  # Resolver spec SM
   # ---------------------------------------------------------------------------
   .resolver_var_spec_safe <- function(var_madre, ctx, df) {
     f <- get0("resolver_var_spec", mode = "function", ifnotfound = NULL)

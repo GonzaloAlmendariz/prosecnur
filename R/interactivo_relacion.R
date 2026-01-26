@@ -6,10 +6,12 @@
 # - SM: fill-only (se colorea SOLO el "Sí"), texto siempre blanco
 # - Estratos sin datos válidos: se omiten en cada chip
 # - Fix: htmltools::withTags
+# - NUEVO (SO): leyenda como BLOQUE independiente (HTML), con wrap + orden invertido,
+#               sin tocar el orden del apilado y sin “legendonly traces”.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# UI del módulo (MINIMAL)  [CAMBIO: rel_plot_ui en vez de rel_plot fijo]
+# UI del módulo
 # -----------------------------------------------------------------------------
 relacion_tab_ui <- function(id) {
   ns <- shiny::NS(id)
@@ -22,28 +24,57 @@ relacion_tab_ui <- function(id) {
 
         shiny::h3("Relación"),
 
-        shiny::selectInput(
-          inputId = ns("main_seccion"),
-          label   = "Sección (variable)",
-          choices = NULL
-        ),
-        shiny::selectInput(
-          inputId = ns("main_var"),
-          label   = "Variable",
-          choices = NULL
-        ),
+        shiny::div(
+          class = "cardbox",
+          style = "padding:12px 12px 10px 12px;",
 
-        shiny::hr(),
+          # 1) Variable
+          shiny::div(
+            style = "font-weight:600; color:#111827; margin-bottom:8px;",
+            "Variable"
+          ),
 
-        shiny::selectInput(
-          inputId = ns("cruce_seccion"),
-          label   = "Sección (cruce)",
-          choices = NULL
-        ),
-        shiny::selectInput(
-          inputId = ns("cruce_var"),
-          label   = "Cruce",
-          choices = NULL
+          shiny::selectInput(
+            inputId = ns("main_seccion"),
+            label   = "Sección",
+            choices = NULL
+          ),
+
+          shiny::selectInput(
+            inputId = ns("main_var"),
+            label   = "Variable",
+            choices = NULL
+          ),
+
+          shiny::div(
+            style = "margin-top:-6px; margin-bottom:12px; font-size:12px; color:#6b7280;",
+            "Se muestra la distribución de la variable elegida."
+          ),
+
+          shiny::hr(style = "margin:10px 0 12px 0; border-color:#eef2f7;"),
+
+          # 2) Segmento
+          shiny::div(
+            style = "font-weight:600; color:#111827; margin-bottom:8px;",
+            "Cruce"
+          ),
+
+          shiny::selectInput(
+            inputId = ns("cruce_seccion"),
+            label   = "Sección",
+            choices = NULL
+          ),
+
+          shiny::selectInput(
+            inputId = ns("cruce_var"),
+            label   = "Segmento",
+            choices = NULL
+          ),
+
+          shiny::div(
+            style = "margin-top:-6px; font-size:12px; color:#6b7280;",
+            "Se calcula dentro de cada grupo del cruce."
+          )
         )
       ),
 
@@ -56,7 +87,12 @@ relacion_tab_ui <- function(id) {
             shiny::div(
               class = "cardbox",
               shiny::div(class = "cardbox-header", shiny::uiOutput(ns("rel_plot_header"))),
-              shiny::uiOutput(ns("rel_plot_ui"))
+
+              # Plot (SO o SM)
+              shiny::uiOutput(ns("rel_plot_ui")),
+
+              # leyenda SOLO para SO, como bloque aparte (no afecta plot)
+              shiny::uiOutput(ns("rel_so_legend"))
             )
           )
         ),
@@ -303,7 +339,6 @@ relacion_tab_server <- function(
       }
 
       if (!is.null(cols_dummies) && length(cols_dummies)) {
-        # dummy esperado: var_madre.<code>
         col <- paste0(var_madre, ".", code)
         if (!col %in% names(df)) return(integer(0))
         v <- suppressWarnings(as.numeric(as.character(df[[col]])))
@@ -314,19 +349,23 @@ relacion_tab_server <- function(
     }
 
     # =========================================================================
-    # Plot SO x SO (igual a tu barra apilada por estrato)  [sin cambios mayores]
+    # Plot SO x SO — barras apiladas por estrato (SIN leyenda interna)
+    # - Leyenda se renderiza como bloque HTML aparte (rel_so_legend)
+    # - Más aire entre etiquetas del eje Y y las barras
     # =========================================================================
     .resolver_paleta_var <- function(var, instrumento, colores_apiladas_por_listname, opcion_levels) {
 
-      surv <- instrumento$survey
+      surv <- instrumento$survey %||% NULL
       pal  <- NULL
 
       if (!is.null(colores_apiladas_por_listname) &&
           !is.null(surv) &&
           all(c("name", "list_name") %in% names(surv))) {
 
-        ln <- surv$list_name[surv$name == var][1]
-        if (!is.na(ln) && ln %in% names(colores_apiladas_por_listname)) pal <- colores_apiladas_por_listname[[ln]]
+        ln <- .get_list_name_safe(surv, var)
+        if (!is.na(ln) && ln %in% names(colores_apiladas_por_listname)) {
+          pal <- colores_apiladas_por_listname[[ln]]
+        }
       }
 
       if (is.null(pal) || !length(pal)) {
@@ -342,9 +381,9 @@ relacion_tab_server <- function(
         return(pal2)
       }
 
-      pal <- rep(pal, length.out = length(opcion_levels))
-      names(pal) <- opcion_levels
-      pal
+      pal2 <- rep(pal, length.out = length(opcion_levels))
+      names(pal2) <- opcion_levels
+      pal2
     }
 
     .plot_so_so <- function(df, var_main, var_cruce) {
@@ -425,20 +464,23 @@ relacion_tab_server <- function(
           format(round(dfo$n, 0), big.mark = ",")
         )
 
+        col_opt <- pal[[opt]] %||% unname(pal[opt]) %||% "#9aa4b2"
+
         p <- p |>
           plotly::add_bars(
-            data          = dfo,
-            x             = ~pct,
-            y             = ~estrato_label,
-            name          = opt,
-            orientation   = "h",
-            text          = ~paste0("<b>", round(100 * pct, 0), "%</b>"),
-            textposition  = "inside",
+            data             = dfo,
+            x                = ~pct,
+            y                = ~estrato_label,
+            name             = opt,
+            orientation      = "h",
+            text             = ~paste0("<b>", round(100 * pct, 0), "%</b>"),
+            textposition     = "inside",
             insidetextanchor = "middle",
-            textfont      = list(color = "white", size = 11),
-            customdata    = ~hover,
-            hovertemplate = "%{customdata}<extra></extra>",
-            marker        = list(color = unname(pal[opt]), line = list(width = 0))
+            textfont         = list(color = "white", size = 11),
+            customdata       = ~hover,
+            hovertemplate    = "%{customdata}<extra></extra>",
+            marker           = list(color = col_opt, line = list(width = 0)),
+            showlegend       = FALSE
           )
       }
 
@@ -446,13 +488,30 @@ relacion_tab_server <- function(
         plotly::layout(
           barmode = "stack",
           bargap  = 0.25,
-          xaxis   = list(title = "", range = c(0, 1), showgrid = FALSE, zeroline = FALSE,
-                         showticklabels = FALSE, ticks = ""),
-          yaxis   = list(title = "", automargin = TRUE, showgrid = FALSE, zeroline = FALSE, ticks = ""),
-          legend  = list(orientation = "h", x = 0.5, xanchor = "center", y = -0.12),
-          margin  = list(l = 120, r = 25, t = 10, b = 55),
+
+          xaxis   = list(
+            title = "", range = c(0, 1),
+            showgrid = FALSE, zeroline = FALSE,
+            showticklabels = FALSE, ticks = ""
+          ),
+
+          yaxis   = list(
+            title = "",
+            automargin = TRUE,
+            showgrid = FALSE, zeroline = FALSE, ticks = "",
+            tickpadding = 10
+          ),
+
+          margin  = list(
+            l = 50,
+            r = 25,
+            t = 10,
+            b = 25
+          ),
+
           hovermode  = "closest",
-          transition = list(duration = 450, easing = "cubic-in-out")
+          transition = list(duration = 450, easing = "cubic-in-out"),
+          showlegend = FALSE
         ) |>
         plotly::config(displayModeBar = FALSE, responsive = TRUE)
     }
@@ -477,7 +536,6 @@ relacion_tab_server <- function(
         key_j  <- estr_codes[j]
         mask_j <- !is.na(v_cruce) & v_cruce == key_j
 
-        # Denominador = SM válido en estrato
         ids_valid_sm <- .sm_valid_ids(df, var_madre, cols_dummies = cols_dummies, col_compact = col_compact)
         if (!length(ids_valid_sm)) next
 
@@ -488,7 +546,6 @@ relacion_tab_server <- function(
         N_j <- sum(w[ids_denom], na.rm = TRUE)
         if (is.na(N_j) || N_j <= 0) next
 
-        # Numerador = marcó esta opción
         ids_yes <- .sm_numerador_option(df, var_madre, code, cols_dummies = cols_dummies, col_compact = col_compact)
         ids_yes <- intersect(ids_yes, ids_denom)
 
@@ -518,7 +575,6 @@ relacion_tab_server <- function(
                  plotly::config(displayModeBar = FALSE, responsive = TRUE))
       }
 
-      # ordenar estratos según aparición
       dfi$estrato_label <- factor(dfi$estrato_label, levels = unique(dfi$estrato_label))
       dfi$pct_bg <- 1 - dfi$pct_yes
 
@@ -534,7 +590,6 @@ relacion_tab_server <- function(
 
       p <- plotly::plot_ly(height = max(220, 70 + 32 * nrow(dfi)))
 
-      # YES
       p <- p |>
         plotly::add_bars(
           data             = dfi,
@@ -551,7 +606,6 @@ relacion_tab_server <- function(
           marker           = list(color = SM_COLOR_YES, line = list(width = 0))
         )
 
-      # BG
       p <- p |>
         plotly::add_bars(
           data        = dfi,
@@ -585,7 +639,6 @@ relacion_tab_server <- function(
       survey <- instrumento$survey %||% NULL
       tp_main <- tipo_pregunta(var_main, survey = survey, sm_vars_force = vars_sm_madres, df = df)
 
-      # Cruce (SO)
       cats_cruce <- get_categorias_so(var_cruce, df, survey, orders_list %||% instrumento$orders_list %||% NULL)
       estr_codes  <- as.character(cats_cruce$codes)
       estr_labels <- as.character(cats_cruce$labels)
@@ -593,7 +646,6 @@ relacion_tab_server <- function(
       v_cruce <- as.character(df[[var_cruce]])
       w <- get_pesos(df, weight_col)
 
-      # ---- filas (opciones) ----
       if (tp_main == "so") {
 
         cats_main <- get_categorias_so(var_main, df, survey, orders_list %||% instrumento$orders_list %||% NULL)
@@ -610,7 +662,6 @@ relacion_tab_server <- function(
         cuerpo <- tibble::tibble(Opciones = labels_row)
         denom_map <- list()
 
-        # Total
         v_main <- as.character(df[[var_main]])
         elig_total <- !is.na(v_main) & nzchar(v_main) & v_main != "NA" & (v_main %in% codes_row)
         N_total <- sum(w[elig_total], na.rm = TRUE)
@@ -621,7 +672,6 @@ relacion_tab_server <- function(
         cuerpo <- dplyr::bind_cols(cuerpo, tibble::tibble(Total__n = n_total, Total__pct = pct_total))
         denom_map[["Total__n"]] <- N_total
 
-        # Estratos
         for (j in seq_along(estr_codes)) {
           key_j <- estr_codes[j]
           mask_j <- !is.na(v_cruce) & v_cruce == key_j
@@ -645,15 +695,12 @@ relacion_tab_server <- function(
 
       } else {
 
-        # ---- SM ----
         spec <- .resolver_var_spec_safe(var_main, df)
         cols <- spec$cols %||% character(0)
 
-        # codes desde dummies: var_main.<code>
         dummy_codes <- sub(paste0("^", var_main, "\\."), "", cols)
         dummy_codes <- dummy_codes[nzchar(dummy_codes)]
 
-        # label por code (choices)
         map <- spec$map_code_to_label %||% list()
         labels_row <- vapply(dummy_codes, function(cd) as.character(map[[cd]] %||% cd), character(1))
         codes_row  <- dummy_codes
@@ -669,7 +716,6 @@ relacion_tab_server <- function(
         cuerpo <- tibble::tibble(Opciones = labels_row)
         denom_map <- list()
 
-        # Total denom = SM válido global
         ids_valid <- .sm_valid_ids(df, var_main, cols_dummies = cols, col_compact = NA_character_)
         N_total <- if (length(ids_valid)) sum(w[ids_valid], na.rm = TRUE) else 0
 
@@ -684,7 +730,6 @@ relacion_tab_server <- function(
         cuerpo <- dplyr::bind_cols(cuerpo, tibble::tibble(Total__n = n_total, Total__pct = pct_total))
         denom_map[["Total__n"]] <- N_total
 
-        # Estratos
         for (j in seq_along(estr_codes)) {
           key_j <- estr_codes[j]
           mask_ids <- which(!is.na(v_cruce) & v_cruce == key_j)
@@ -712,7 +757,6 @@ relacion_tab_server <- function(
         }
       }
 
-      # ---- fila Total (N por columna) ----
       total_row <- as.list(rep(NA, ncol(cuerpo)))
       names(total_row) <- names(cuerpo)
       total_row[["Opciones"]] <- "Total"
@@ -722,8 +766,6 @@ relacion_tab_server <- function(
 
       for (k in n_cols) {
         nm <- names(cuerpo)[k]
-        # denom_map guarda N del estrato para ese bloque
-        # (si NA/0, dejar NA)
         Nj <- denom_map[[nm]]
         total_row[[k]] <- if (is.null(Nj) || is.na(Nj)) NA_real_ else round(as.numeric(Nj), 0)
       }
@@ -732,14 +774,11 @@ relacion_tab_server <- function(
         nm_n   <- sub("__pct$", "__n", nm_pct)
 
         Nj <- denom_map[[nm_n]]
-
-        # Convención: fila Total (%) = 100% si ese bloque tiene N > 0, si no 0%
         total_row[[k]] <- if (is.null(Nj) || is.na(Nj) || Nj <= 0) 0 else 1
       }
 
       cuerpo <- dplyr::bind_rows(cuerpo, tibble::as_tibble(total_row))
 
-      # label cruce
       dic_vars <- NULL
       if (!is.null(survey) && all(c("name","label") %in% names(survey))) {
         dic_vars <- dplyr::select(survey, name, label)
@@ -773,7 +812,7 @@ relacion_tab_server <- function(
     # =========================================================================
     .dt_container_multihdr <- function(cuerpo, cruce_lbl, estr_labels) {
 
-      n_blocks <- 1L + length(estr_labels)     # Total + estratos
+      n_blocks <- 1L + length(estr_labels)
       ncols    <- ncol(cuerpo)
       exp_cols <- 1L + 2L * n_blocks
 
@@ -838,8 +877,14 @@ relacion_tab_server <- function(
 
       vars_sec <- secciones_limpias[[sec]]
 
-      main_choices <- sort(unique(intersect(vars_sec, unique(c(vars_so, vars_sm_madres)))))
-      if (!length(main_choices)) main_choices <- sort(unique(c(vars_so, vars_sm_madres)))
+      pool_main <- unique(c(vars_so, vars_sm_madres))
+
+      main_choices <- vars_sec[vars_sec %in% pool_main]
+      main_choices <- unique(main_choices)
+
+      if (!length(main_choices)) {
+        main_choices <- pool_main
+      }
 
       main_lab <- stats::setNames(
         main_choices,
@@ -855,8 +900,10 @@ relacion_tab_server <- function(
 
       vars_sec <- secciones_limpias[[sec]]
 
-      cruce_choices <- sort(unique(intersect(vars_sec, vars_so)))
-      if (!length(cruce_choices)) cruce_choices <- sort(unique(vars_so))
+      cruce_choices <- vars_sec[vars_sec %in% vars_so]
+      cruce_choices <- unique(cruce_choices)
+
+      if (!length(cruce_choices)) cruce_choices <- vars_so
 
       cruce_lab <- stats::setNames(
         cruce_choices,
@@ -903,14 +950,14 @@ relacion_tab_server <- function(
       out_tab <- .build_cuerpo(df, var_main, var_cruce)
 
       list(
-        df        = df,
-        var_main  = var_main,
-        var_cruce = var_cruce,
-        tipo_main = tp_main,
-        cuerpo    = out_tab$cuerpo,
-        cruce_lbl = out_tab$cruce_lbl,
+        df          = df,
+        var_main    = var_main,
+        var_cruce   = var_cruce,
+        tipo_main   = tp_main,
+        cuerpo      = out_tab$cuerpo,
+        cruce_lbl   = out_tab$cruce_lbl,
         estr_labels = out_tab$estr_labels,
-        error     = NULL
+        error       = NULL
       )
     })
 
@@ -927,11 +974,115 @@ relacion_tab_server <- function(
         return(plotly::plotlyOutput(session$ns("rel_plot"), height = "520px"))
       }
 
-      # SM -> contenedor de chips (cards)
-      # se renderizan plotlyOutputs individuales: rel_sm_plot_1, rel_sm_plot_2, ...
       shiny::div(
         style = "display:flex; flex-direction:column; gap:12px;",
         shiny::uiOutput(session$ns("rel_sm_chips_ui"))
+      )
+    })
+
+    # =========================================================================
+    # Leyenda SO como bloque independiente (sofisticada)
+    # - Orden invertido SOLO en la leyenda
+    # - Wrap sin cortes
+    # =========================================================================
+    output$rel_so_legend <- shiny::renderUI({
+
+      obj <- rel_obj()
+      if (!is.null(obj$error)) return(NULL)
+      if (!identical(obj$tipo_main, "so")) return(NULL)
+
+      df <- obj$df
+      var_main <- obj$var_main
+      survey <- instrumento$survey %||% NULL
+
+      cats_main <- get_categorias_so(
+        var = var_main,
+        df = df,
+        survey = survey,
+        orders_list = orders_list %||% instrumento$orders_list %||% NULL
+      )
+
+      codes_row <- as.character(cats_main$codes)
+      opciones  <- as.character(cats_main$labels)
+
+      if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0 && length(codes_row)) {
+        codp <- as.character(codigos_perdidos)
+        keep <- !(codes_row %in% codp)
+        opciones <- opciones[keep]
+      }
+
+      pal <- .resolver_paleta_var(
+        var = var_main,
+        instrumento = instrumento,
+        colores_apiladas_por_listname = colores_apiladas_por_listname,
+        opcion_levels = unique(opciones)
+      )
+
+      legend_levels <- opciones
+
+      shiny::div(
+        class = "rel-legend",
+        style = paste0(
+          "margin-top:14px;",
+          "padding:12px 14px;",
+          "border:1px solid #edf0f7;",
+          "border-radius:14px;",
+          "background:#ffffff;"
+        ),
+
+        shiny::div(
+          style = paste0(
+            "display:flex;",
+            "justify-content:center;",
+            "width:100%;"
+          ),
+
+          shiny::div(
+            style = paste0(
+              "display:flex;",
+              "flex-wrap:wrap;",
+              "justify-content:center;",
+              "gap:12px 18px;",
+              "align-items:center;",
+              "max-width:980px;",
+              "width:100%;"
+            ),
+
+            lapply(legend_levels, function(lab) {
+
+              col <- pal[[lab]] %||% unname(pal[lab]) %||% "#9aa4b2"
+
+              shiny::div(
+                style = paste0(
+                  "display:flex;",
+                  "align-items:center;",
+                  "gap:10px;",
+                  "max-width:360px;"
+                ),
+
+                shiny::span(style = paste0(
+                  "display:inline-block;",
+                  "width:16px; height:16px;",  # <-- swatch más grande
+                  "border-radius:4px;",
+                  "background:", col, ";",
+                  "box-shadow:0 0 0 1px rgba(0,0,0,0.06) inset;"
+                )),
+
+                shiny::span(
+                  style = paste0(
+                    "font-size:14px;",
+                    "font-weight:500;",
+                    "color:#334155;",
+                    "line-height:1.15;",
+                    "white-space:normal;",
+                    "word-break:break-word;"
+                  ),
+                  lab
+                )
+              )
+            })
+          )
+        )
       )
     })
 
@@ -955,7 +1106,6 @@ relacion_tab_server <- function(
       codes <- sub(paste0("^", var_main, "\\."), "", cols)
       codes <- codes[nzchar(codes)]
 
-      # excluir perdidos
       if (!is.null(codigos_perdidos) && length(codigos_perdidos) > 0) {
         codp <- as.character(codigos_perdidos)
         keep <- !(codes %in% codp)

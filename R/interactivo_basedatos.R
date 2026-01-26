@@ -177,7 +177,10 @@
       return(shiny::div(style="font-size:12px;color:#5f6b7a;", "Sin variables codificadas disponibles."))
     }
 
-    fila <- instrumento$survey[instrumento$survey$name == v, , drop = FALSE]
+    surv <- instrumento$survey
+    nm <- as.character(surv$name)
+    i  <- which(!is.na(nm) & trimws(nm) == trimws(v))[1]
+    fila <- if (!is.na(i)) surv[i, , drop = FALSE] else surv[0, , drop = FALSE]
     tipo_survey <- if (nrow(fila)) tolower(as.character(fila$type[1])) else ""
 
     es_so <- grepl("^select_one\\b", tipo_survey)
@@ -211,7 +214,10 @@
     v <- input$dicc_var
     if (is.null(v) || !nzchar(v) || !v %in% ctx$vars_diccionario_all) return(NULL)
 
-    fila <- instrumento$survey[instrumento$survey$name == v, , drop = FALSE]
+    surv <- instrumento$survey
+    nm <- as.character(surv$name)
+    i  <- which(!is.na(nm) & trimws(nm) == trimws(v))[1]
+    fila <- if (!is.na(i)) surv[i, , drop = FALSE] else surv[0, , drop = FALSE]
     tipo_survey <- if (nrow(fila)) tolower(as.character(fila$type[1])) else ""
     es_so <- grepl("^select_one\\b", tipo_survey)
     es_sm <- grepl("^select_multiple\\b", tipo_survey)

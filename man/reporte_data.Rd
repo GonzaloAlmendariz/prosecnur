@@ -9,7 +9,9 @@ reporte_data(
   instrumento,
   var_peso = NULL,
   dummy_vars = NULL,
-  dummies_na_to_zero = TRUE
+  dummies_na_to_zero = TRUE,
+  ordinal_vars = NULL,
+  ordinal_list_names = NULL
 )
 }
 \arguments{

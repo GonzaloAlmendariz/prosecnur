@@ -1,37 +1,63 @@
 #' @noRd
-guess_spss_measure <- function(x) {
+guess_spss_measure <- function(x,
+                               var_name = NULL,
+                               ordinal_list_names = NULL,
+                               instrumento = NULL) {
+
+  # 0) Forzar ordinal por list_name del instrumento (aunque survey$list_name sea NA)
+  if (!is.null(var_name) &&
+      !is.null(ordinal_list_names) &&
+      length(ordinal_list_names) > 0 &&
+      !is.null(instrumento) &&
+      !is.null(instrumento$survey) &&
+      all(c("name","type") %in% names(instrumento$survey))) {
+
+    surv <- instrumento$survey
+    i <- which(!is.na(surv$name) & as.character(surv$name) == var_name)[1]
+
+    if (!is.na(i)) {
+      # 1) intentar list_name directo si existe y está lleno
+      ln <- NA_character_
+      if ("list_name" %in% names(surv)) {
+        ln0 <- as.character(surv$list_name[i])
+        if (!is.na(ln0) && nzchar(trimws(ln0))) ln <- trimws(ln0)
+      }
+
+      # 2) fallback: extraer desde type: "select_one satisfaccion" -> "satisfaccion"
+      if (is.na(ln) || !nzchar(ln)) {
+        tp <- trimws(as.character(surv$type[i]))
+        if (!is.na(tp) && nzchar(tp) && grepl("^select_one\\b|^select_multiple\\b", tp)) {
+          ln2 <- sub("^(select_one|select_multiple)\\s+([^\\s]+).*$", "\\2", tp)
+          if (!is.na(ln2) && nzchar(ln2)) ln <- ln2
+        }
+      }
+
+      if (!is.na(ln) && nzchar(ln) && ln %in% ordinal_list_names) {
+        return("ORDINAL")
+      }
+    }
+  }
+
   # 1) Si viene medida explícita en el atributo, se respeta SIEMPRE
   m <- attr(x, "measure", exact = TRUE)
   if (!is.null(m)) {
     m <- tolower(as.character(m))
-    if (m %in% c("nominal", "ordinal", "scale")) {
-      return(toupper(m))  # "NOMINAL", "ORDINAL", "SCALE"
-    }
+    if (m %in% c("nominal","ordinal","scale")) return(toupper(m))
   }
 
-  # 2) Heurísticas de respaldo si NO hay "measure" definido
-  if (inherits(x, "haven_labelled")) {
-    labs <- attr(x, "labels", exact = TRUE)
-    if (!is.null(labs)) {
-      cods <- suppressWarnings(as.numeric(names(labs)))
-      if (all(!is.na(cods))) {
-        return("ORDINAL")
-      } else {
-        return("NOMINAL")
-      }
-    }
-    return("NOMINAL")
-  }
+  # 2) Si tiene value labels (aunque sea character), es categórica
+  labs <- attr(x, "labels", exact = TRUE)
+  if (!is.null(labs) && length(labs) > 0) return("NOMINAL")
 
-  if (is.factor(x)) {
-    return("NOMINAL")
-  }
+  # 3) haven_labelled sin labels -> nominal
+  if (inherits(x, "haven_labelled")) return("NOMINAL")
 
-  if (is.numeric(x)) {
-    return("SCALE")
-  }
+  # 4) factor -> nominal
+  if (is.factor(x)) return("NOMINAL")
 
-  # Para character u otros sin atributo "measure", no se define nada
+  # 5) numeric -> scale
+  if (is.numeric(x)) return("SCALE")
+
   NA_character_
 }
 
@@ -114,7 +140,9 @@ reporte_data <- function(data,
                          instrumento,
                          var_peso           = NULL,
                          dummy_vars         = NULL,
-                         dummies_na_to_zero = TRUE) {
+                         dummies_na_to_zero = TRUE,
+                         ordinal_vars       = NULL,
+                         ordinal_list_names = NULL) {
 
   if (!is.data.frame(data)) {
     stop("`data` debe ser un data.frame o tibble.", call. = FALSE)
@@ -174,7 +202,8 @@ reporte_data <- function(data,
     so_vars <- intersect(so_vars, names(data))
 
     for (v in so_vars) {
-      ln <- survey$list_name[survey$name == v][1]
+      idx <- which(!is.na(survey$name) & survey$name == v)
+      ln  <- if (length(idx)) survey$list_name[idx[1]] else NA_character_
       if (is.na(ln) || !ln %in% names(dicc_label_to_code)) next
 
       map_lab_to_code <- dicc_label_to_code[[ln]]   # labels -> codes (char)
@@ -213,7 +242,8 @@ reporte_data <- function(data,
 
     for (v in sm_vars) {
 
-      ln <- survey$list_name[survey$name == v][1]
+      idx <- which(!is.na(survey$name) & survey$name == v)
+      ln  <- if (length(idx)) survey$list_name[idx[1]] else NA_character_
 
       dict_code_to_lab <- NULL
       if (!is.na(ln) &&
@@ -366,11 +396,12 @@ reporte_data <- function(data,
     so_comunes <- intersect(so_vars, names(data))
 
     for (v in so_comunes) {
-      ln <- survey$list_name[survey$name == v][1]
+      idx <- which(!is.na(survey$name) & survey$name == v)
+      ln  <- if (length(idx)) survey$list_name[idx[1]] else NA_character_
       if (is.na(ln) || is.null(ln)) next
       if (is.null(dicc_code_to_label) || !ln %in% names(dicc_code_to_label)) next
 
-      labs <- dicc_code_to_label[[ln]]  # code -> label
+      labs <- dicc_code_to_label[[ln]]
       if (is.null(labs) || length(labs) == 0L) next
 
       labs <- stats::setNames(as.character(labs),
@@ -410,13 +441,17 @@ reporte_data <- function(data,
     }
   }
 
-  # -------------------------------------------------------------------------
   # 6b) Completar measure faltante con heurística SPSS-friendly
-  #      (no rompe nada: respeta lo que ya viene en attr("measure"))
-  # -------------------------------------------------------------------------
   for (v in names(data)) {
     if (is.null(attr(data[[v]], "measure"))) {
-      m_inf <- guess_spss_measure(data[[v]])
+
+      m_inf <- guess_spss_measure(
+        x                  = data[[v]],
+        var_name           = v,
+        ordinal_list_names = ordinal_list_names,
+        instrumento        = instrumento
+      )
+
       if (!is.na(m_inf)) {
         attr(data[[v]], "measure") <- tolower(m_inf)
       }

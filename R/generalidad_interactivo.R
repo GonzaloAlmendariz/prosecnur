@@ -11,6 +11,15 @@
 # Helpers internos (IGUAL que tu archivo)
 # -----------------------------------------------------------------------------
 
+.get_list_name_safe <- function(survey, var) {
+  if (is.null(survey) || !all(c("name","list_name") %in% names(survey))) return(NA_character_)
+  i <- which(!is.na(survey$name) & survey$name == var)[1]
+  if (is.na(i)) return(NA_character_)
+  ln <- as.character(survey$list_name[i])
+  if (is.na(ln) || !nzchar(ln)) return(NA_character_)
+  ln
+}
+
 .wrap_y <- function(x, width = 35) {
   x <- as.character(x)
   if (requireNamespace("stringr", quietly = TRUE)) {
@@ -31,7 +40,7 @@
       !is.null(surv) &&
       all(c("name", "list_name") %in% names(surv))) {
 
-    ln <- surv$list_name[surv$name == var][1]
+    ln <- .get_list_name_safe(surv, var)
     if (!is.na(ln) && ln %in% names(colores_apiladas_por_listname)) {
       pal <- colores_apiladas_por_listname[[ln]]
     }
@@ -84,22 +93,30 @@
 }
 
 .obtener_label_var <- function(var, instrumento, data = NULL) {
-  survey <- instrumento$survey
 
-  if (!is.null(survey) &&
-      all(c("name", "label") %in% names(survey)) &&
-      var %in% survey$name) {
+  var <- trimws(as.character(var)[1])
 
-    lab <- survey$label[survey$name == var][1]
-    if (!is.na(lab) && nzchar(as.character(lab))) return(as.character(lab))
+  surv <- instrumento$survey
+
+  if (!is.null(surv) && all(c("name","label") %in% names(surv))) {
+
+    nm <- trimws(as.character(surv$name))
+    i  <- which(!is.na(nm) & nm == var)[1]
+
+    if (!is.na(i)) {
+      lab <- surv$label[i]
+      if (!is.na(lab) && nzchar(trimws(as.character(lab)))) {
+        return(as.character(lab))
+      }
+    }
   }
 
   if (!is.null(data) && var %in% names(data)) {
     vl <- attr(data[[var]], "label", exact = TRUE)
-    if (!is.null(vl) && nzchar(as.character(vl))) return(as.character(vl))
+    if (!is.null(vl) && nzchar(trimws(as.character(vl)))) return(as.character(vl))
   }
 
-  as.character(var)
+  var
 }
 
 .wrap_titulo_html <- function(txt, width = 120) {
@@ -173,11 +190,11 @@
     stop("El `instrumento` debe contener `survey` válido.", call. = FALSE)
   }
 
-  fila_var <- survey[survey$name == var, , drop = FALSE]
-  if (nrow(fila_var) == 0L) {
+  idx_var <- which(!is.na(survey$name) & as.character(survey$name) == var)[1]
+  if (is.na(idx_var)) {
     stop("La variable '", var, "' no está en `instrumento$survey`.", call. = FALSE)
   }
-  list_main <- fila_var$list_name[1]
+  list_main <- as.character(survey$list_name[idx_var])
 
   if (!is.null(choices) &&
       all(c("list_name", "name", "label") %in% names(choices)) &&
@@ -655,7 +672,10 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
   data <- df %||% ctx$data
   inst <- ctx$instrumento
 
-  if (is.null(data) || !is.data.frame(data)) {
+  # ------------------------------------------------------------
+  # 0) Guardas
+  # ------------------------------------------------------------
+  if (is.null(data) || !is.data.frame(data) || is.null(inst)) {
     return(list(
       var_madre = var_madre,
       cols = character(0),
@@ -666,10 +686,10 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
   }
 
   # ------------------------------------------------------------
-  # 1) Detectar dummies disponibles
+  # 1) Detectar dummies disponibles (soporta v. y v_recod.)
   # ------------------------------------------------------------
   var_esc <- gsub("([\\W])", "\\\\\\1", var_madre)
-  pat_dum <- paste0("^", var_esc, "\\.")
+  pat_dum <- paste0("^", var_esc, "(\\.|_recod\\.)")
   cols <- grep(pat_dum, names(data), value = TRUE)
 
   # ------------------------------------------------------------
@@ -685,20 +705,25 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
 
   # ------------------------------------------------------------
   # 3) Obtener list_name y diccionario code->label desde inst
+  #    (NA-safe: evita el bug de surv$name con NA)
   # ------------------------------------------------------------
   surv <- inst$survey %||% NULL
   ch   <- inst$choices %||% NULL
 
   list_name <- NA_character_
-  if (!is.null(surv) && all(c("name","list_name") %in% names(surv)) && var_madre %in% surv$name) {
-    list_name <- as.character(surv$list_name[surv$name == var_madre][1])
-    if (is.na(list_name) || !nzchar(list_name)) list_name <- NA_character_
+  if (!is.null(surv) && all(c("name", "list_name") %in% names(surv))) {
+    i <- which(!is.na(surv$name) & surv$name == var_madre)[1]
+    if (!is.na(i)) {
+      list_name <- as.character(surv$list_name[i])
+      if (is.na(list_name) || !nzchar(list_name)) list_name <- NA_character_
+    }
   }
 
   map_code_to_label <- NULL
 
   # 3a) preferir choices del instrumento
-  if (!is.null(ch) && all(c("list_name","name") %in% names(ch))) {
+  if (!is.null(ch) && all(c("list_name", "name") %in% names(ch))) {
+
     # label puede ser "label" o "label::Spanish (ES)" etc.
     label_col <- NULL
     if ("label" %in% names(ch)) {
@@ -708,17 +733,22 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
       if (length(lab_candidates)) label_col <- lab_candidates[1]
     }
 
-    if (!is.na(list_name) && nzchar(list_name) && !is.null(label_col) && label_col %in% names(ch)) {
+    if (!is.na(list_name) && nzchar(list_name) &&
+        !is.null(label_col) && label_col %in% names(ch)) {
+
       ch_v <- ch[ch$list_name == list_name, , drop = FALSE]
       if (nrow(ch_v)) {
-        map_code_to_label <- stats::setNames(as.character(ch_v[[label_col]]), as.character(ch_v$name))
+        map_code_to_label <- stats::setNames(
+          as.character(ch_v[[label_col]]),
+          as.character(ch_v$name)
+        )
       }
     }
   }
 
-  # 3b) fallback: labels del atributo si existe alguna dummy con labels
+  # 3b) fallback: labels del atributo si existe (compacta o primera dummy)
   if (is.null(map_code_to_label)) {
-    # buscar en madre si existe, si no en primera dummy
+
     cand_attr <- NULL
     if (!is.na(col_compact) && col_compact %in% names(data)) cand_attr <- col_compact
     if (is.null(cand_attr) && length(cols)) cand_attr <- cols[1]
@@ -726,7 +756,10 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     if (!is.null(cand_attr) && cand_attr %in% names(data)) {
       labs <- attr(data[[cand_attr]], "labels", exact = TRUE)
       if (!is.null(labs) && length(labs) > 0) {
-        map_code_to_label <- stats::setNames(as.character(unname(labs)), as.character(names(labs)))
+        map_code_to_label <- stats::setNames(
+          as.character(unname(labs)),
+          as.character(names(labs))
+        )
       }
     }
   }
@@ -734,22 +767,22 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
   if (is.null(map_code_to_label)) map_code_to_label <- character(0)
 
   # ------------------------------------------------------------
-  # 4) Orden de opciones (codes) y reordenamiento de dummies
+  # 4) Ordenar opciones y reordenar dummies coherentemente
   # ------------------------------------------------------------
-  # helper: extraer code desde dummy "p106_recod.70" -> "70"
-  dummy_code <- function(x) sub(paste0("^", var_madre, "\\."), "", x)
+  # extraer code desde dummy: "p40.70" -> "70" ; "p40_recod.70" -> "70"
+  dummy_code <- function(x) {
+    sub(paste0("^", var_esc, "(\\.|_recod\\.)"), "", x)
+  }
 
   dummy_codes <- if (length(cols)) dummy_code(cols) else character(0)
 
-  # si hay compacta, intentar ordenar por aparición/choices
-  codes_order <- character(0)
-
   # 4a) si existe diccionario, usar su orden
+  codes_order <- character(0)
   if (length(map_code_to_label) > 0) {
     codes_order <- as.character(names(map_code_to_label))
   }
 
-  # 4b) si no, pero hay compacta, derivar codes existentes en data (split ;)
+  # 4b) fallback: si hay compacta, derivar codes existentes en data (split ;)
   if (!length(codes_order) && !is.na(col_compact) && col_compact %in% names(data)) {
     x <- as.character(data[[col_compact]])
     x <- x[!is.na(x) & nzchar(x) & x != "NA"]
@@ -761,18 +794,15 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     }
   }
 
-  # 4c) si no, usar codes de dummies
+  # 4c) fallback final: usar codes de dummies
   if (!length(codes_order) && length(dummy_codes)) {
     codes_order <- unique(dummy_codes)
   }
 
-  # ordenar con heurística numérica si aplica
+  # Orden numérico si aplica
   if (length(codes_order)) {
-    suppressWarnings({
-      num <- as.numeric(codes_order)
-    })
+    suppressWarnings(num <- as.numeric(codes_order))
     if (!all(is.na(num))) {
-      # mezcla numérica: ordenar numéricos primero, luego alfanuméricos
       ord <- order(is.na(num), num, codes_order)
       codes_order <- codes_order[ord]
     } else {
@@ -783,8 +813,17 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
   # Reordenar cols según codes_order
   if (length(cols) && length(codes_order)) {
     ord_idx <- match(dummy_codes, codes_order)
-    # los no encontrados al final
-    ord_idx[is.na(ord_idx)] <- max(ord_idx, na.rm = TRUE) + seq_len(sum(is.na(ord_idx)))
+    if (all(is.na(ord_idx))) {
+      # si por alguna razón no matchea, dejar como está
+      ord_idx <- seq_along(cols)
+    } else {
+      # los no encontrados al final, estable
+      nf <- is.na(ord_idx)
+      if (any(nf)) {
+        base <- max(ord_idx, na.rm = TRUE)
+        ord_idx[nf] <- base + seq_len(sum(nf))
+      }
+    }
     cols <- cols[order(ord_idx)]
   }
 
@@ -810,8 +849,6 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     col_compact = col_compact
   )
 }
-
-
 
 
 # -----------------------------------------------------------------------------

@@ -400,11 +400,11 @@ ppra_so_parent <- function(df, parent, path_instrumento, path_plantilla,
     i <- which(!is.na(x)); if (length(i)) code_final[i] <- x[i]
   }
 
-  is_other_legacy <- (tolower(code_final) == "other") | (tolower(base_code) == "other")
-  is_other_legacy[is.na(is_other_legacy)] <- FALSE
-  if (isTRUE(any(is_other_legacy, na.rm = TRUE)) && !is.na(orec_tpl)) {
+
+  if (!is.na(orec_tpl)) {
     y <- trimws(as.character(tmp[[orec_tpl]])); y[y==""] <- NA_character_
-    j <- which(is_other_legacy & !is.na(y)); if (length(j)) code_final[j] <- y[j]
+    j <- which(!is.na(y))
+    if (length(j)) code_final[j] <- y[j]
   }
 
   # override por texto de familias
