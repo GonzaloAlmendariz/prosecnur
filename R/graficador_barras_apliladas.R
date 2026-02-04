@@ -298,6 +298,19 @@ graficar_barras_apiladas <- function(
     df_long$.valor_plot <- df_long$.valor
   }
 
+
+  # 1.bis Normalizar por categoría para que cada barra sume exactamente 1 (100%)
+
+  df_long <- df_long |>
+    dplyr::group_by(.data[[var_categoria]]) |>
+    dplyr::mutate(
+      .suma_raw = sum(.valor_plot, na.rm = TRUE),
+      .valor_plot = dplyr::if_else(.suma_raw > 0,
+                                   .valor_plot / .suma_raw,
+                                   0)
+    ) |>
+    dplyr::ungroup()
+
   # ---------------------------------------------------------------------------
   # 1.1 Orden de grupos (segmentos) y orden de leyenda (separados)
   # ---------------------------------------------------------------------------
@@ -330,18 +343,13 @@ graficar_barras_apiladas <- function(
   }
   df_long[[var_categoria]] <- factor(cat_vec, levels = cat_lvls)
 
-  # Suma por categoría (longitud total de cada barra)
+  # Suma por categoría (tras normalización, debe ser 1 en todas)
   df_sum <- df_long |>
     dplyr::group_by(.data[[var_categoria]]) |>
     dplyr::summarise(suma = sum(.valor_plot, na.rm = TRUE), .groups = "drop")
 
-  max_suma <- max(df_sum$suma, na.rm = TRUE)
-
-  # Para gráficos tipo 100% (escala_valor = "proporcion_100"),
-  # forzar que el máximo del eje sea siempre 1 (100%)
-  if (escala_valor == "proporcion_100") {
-    max_suma <- 1
-  }
+  # Gráfico 100%: el eje debe ser 0–1 siempre
+  max_suma <- 1
 
   if (mostrar_barra_extra) {
     x_max <- max_suma * (1 + extra_derecha_rel)
@@ -387,11 +395,32 @@ graficar_barras_apiladas <- function(
       ) |>
       dplyr::ungroup()
 
-    # Formato de porcentajes: siempre enteros (redondeados)
-    pct_num <- df_lab$.valor_plot * 100
-    lab <- sprintf("%d%%", round(pct_num))
+    # Asignar porcentajes enteros que sumen 100 por barra (método "largest remainder")
+    .asignar_pct_100 <- function(p) {
+      p[is.na(p) | !is.finite(p)] <- 0
+      s <- sum(p)
+      if (s <= 0) return(rep(0L, length(p)))
 
-    df_lab$lab <- lab
+      p <- p / s
+      x <- p * 100
+      base <- floor(x)
+      resto <- 100L - sum(base)
+
+      if (resto > 0) {
+        frac <- x - base
+        idx <- order(frac, decreasing = TRUE)
+        base[idx[seq_len(resto)]] <- base[idx[seq_len(resto)]] + 1L
+      }
+      as.integer(base)
+    }
+
+    df_lab <- df_lab |>
+      dplyr::group_by(!!rlang::sym(var_categoria)) |>
+      dplyr::mutate(
+        .pct_int = .asignar_pct_100(.valor_plot),
+        lab = paste0(.pct_int, "%")
+      ) |>
+      dplyr::ungroup()
 
     # Clasificar etiquetas según umbrales (grande / pequeña / oculta)
     df_lab <- df_lab |>

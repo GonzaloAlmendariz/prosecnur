@@ -134,6 +134,7 @@ graficar_barras_agrupadas <- function(
     size_barra_extra          = 3,
     color_ejes                = "#004B8D",
     size_ejes                 = 9,
+    usar_eje_libre            = FALSE,
     color_fondo               = NA,
     grosor_barras             = 0.6,
     extra_derecha_rel         = 0.25,
@@ -372,23 +373,30 @@ graficar_barras_agrupadas <- function(
   if (es_proporcion) {
 
     if (orientacion == "horizontal") {
-      # Mantener la lógica 0–100% fija para horizontales
+
+      # --- NUEVO: máximo base del eje ---
+      max_base <- if (isTRUE(usar_eje_libre)) max_valor else 1
+
+      # --- espacio para barra extra ---
       if (mostrar_barra_extra) {
-        y_lim   <- 1 + extra_derecha_rel
-        y_extra <- 1 + extra_derecha_rel * 0.5
+        y_lim   <- max_base * (1 + extra_derecha_rel)
+        y_extra <- max_base * (1 + extra_derecha_rel * 0.5)
       } else {
-        y_lim   <- 1
+        y_lim   <- max_base
         y_extra <- NA_real_
       }
+
+      # --- breaks dinámicos (en lugar de seq(0.25, 1, ...)) ---
+      breaks_y <- scales::pretty_breaks(n = 4)(c(0, max_base))
+      breaks_y <- breaks_y[breaks_y >= 0 & breaks_y <= max_base]
 
       p <- p +
         ggplot2::scale_y_continuous(
           limits = c(0, y_lim),
-          breaks = seq(0.25, 1, by = 0.25),
+          breaks = breaks_y,
           labels = scales::percent_format(accuracy = 1),
           expand = ggplot2::expansion(mult = c(0, 0.02))
         )
-
     } else {
       # VERTICAL: escala libre según los datos (pero manteniendo %)
       if (mostrar_barra_extra) {

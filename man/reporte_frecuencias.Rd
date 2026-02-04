@@ -13,49 +13,14 @@ reporte_frecuencias(
   sm_vars_force = NULL,
   fuente = "Pulso PUCP",
   mostrar_todo = FALSE,
-  codigos_solo_si_presentes = NULL
+  codigos_solo_si_presentes = NULL,
+  numericas = NULL
 )
 }
 \arguments{
-\item{data}{Data frame o tibble, idealmente el objeto devuelto por
-\code{\link[=reporte_data]{reporte_data()}}, que contiene los atributos \code{label} y \code{labels}.}
-
-\item{instrumento}{Objeto devuelto por \code{\link[=reporte_instrumento]{reporte_instrumento()}}. Si es
-\code{NULL}, se intentará recuperarlo desde \code{attr(data, "instrumento_reporte")}.}
-
-\item{secciones}{Lista nombrada que define qué variables se incluyen en cada
-sección. Si es \code{NULL}, se intentará inferirla desde una columna
-\code{section} o \code{seccion} del \code{survey}.}
-
-\item{path_xlsx}{Ruta del archivo Excel a generar.}
-
-\item{orden}{\code{"desc"}, \code{"asc"} o \code{"original"} para el orden de las
-categorías dentro de cada tabla.}
-
-\item{sm_vars_force}{Vector opcional de variables que deben tratarse como
-\code{select_multiple} aunque el instrumento no las marque como tales.}
-
-\item{fuente}{Texto de fuente que se mostrará al pie de cada tabla.}
-
-\item{mostrar_todo}{Lógico; si \code{TRUE}, se pasa como tal a
-\code{\link[=exportar_frecuencias_spss]{exportar_frecuencias_spss()}} y, en consecuencia, a \code{\link[=freq_table_spss]{freq_table_spss()}},
-mostrando todas las categorías definidas en el instrumento, incluso con
-frecuencia 0 (salvo las indicadas en \code{codigos_solo_si_presentes} que no
-tengan casos).}
-
-\item{codigos_solo_si_presentes}{Vector opcional de códigos que solo se
-completarán si aparecen en la data.}
-}
-\value{
-Invisiblemente, la ruta normalizada del archivo Excel generado.
+\item{numericas}{Vector de variables numéricas (declaradas) para generar tabla
+de resumen en lugar de n/\%.}
 }
 \description{
-\code{reporte_frecuencias()} toma una base ya adaptada para reporte (típicamente
-el resultado de \code{\link[=reporte_data]{reporte_data()}}) y genera un archivo Excel con tablas de
-frecuencias simples (n y \%), organizadas por secciones.
-}
-\details{
-Utiliza la información del instrumento (\code{survey}, \code{orders_list}) para
-construir etiquetas de variables y ordenar categorías. Internamente llama
-a \code{\link[=exportar_frecuencias_spss]{exportar_frecuencias_spss()}}.
+Generar reporte de frecuencias en Excel a partir de una base de reporte
 }

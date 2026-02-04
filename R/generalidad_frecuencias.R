@@ -269,6 +269,131 @@ split_sm_tokens <- function(x) {
 }
 
 # ============================
+# Helper para resumen numérico
+# ============================
+
+#' @noRd
+.resumen_numerico_w <- function(x, w, probs = c(.25, .5, .75), digits = 1) {
+  x <- suppressWarnings(as.numeric(x))
+  w <- suppressWarnings(as.numeric(w))
+
+  idx <- is.finite(x) & !is.na(x) & is.finite(w) & !is.na(w) & w > 0
+  if (!any(idx)) {
+    return(tibble::tibble(
+      estadistico = c("N válido", "Media", "Desv. estándar", "Mínimo", "P25", "Mediana", "P75", "Máximo"),
+      valor = c(0, rep(NA_real_, 7))
+    ))
+  }
+
+  x <- x[idx]; w <- w[idx]
+  n_val <- length(x)
+
+  # Media ponderada
+  mu <- stats::weighted.mean(x, w, na.rm = TRUE)
+
+  # Varianza ponderada (tipo “frecuencia”; estable y suficiente para reporte)
+  wsum <- sum(w)
+  var_w <- if (wsum > 0) sum(w * (x - mu)^2) / wsum else NA_real_
+  sd_w  <- sqrt(var_w)
+
+  # Cuantiles ponderados (simple, robusto; sin depender de paquetes extra)
+  ord <- order(x)
+  x2 <- x[ord]; w2 <- w[ord]
+  cw <- cumsum(w2) / sum(w2)
+
+  wq <- function(p) {
+    j <- which(cw >= p)[1]
+    if (is.na(j)) NA_real_ else x2[j]
+  }
+
+  q25 <- wq(probs[1]); q50 <- wq(probs[2]); q75 <- wq(probs[3])
+
+  out <- tibble::tibble(
+    estadistico = c("N válido", "Media", "Desv. estándar", "Mínimo", "P25", "Mediana", "P75", "Máximo"),
+    valor = c(
+      n_val,
+      round(mu, digits),
+      round(sd_w, digits),
+      round(min(x2), digits),
+      round(q25, digits),
+      round(q50, digits),
+      round(q75, digits),
+      round(max(x2), digits)
+    )
+  )
+
+  out
+}
+
+#' @noRd
+write_one_numeric <- function(wb, sheet, data, var, dic_vars,
+                              labels_override = NULL,
+                              start_row = 1, start_col = 1,
+                              fuente = "Pulso PUCP",
+                              orders_list = NULL) {
+
+  st <- mk_styles_spss()
+  fila <- start_row
+
+  label_q <- titulo_var(
+    var,
+    dic_vars,
+    labels_override,
+    orders_list = orders_list,
+    df = data
+  )
+
+  # Título (merge 2 cols: Estadístico / Valor)
+  openxlsx::writeData(wb, sheet, label_q, startRow = fila, startCol = start_col, colNames = FALSE)
+  openxlsx::mergeCells(wb, sheet, cols = start_col:(start_col + 1), rows = fila:fila)
+  openxlsx::addStyle(wb, sheet, st$q_title, rows = fila, cols = start_col, gridExpand = TRUE, stack = TRUE)
+  openxlsx::setRowHeights(
+    wb, sheet, rows = fila,
+    heights = .auto_row_height(label_q, chars_per_line = 70, base = 24, per_line = 16)
+  )
+  fila <- fila + 1
+
+  # Header
+  header_vec <- c("Estadístico", "Valor")
+  openxlsx::writeData(wb, sheet, t(header_vec), startRow = fila, startCol = start_col, colNames = FALSE)
+  openxlsx::addStyle(wb, sheet, st$header, rows = fila, cols = start_col:(start_col + 1), gridExpand = TRUE, stack = TRUE)
+  fila <- fila + 1
+
+  # Tabla numérica ponderada (usa tu .peso_vec)
+  w <- .peso_vec(data)
+  tabn <- .resumen_numerico_w(data[[var]], w)
+
+  openxlsx::writeData(wb, sheet, tabn, startRow = fila, startCol = start_col, colNames = FALSE)
+
+  r_ini <- fila
+  r_fin <- fila + nrow(tabn) - 1
+
+  openxlsx::addStyle(wb, sheet, st$body_txt, rows = r_ini:r_fin, cols = start_col, gridExpand = TRUE)
+  openxlsx::addStyle(wb, sheet, st$body_int, rows = r_ini:r_fin, cols = start_col + 1, gridExpand = TRUE)
+
+  fila <- r_fin + 1
+
+  # Línea final
+  openxlsx::addStyle(wb, sheet, st$table_end, rows = r_fin, cols = start_col:(start_col + 1), gridExpand = TRUE, stack = TRUE)
+
+  # Fuente
+  openxlsx::writeData(wb, sheet, paste0("Fuente: ", fuente), startRow = fila, startCol = start_col, colNames = FALSE)
+  openxlsx::addStyle(
+    wb, sheet,
+    openxlsx::createStyle(fontSize = 9, fontColour = "#666666", halign = "left", fontName = "Arial"),
+    rows = fila, cols = start_col, gridExpand = TRUE
+  )
+  openxlsx::mergeCells(wb, sheet, rows = fila, cols = start_col:(start_col + 1))
+
+  # Anchos (compatibles con tu layout general)
+  openxlsx::setColWidths(wb, sheet, cols = start_col,     widths = 55)
+  openxlsx::setColWidths(wb, sheet, cols = start_col + 1, widths = 18)
+
+  fila + 2
+}
+
+
+# ============================
 # freq_table_spss
 # ============================
 
@@ -625,6 +750,311 @@ mk_styles_spss <- function() {
   )
 }
 
+
+
+# =============================================================================
+# Nuevo: FRECUENCIAS (CATEGÓRICAS) + RESUMEN NUMÉRICO (DECLARADO)
+# - NO rompe lo existente: freq_table_spss() queda igual.
+# - Se agrega write_one_numeric() y soporte `numericas=` en export/reporte.
+# =============================================================================
+
+
+# =============================================================================
+# freq_table_spss
+# =============================================================================
+
+#' Tabla de frecuencias ponderadas para una variable
+#'
+#' Calcula una tabla de frecuencias (n y porcentaje) para una variable de la
+#' base de reporte. Soporta variables de tipo elección múltiple (`select_multiple`)
+#' codificadas como:
+#' \itemize{
+#'   \item Variable madre con códigos separados por `";"` (p. ej. `"1;3;4"`).
+#'   \item Dummies derivadas:
+#'     \itemize{
+#'       \item Formato original tipo KoBo: `var/cod`.
+#'       \item Formato normalizado tipo SPSS: `var.cod` (solo dummies, sin madre).
+#'     }
+#' }
+#'
+#' La identificación de que una variable es `select_multiple` se basa en:
+#' \itemize{
+#'   \item El `survey` (tipo `select_multiple` para `name == var`), o
+#'   \item El argumento `sm_vars_force`, o
+#'   \item La existencia de dummies asociadas (`var/cod` o `var.cod`) aunque
+#'         la madre no exista como columna.
+#' }
+#'
+#' La función utiliza, cuando están disponibles:
+#' \itemize{
+#'   \item Atributos `labels` de la variable en `data` (para mapear códigos a
+#'         etiquetas), en el caso de madres “pegadas”.
+#'   \item `orders_list` (si se proporciona) para ordenar las categorías según
+#'         el instrumento.
+#'   \item Una variable de peso llamada `peso` en `data`. Si no existe, se
+#'         asume peso 1 para todos los casos.
+#' }
+#'
+#' El argumento `codigos_solo_si_presentes` permite declarar códigos especiales
+#' (normalmente definidos en `orders_list[[var]]$names`) que **no** se completan
+#' con filas de `n = 0` cuando `mostrar_todo = TRUE` si no hay casos en la
+#' variable.
+#'
+#' @export
+freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
+                            orders_list = NULL, mostrar_todo = FALSE,
+                            codigos_solo_si_presentes = NULL) {
+
+  if (!is.data.frame(data)) {
+    stop("`data` debe ser un data.frame o tibble.", call. = FALSE)
+  }
+
+  # Detectar presencia de madre y dummies
+  has_main <- var %in% names(data)
+
+  var_escaped   <- gsub("([\\W])", "\\\\\\1", var)
+  subvars_slash <- names(data)[grepl(paste0("^", var_escaped, "/"), names(data))]
+  subvars_dot   <- names(data)[grepl(paste0("^", var_escaped, "\\.[^.]+$"), names(data))]
+
+  subvars_all <- c(subvars_slash, subvars_dot)
+  has_dummies <- length(subvars_all) > 0L
+
+  if (!has_main && !has_dummies) {
+    stop("`", var, "` no se encuentra en `data` ni se detectaron dummies asociadas.",
+         call. = FALSE)
+  }
+
+  tipo <- tipo_pregunta_spss(var, survey, sm_vars_force)
+  if (tipo != "sm" && has_dummies) tipo <- "sm"
+
+  w <- .peso_vec(data)
+
+  # ----------------------------
+  # select_multiple
+  # ----------------------------
+  if (tipo == "sm") {
+
+    # Caso 1: madre pegada
+    if (has_main && (is.character(data[[var]]) || is.factor(data[[var]]))) {
+
+      vec <- as.character(data[[var]])
+      df_long <- tibble::tibble(id = seq_len(nrow(data)), valor = vec) |>
+        dplyr::filter(!is.na(valor) & nzchar(valor) & valor != "NA") |>
+        dplyr::mutate(tokens = split_sm_tokens(valor)) |>
+        dplyr::select(-valor) |>
+        tidyr::unnest_longer(tokens, values_to = "op") |>
+        dplyr::mutate(op = trimws(op)) |>
+        dplyr::filter(nzchar(op)) |>
+        dplyr::distinct(id, op)
+
+      if (!nrow(df_long)) {
+        return(tibble::tibble(Opciones = character(), n = numeric(), pct = numeric()))
+      }
+
+      ids_con_marca <- sort(unique(df_long$id))
+      denom <- sum(w[ids_con_marca], na.rm = TRUE)
+
+      tab <- df_long |>
+        dplyr::left_join(
+          tibble::tibble(id = seq_len(nrow(data)), peso = w),
+          by = "id"
+        ) |>
+        dplyr::group_by(op) |>
+        dplyr::summarise(n = sum(peso, na.rm = TRUE), .groups = "drop") |>
+        dplyr::arrange(dplyr::desc(n)) |>
+        dplyr::transmute(
+          Opciones = op,
+          n        = as.numeric(n),
+          pct      = if (denom > 0) n / denom else NA_real_
+        )
+
+      tab <- .map_from_attr_labels(tab, var, data)
+      tab <- .map_to_labels(tab, var, orders_list)
+      tab <- .completar_categorias(
+        tab, var, orders_list, denom,
+        mostrar_todo = mostrar_todo,
+        codigos_solo_si_presentes = codigos_solo_si_presentes
+      )
+      tab <- .reordenar_por_instrumento(tab, var, orders_list)
+      tab <- .move_ns_pref_last(tab)
+
+      total_row <- tibble::tibble(Opciones = "Total", n = as.numeric(denom), pct = 1)
+      return(dplyr::bind_rows(tab, total_row))
+    }
+
+    # Caso 2: solo dummies
+    if (!length(subvars_all)) {
+      return(tibble::tibble(Opciones = character(), n = numeric(), pct = numeric()))
+    }
+
+    mat <- as.data.frame(data[, subvars_all, drop = FALSE])
+    mat[] <- lapply(mat, function(v) suppressWarnings(as.numeric(as.character(v))))
+
+    has_any <- rowSums(mat == 1, na.rm = TRUE) > 0
+    denom   <- sum(w[has_any], na.rm = TRUE)
+
+    n_w <- vapply(subvars_all, function(sv) {
+      v <- suppressWarnings(as.numeric(as.character(mat[[sv]])))
+      sum(w[v == 1 & !is.na(v)], na.rm = TRUE)
+    }, numeric(1))
+
+    tab <- tibble::tibble(subvar = subvars_all, n = as.numeric(n_w)) |>
+      dplyr::mutate(
+        Opciones = sub(paste0("^", var_escaped, "[/\\.]"), "", subvar)
+      ) |>
+      dplyr::arrange(dplyr::desc(n)) |>
+      dplyr::transmute(
+        Opciones,
+        n,
+        pct = if (denom > 0) n / denom else NA_real_
+      )
+
+    tab <- .map_to_labels(tab, var, orders_list)
+    tab <- .completar_categorias(
+      tab, var, orders_list, denom,
+      mostrar_todo = mostrar_todo,
+      codigos_solo_si_presentes = codigos_solo_si_presentes
+    )
+    tab <- .reordenar_por_instrumento(tab, var, orders_list)
+    tab <- .move_ns_pref_last(tab)
+
+    total_row <- tibble::tibble(Opciones = "Total", n = as.numeric(denom), pct = 1)
+    return(dplyr::bind_rows(tab, total_row))
+  }
+
+  # ----------------------------
+  # select_one / abierta
+  # ----------------------------
+  if (!has_main) {
+    stop("`", var, "` no existe como columna en `data` y no se detectó como ",
+         "pregunta de respuesta múltiple con dummies.", call. = FALSE)
+  }
+
+  tib <- data |>
+    dplyr::transmute(.op = as.character(.data[[var]]), peso = w) |>
+    dplyr::filter(!is.na(.op) & nzchar(.op) & .op != "NA")
+
+  if (!nrow(tib)) {
+    return(tibble::tibble(Opciones = character(), n = numeric(), pct = numeric()))
+  }
+
+  denom <- sum(tib$peso, na.rm = TRUE)
+
+  tab <- tib |>
+    dplyr::group_by(.op) |>
+    dplyr::summarise(n = sum(peso, na.rm = TRUE), .groups = "drop") |>
+    dplyr::arrange(dplyr::desc(n)) |>
+    dplyr::mutate(pct = if (denom > 0) n / denom else NA_real_) |>
+    dplyr::rename(Opciones = .op)
+
+  tab <- .map_from_attr_labels(tab, var, data)
+  tab <- .map_to_labels(tab, var, orders_list)
+  tab <- .completar_categorias(
+    tab, var, orders_list, denom,
+    mostrar_todo = mostrar_todo,
+    codigos_solo_si_presentes = codigos_solo_si_presentes
+  )
+  tab <- .reordenar_por_instrumento(tab, var, orders_list)
+  tab <- .move_ns_pref_last(tab)
+
+  total_row <- tibble::tibble(Opciones = "Total", n = sum(tab$n, na.rm = TRUE), pct = 1)
+  dplyr::bind_rows(tab, total_row)
+}
+
+
+# =============================================================================
+# Estilos y escritura en Excel
+# =============================================================================
+
+#' @noRd
+mk_styles_spss <- function() {
+  list(
+    sec_title = openxlsx::createStyle(
+      fontSize = 18,
+      textDecoration = NULL,
+      halign = "center",
+      valign = "center",
+      wrapText = TRUE,
+      fgFill = "#FFFFFF",
+      fontColour = "#000000",
+      fontName = "Arial"
+    ),
+    q_title = openxlsx::createStyle(
+      fontSize = 11,
+      textDecoration = "italic",
+      halign = "left",
+      valign = "center",
+      wrapText = TRUE,
+      fgFill = "#FFFFFF",
+      fontColour = "#000000",
+      fontName = "Arial"
+    ),
+    header = openxlsx::createStyle(
+      fontSize = 10,
+      textDecoration = NULL,
+      border = c("top", "bottom"),
+      borderStyle = "thin",
+      borderColour = "#000000",
+      halign = "center",
+      valign = "center",
+      fgFill = "#FFFFFF",
+      fontName = "Arial"
+    ),
+    body_txt = openxlsx::createStyle(
+      fontSize = 10,
+      textDecoration = NULL,
+      border = c(),
+      halign = "left",
+      valign = "center",
+      fgFill = "#FFFFFF",
+      fontName = "Arial",
+      wrapText = TRUE
+    ),
+    body_int = openxlsx::createStyle(
+      fontSize = 10,
+      textDecoration = NULL,
+      numFmt = "#,##0",
+      border = c(),
+      halign = "right",
+      valign = "center",
+      fgFill = "#FFFFFF",
+      fontName = "Arial"
+    ),
+    body_pct = openxlsx::createStyle(
+      fontSize = 10,
+      textDecoration = NULL,
+      numFmt = "0.0%",
+      border = c(),
+      halign = "right",
+      valign = "center",
+      fgFill = "#FFFFFF",
+      fontName = "Arial"
+    ),
+    total_row = openxlsx::createStyle(
+      fontSize = 10,
+      textDecoration = NULL,
+      numFmt = "#,##0",
+      halign = "right",
+      valign = "center",
+      fgFill = "#FFFFFF",
+      fontName = "Arial"
+    ),
+    total_label = openxlsx::createStyle(
+      fontSize = 10,
+      textDecoration = NULL,
+      halign = "left",
+      valign = "center",
+      fgFill = "#FFFFFF",
+      fontName = "Arial"
+    ),
+    table_end = openxlsx::createStyle(
+      border = c("bottom"),
+      borderStyle = "thin",
+      borderColour = "#000000"
+    )
+  )
+}
+
 #' @noRd
 write_one_freq <- function(wb, sheet, data, var, dic_vars,
                            survey = NULL, sm_vars_force = NULL,
@@ -634,6 +1064,7 @@ write_one_freq <- function(wb, sheet, data, var, dic_vars,
                            orders_list = NULL,
                            mostrar_todo = FALSE,
                            codigos_solo_si_presentes = NULL) {
+
   st <- mk_styles_spss()
   fila <- start_row
 
@@ -642,31 +1073,21 @@ write_one_freq <- function(wb, sheet, data, var, dic_vars,
     dic_vars,
     labels_override,
     orders_list = orders_list,
-    df         = data
+    df = data
   )
 
-  openxlsx::writeData(wb, sheet, label_q,
-                      startRow = fila, startCol = start_col, colNames = FALSE)
-  openxlsx::mergeCells(wb, sheet,
-                       cols = start_col:(start_col + 2),
-                       rows = fila:fila)
-  openxlsx::addStyle(wb, sheet, st$q_title,
-                     rows = fila, cols = start_col,
-                     gridExpand = TRUE, stack = TRUE)
+  openxlsx::writeData(wb, sheet, label_q, startRow = fila, startCol = start_col, colNames = FALSE)
+  openxlsx::mergeCells(wb, sheet, cols = start_col:(start_col + 2), rows = fila:fila)
+  openxlsx::addStyle(wb, sheet, st$q_title, rows = fila, cols = start_col, gridExpand = TRUE, stack = TRUE)
   openxlsx::setRowHeights(
     wb, sheet, rows = fila,
-    heights = .auto_row_height(label_q, chars_per_line = 70,
-                               base = 24, per_line = 16)
+    heights = .auto_row_height(label_q, chars_per_line = 70, base = 24, per_line = 16)
   )
   fila <- fila + 1
 
   header_vec <- c("", "n", "%")
-  openxlsx::writeData(wb, sheet, t(header_vec),
-                      startRow = fila, startCol = start_col, colNames = FALSE)
-  openxlsx::addStyle(wb, sheet, st$header,
-                     rows = fila,
-                     cols = start_col:(start_col + 2),
-                     gridExpand = TRUE, stack = TRUE)
+  openxlsx::writeData(wb, sheet, t(header_vec), startRow = fila, startCol = start_col, colNames = FALSE)
+  openxlsx::addStyle(wb, sheet, st$header, rows = fila, cols = start_col:(start_col + 2), gridExpand = TRUE, stack = TRUE)
   fila <- fila + 1
 
   tab <- freq_table_spss(
@@ -680,117 +1101,133 @@ write_one_freq <- function(wb, sheet, data, var, dic_vars,
   )
 
   if (!nrow(tab)) {
-    openxlsx::writeData(wb, sheet, "Sin datos",
-                        startRow = fila, startCol = start_col)
+    openxlsx::writeData(wb, sheet, "Sin datos", startRow = fila, startCol = start_col)
     return(fila + 2)
   }
 
-  is_total <- tab$Opciones == "Total"
-  body_rows <- if (any(is_total)) tab[!is_total, , drop = FALSE] else tab
-  total_row <- if (any(is_total)) tab[ is_total, , drop = FALSE] else NULL
+  is_total   <- tab$Opciones == "Total"
+  body_rows  <- if (any(is_total)) tab[!is_total, , drop = FALSE] else tab
+  total_row  <- if (any(is_total)) tab[ is_total, , drop = FALSE] else NULL
 
   if (nrow(body_rows)) {
-    openxlsx::writeData(wb, sheet, body_rows,
-                        startRow = fila, startCol = start_col,
-                        colNames = FALSE)
-    r_ini <- fila; r_fin <- fila + nrow(body_rows) - 1
+    openxlsx::writeData(wb, sheet, body_rows, startRow = fila, startCol = start_col, colNames = FALSE)
+    r_ini <- fila
+    r_fin <- fila + nrow(body_rows) - 1
 
-    openxlsx::addStyle(wb, sheet, st$body_txt,
-                       rows = r_ini:r_fin, cols = start_col,
-                       gridExpand = TRUE)
-    openxlsx::addStyle(wb, sheet, st$body_int,
-                       rows = r_ini:r_fin, cols = start_col + 1,
-                       gridExpand = TRUE)
-    openxlsx::addStyle(wb, sheet, st$body_pct,
-                       rows = r_ini:r_fin, cols = start_col + 2,
-                       gridExpand = TRUE)
+    openxlsx::addStyle(wb, sheet, st$body_txt, rows = r_ini:r_fin, cols = start_col,     gridExpand = TRUE)
+    openxlsx::addStyle(wb, sheet, st$body_int, rows = r_ini:r_fin, cols = start_col + 1, gridExpand = TRUE)
+    openxlsx::addStyle(wb, sheet, st$body_pct, rows = r_ini:r_fin, cols = start_col + 2, gridExpand = TRUE)
 
     fila <- r_fin + 1
   }
 
   if (!is.null(total_row) && nrow(total_row)) {
-    openxlsx::writeData(wb, sheet, total_row,
-                        startRow = fila, startCol = start_col,
-                        colNames = FALSE)
-    openxlsx::addStyle(wb, sheet, st$total_label,
-                       rows = fila, cols = start_col,
-                       gridExpand = TRUE)
-    openxlsx::addStyle(wb, sheet, st$total_row,
-                       rows = fila, cols = start_col + 1,
-                       gridExpand = TRUE)
-    openxlsx::addStyle(wb, sheet, st$total_row,
-                       rows = fila, cols = start_col + 2,
-                       gridExpand = TRUE)
+    openxlsx::writeData(wb, sheet, total_row, startRow = fila, startCol = start_col, colNames = FALSE)
 
-    openxlsx::addStyle(wb, sheet, st$table_end,
-                       rows = fila,
-                       cols = start_col:(start_col + 2),
-                       gridExpand = TRUE, stack = TRUE)
+    openxlsx::addStyle(wb, sheet, st$total_label, rows = fila, cols = start_col,     gridExpand = TRUE)
+    openxlsx::addStyle(wb, sheet, st$total_row,   rows = fila, cols = start_col + 1, gridExpand = TRUE)
+    openxlsx::addStyle(wb, sheet, st$total_row,   rows = fila, cols = start_col + 2, gridExpand = TRUE)
 
+    openxlsx::addStyle(wb, sheet, st$table_end, rows = fila, cols = start_col:(start_col + 2), gridExpand = TRUE, stack = TRUE)
     fila <- fila + 1
   } else {
-    openxlsx::addStyle(wb, sheet, st$table_end,
-                       rows = max(start_row + 1, fila - 1),
-                       cols = start_col:(start_col + 2),
-                       gridExpand = TRUE, stack = TRUE)
+    openxlsx::addStyle(
+      wb, sheet, st$table_end,
+      rows = max(start_row + 1, fila - 1),
+      cols = start_col:(start_col + 2),
+      gridExpand = TRUE, stack = TRUE
+    )
   }
 
-  openxlsx::writeData(wb, sheet, paste0("Fuente: ", fuente),
-                      startRow = fila, startCol = start_col, colNames = FALSE)
+  openxlsx::writeData(wb, sheet, paste0("Fuente: ", fuente), startRow = fila, startCol = start_col, colNames = FALSE)
   openxlsx::addStyle(
     wb, sheet,
-    openxlsx::createStyle(
-      fontSize   = 9,
-      fontColour = "#666666",
-      halign     = "left",
-      fontName   = "Arial"
-    ),
+    openxlsx::createStyle(fontSize = 9, fontColour = "#666666", halign = "left", fontName = "Arial"),
     rows = fila, cols = start_col, gridExpand = TRUE
   )
+
   openxlsx::setColWidths(wb, sheet, cols = start_col,     widths = 55)
   openxlsx::setColWidths(wb, sheet, cols = start_col + 1, widths = 14)
   openxlsx::setColWidths(wb, sheet, cols = start_col + 2, widths = 14)
 
-  return(fila + 2)
+  fila + 2
 }
 
-# ============================
+#' @noRd
+write_one_numeric <- function(wb, sheet, data, var, dic_vars,
+                              labels_override = NULL,
+                              start_row = 1, start_col = 1,
+                              fuente = "Pulso PUCP",
+                              orders_list = NULL) {
+
+  st <- mk_styles_spss()
+  fila <- start_row
+
+  label_q <- titulo_var(
+    var,
+    dic_vars,
+    labels_override,
+    orders_list = orders_list,
+    df = data
+  )
+
+  openxlsx::writeData(wb, sheet, label_q, startRow = fila, startCol = start_col, colNames = FALSE)
+  openxlsx::mergeCells(wb, sheet, cols = start_col:(start_col + 1), rows = fila:fila)
+  openxlsx::addStyle(wb, sheet, st$q_title, rows = fila, cols = start_col, gridExpand = TRUE, stack = TRUE)
+  openxlsx::setRowHeights(
+    wb, sheet, rows = fila,
+    heights = .auto_row_height(label_q, chars_per_line = 70, base = 24, per_line = 16)
+  )
+  fila <- fila + 1
+
+  header_vec <- c("Estadístico", "Valor")
+  openxlsx::writeData(wb, sheet, t(header_vec), startRow = fila, startCol = start_col, colNames = FALSE)
+  openxlsx::addStyle(wb, sheet, st$header, rows = fila, cols = start_col:(start_col + 1), gridExpand = TRUE, stack = TRUE)
+  fila <- fila + 1
+
+  w    <- .peso_vec(data)
+  tabn <- .resumen_numerico_w(data[[var]], w)
+
+  if (!nrow(tabn)) {
+    openxlsx::writeData(wb, sheet, "Sin datos", startRow = fila, startCol = start_col)
+    return(fila + 2)
+  }
+
+  openxlsx::writeData(wb, sheet, tabn, startRow = fila, startCol = start_col, colNames = FALSE)
+
+  r_ini <- fila
+  r_fin <- fila + nrow(tabn) - 1
+
+  openxlsx::addStyle(wb, sheet, st$body_txt, rows = r_ini:r_fin, cols = start_col,     gridExpand = TRUE)
+  openxlsx::addStyle(wb, sheet, st$body_int, rows = r_ini:r_fin, cols = start_col + 1, gridExpand = TRUE)
+
+  openxlsx::addStyle(wb, sheet, st$table_end, rows = r_fin, cols = start_col:(start_col + 1), gridExpand = TRUE, stack = TRUE)
+
+  fila <- r_fin + 1
+
+  openxlsx::writeData(wb, sheet, paste0("Fuente: ", fuente), startRow = fila, startCol = start_col, colNames = FALSE)
+  openxlsx::addStyle(
+    wb, sheet,
+    openxlsx::createStyle(fontSize = 9, fontColour = "#666666", halign = "left", fontName = "Arial"),
+    rows = fila, cols = start_col, gridExpand = TRUE
+  )
+  openxlsx::mergeCells(wb, sheet, rows = fila, cols = start_col:(start_col + 1))
+
+  openxlsx::setColWidths(wb, sheet, cols = start_col,     widths = 55)
+  openxlsx::setColWidths(wb, sheet, cols = start_col + 1, widths = 18)
+
+  fila + 2
+}
+
+
+# =============================================================================
 # exportar_frecuencias_spss
-# ============================
+# =============================================================================
 
 #' Exportar tablas de frecuencias a Excel por secciones
 #'
-#' Función de nivel intermedio que recibe una base de datos, un diccionario
-#' de variables y una lista de secciones, y genera un archivo Excel con tablas
-#' de frecuencias simples (n y %) para cada variable indicada.
-#'
-#' Suele llamarse desde [reporte_frecuencias()], que se encarga de construir
-#' `dic_vars` y `SECCIONES` a partir del instrumento.
-#'
-#' @param data Data frame o tibble con la base de datos.
-#' @param dic_vars Tibble con al menos las columnas `name` y `label`.
-#' @param SECCIONES Lista nombrada donde cada elemento es un vector de nombres
-#'   de variables a incluir en esa sección.
-#' @param labels_override Vector nombrado opcional para sobrescribir etiquetas
-#'   de algunas variables en los títulos de tabla.
-#' @param path_xlsx Ruta del archivo Excel a generar.
-#' @param orden Criterio de ordenamiento interno de las categorías: `"desc"`,
-#'   `"asc"` o `"original"`.
-#' @param sm_vars_force Vector opcional de variables que deben tratarse como
-#'   `select_multiple` aunque el instrumento no las marque como tales.
-#' @param fuente Texto que se mostrará como fuente al pie de cada tabla.
-#' @param orders_list Lista opcional con información de orden de categorías
-#'   por variable.
-#' @param survey Tibble con la hoja `survey` del instrumento (para detectar
-#'   `select_one` y `select_multiple`).
-#' @param mostrar_todo Lógico; si `TRUE`, las tablas internas se construyen con
-#'   `mostrar_todo = TRUE` en [freq_table_spss()], es decir, se incluyen las
-#'   categorías con frecuencia 0 definidas en el instrumento (salvo las
-#'   indicadas en `codigos_solo_si_presentes` que no tengan casos).
-#' @param codigos_solo_si_presentes Vector opcional de códigos que solo se
-#'   completarán si aparecen en la data (normalmente 96–99, etc.).
-#'
-#' @return Invisiblemente, la ruta normalizada del archivo Excel generado.
+#' @param numericas Vector de variables numéricas (declaradas) para generar tabla
+#'   de resumen (media, sd, cuantiles, etc.) en lugar de n/%.
 #'
 #' @export
 exportar_frecuencias_spss <- function(
@@ -805,7 +1242,8 @@ exportar_frecuencias_spss <- function(
     orders_list = NULL,
     survey = NULL,
     mostrar_todo = FALSE,
-    codigos_solo_si_presentes = NULL
+    codigos_solo_si_presentes = NULL,
+    numericas = NULL
 ){
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop("El paquete 'openxlsx' es necesario para `exportar_frecuencias_spss()`. ",
@@ -813,6 +1251,8 @@ exportar_frecuencias_spss <- function(
   }
 
   orden <- match.arg(orden)
+  numericas <- if (is.null(numericas)) character(0) else as.character(numericas)
+
   wb <- openxlsx::createWorkbook()
   sheet <- "Frecuencias"
   openxlsx::addWorksheet(wb, sheet)
@@ -823,31 +1263,41 @@ exportar_frecuencias_spss <- function(
   for (sec in names(SECCIONES)) {
     vars_sec <- SECCIONES[[sec]]
 
-    # Mantener solo variables que existan como columna o tengan dummies asociadas
-    vars_sec <- vars_sec[vapply(
-      vars_sec,
-      function(v) .has_var_or_dummies(data, v),
-      logical(1)
-    )]
-
+    vars_sec <- vars_sec[vapply(vars_sec, function(v) .has_var_or_dummies(data, v), logical(1))]
     if (!length(vars_sec)) next
 
-    openxlsx::writeData(wb, sheet, toupper(sec),
-                        startRow = fila, startCol = 1)
-    openxlsx::mergeCells(wb, sheet, cols = 1:3, rows = fila:fila)
-    openxlsx::addStyle(wb, sheet, st$sec_title,
-                       rows = fila, cols = 1,
-                       gridExpand = TRUE, stack = TRUE)
+    openxlsx::writeData(wb, sheet, toupper(sec), startRow = fila, startCol = 1)
+
+    # Merge depende de si habrá tablas numéricas en la sección
+    ncols_sec <- if (any(vars_sec %in% numericas)) 2 else 3
+    openxlsx::mergeCells(wb, sheet, cols = 1:ncols_sec, rows = fila:fila)
+
+    openxlsx::addStyle(wb, sheet, st$sec_title, rows = fila, cols = 1, gridExpand = TRUE, stack = TRUE)
     openxlsx::setRowHeights(
       wb, sheet, rows = fila,
-      heights = .auto_row_height(toupper(sec),
-                                 chars_per_line = 70,
-                                 base = 28, per_line = 18)
+      heights = .auto_row_height(toupper(sec), chars_per_line = 70, base = 28, per_line = 18)
     )
     fila <- fila + 2
 
     for (v in vars_sec) {
 
+      # --- Tabla numérica (solo si se declara) ---
+      if (v %in% numericas) {
+        fila <- write_one_numeric(
+          wb, sheet,
+          data  = data,
+          var   = v,
+          dic_vars = dic_vars,
+          labels_override = labels_override,
+          start_row = fila,
+          start_col = 1,
+          fuente = fuente,
+          orders_list = orders_list
+        )
+        next
+      }
+
+      # --- Tabla categórica (flujo actual) ---
       tab <- freq_table_spss(
         data,
         v,
@@ -860,16 +1310,13 @@ exportar_frecuencias_spss <- function(
 
       if (nrow(tab)) {
         is_total <- tab$Opciones == "Total"
-        body <- tab[!is_total, , drop = FALSE]
+        body  <- tab[!is_total, , drop = FALSE]
         total <- tab[ is_total, , drop = FALSE]
 
         if (orden %in% c("asc","desc") && nrow(body)) {
-          body <- dplyr::arrange(body,
-                                 if (orden == "asc") n else dplyr::desc(n))
-          tab <- dplyr::bind_rows(body, total)
-        } else {
-          tab <- dplyr::bind_rows(body, total)
+          body <- dplyr::arrange(body, if (orden == "asc") n else dplyr::desc(n))
         }
+        tab <- dplyr::bind_rows(body, total)
       }
 
       fila <- write_one_freq(
@@ -897,42 +1344,15 @@ exportar_frecuencias_spss <- function(
   invisible(normalizePath(path_xlsx, winslash = "/"))
 }
 
-# ============================
+
+# =============================================================================
 # reporte_frecuencias
-# ============================
+# =============================================================================
 
 #' Generar reporte de frecuencias en Excel a partir de una base de reporte
 #'
-#' `reporte_frecuencias()` toma una base ya adaptada para reporte (típicamente
-#' el resultado de [reporte_data()]) y genera un archivo Excel con tablas de
-#' frecuencias simples (n y %), organizadas por secciones.
-#'
-#' Utiliza la información del instrumento (`survey`, `orders_list`) para
-#' construir etiquetas de variables y ordenar categorías. Internamente llama
-#' a [exportar_frecuencias_spss()].
-#'
-#' @param data Data frame o tibble, idealmente el objeto devuelto por
-#'   [reporte_data()], que contiene los atributos `label` y `labels`.
-#' @param instrumento Objeto devuelto por [reporte_instrumento()]. Si es
-#'   `NULL`, se intentará recuperarlo desde `attr(data, "instrumento_reporte")`.
-#' @param secciones Lista nombrada que define qué variables se incluyen en cada
-#'   sección. Si es `NULL`, se intentará inferirla desde una columna
-#'   `section` o `seccion` del `survey`.
-#' @param path_xlsx Ruta del archivo Excel a generar.
-#' @param orden `"desc"`, `"asc"` o `"original"` para el orden de las
-#'   categorías dentro de cada tabla.
-#' @param sm_vars_force Vector opcional de variables que deben tratarse como
-#'   `select_multiple` aunque el instrumento no las marque como tales.
-#' @param fuente Texto de fuente que se mostrará al pie de cada tabla.
-#' @param mostrar_todo Lógico; si `TRUE`, se pasa como tal a
-#'   [exportar_frecuencias_spss()] y, en consecuencia, a [freq_table_spss()],
-#'   mostrando todas las categorías definidas en el instrumento, incluso con
-#'   frecuencia 0 (salvo las indicadas en `codigos_solo_si_presentes` que no
-#'   tengan casos).
-#' @param codigos_solo_si_presentes Vector opcional de códigos que solo se
-#'   completarán si aparecen en la data.
-#'
-#' @return Invisiblemente, la ruta normalizada del archivo Excel generado.
+#' @param numericas Vector de variables numéricas (declaradas) para generar tabla
+#'   de resumen en lugar de n/%.
 #'
 #' @export
 reporte_frecuencias <- function(data,
@@ -943,7 +1363,8 @@ reporte_frecuencias <- function(data,
                                 sm_vars_force = NULL,
                                 fuente      = "Pulso PUCP",
                                 mostrar_todo = FALSE,
-                                codigos_solo_si_presentes = NULL) {
+                                codigos_solo_si_presentes = NULL,
+                                numericas = NULL) {
 
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop("El paquete 'openxlsx' es necesario para `reporte_frecuencias()`. ",
@@ -975,10 +1396,8 @@ reporte_frecuencias <- function(data,
     dplyr::distinct(name, .keep_all = TRUE)
 
   orders_list <- if (!is.null(instrumento$orders_list)) instrumento$orders_list else NULL
-
   orden <- match.arg(orden)
 
-  # inferir secciones si no se pasan
   if (is.null(secciones)) {
     seccion_col <- NULL
     if ("section" %in% names(survey)) {
@@ -1008,13 +1427,8 @@ reporte_frecuencias <- function(data,
     }
   }
 
-  # Mantener, por sección, solo variables que existan o tengan dummies asociadas
   SECCIONES <- lapply(secciones, function(vars) {
-    vars[vapply(
-      vars,
-      function(v) .has_var_or_dummies(data, v),
-      logical(1)
-    )]
+    vars[vapply(vars, function(v) .has_var_or_dummies(data, v), logical(1))]
   })
   SECCIONES <- SECCIONES[vapply(SECCIONES, length, integer(1)) > 0L]
 
@@ -1036,7 +1450,8 @@ reporte_frecuencias <- function(data,
     orders_list     = orders_list,
     survey          = survey,
     mostrar_todo    = mostrar_todo,
-    codigos_solo_si_presentes = codigos_solo_si_presentes
+    codigos_solo_si_presentes = codigos_solo_si_presentes,
+    numericas       = numericas
   )
 
   invisible(normalizePath(path_xlsx, winslash = "/"))

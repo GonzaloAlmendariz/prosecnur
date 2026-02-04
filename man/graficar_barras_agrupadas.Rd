@@ -42,6 +42,7 @@ graficar_barras_agrupadas(
   size_barra_extra = 3,
   color_ejes = "#004B8D",
   size_ejes = 9,
+  usar_eje_libre = FALSE,
   color_fondo = NA,
   grosor_barras = 0.6,
   extra_derecha_rel = 0.25,

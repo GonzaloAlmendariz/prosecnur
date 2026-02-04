@@ -13,6 +13,16 @@ freq_table_spss(
   mostrar_todo = FALSE,
   codigos_solo_si_presentes = NULL
 )
+
+freq_table_spss(
+  data,
+  var,
+  survey = NULL,
+  sm_vars_force = NULL,
+  orders_list = NULL,
+  mostrar_todo = FALSE,
+  codigos_solo_si_presentes = NULL
+)
 }
 \arguments{
 \item{data}{Data frame o tibble con la base de datos.}
@@ -60,8 +70,43 @@ codificadas como:
 \item Formato normalizado tipo SPSS: \code{var.cod} (solo dummies, sin madre).
 }
 }
+
+Calcula una tabla de frecuencias (n y porcentaje) para una variable de la
+base de reporte. Soporta variables de tipo elección múltiple (\code{select_multiple})
+codificadas como:
+\itemize{
+\item Variable madre con códigos separados por \code{";"} (p. ej. \code{"1;3;4"}).
+\item Dummies derivadas:
+\itemize{
+\item Formato original tipo KoBo: \code{var/cod}.
+\item Formato normalizado tipo SPSS: \code{var.cod} (solo dummies, sin madre).
+}
+}
 }
 \details{
+La identificación de que una variable es \code{select_multiple} se basa en:
+\itemize{
+\item El \code{survey} (tipo \code{select_multiple} para \code{name == var}), o
+\item El argumento \code{sm_vars_force}, o
+\item La existencia de dummies asociadas (\code{var/cod} o \code{var.cod}) aunque
+la madre no exista como columna.
+}
+
+La función utiliza, cuando están disponibles:
+\itemize{
+\item Atributos \code{labels} de la variable en \code{data} (para mapear códigos a
+etiquetas), en el caso de madres “pegadas”.
+\item \code{orders_list} (si se proporciona) para ordenar las categorías según
+el instrumento.
+\item Una variable de peso llamada \code{peso} en \code{data}. Si no existe, se
+asume peso 1 para todos los casos.
+}
+
+El argumento \code{codigos_solo_si_presentes} permite declarar códigos especiales
+(normalmente definidos en \code{orders_list[[var]]$names}) que \strong{no} se completan
+con filas de \code{n = 0} cuando \code{mostrar_todo = TRUE} si no hay casos en la
+variable.
+
 La identificación de que una variable es \code{select_multiple} se basa en:
 \itemize{
 \item El \code{survey} (tipo \code{select_multiple} para \code{name == var}), o
