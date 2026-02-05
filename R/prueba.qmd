@@ -1,5 +1,454 @@
----
-title: "prueba"
-format: html
----
+
+# Ejemplo 1
+
+
+```{r}
+# ============================================================
+# EJEMPLO RÁPIDO (FAKE DATA) — CANVAS ON + BUFFERS + LEYENDA CUADRADA
+# Nota: el ejemplo queda alineado con la versión corregida de la función:
+# - ya NO existen: etiquetas_margin_r_pt, etiquetas_expand_y, extra_center_x, extra_titulo_shift_x
+# - el título del PH extra se controla con `titulo_barra_extra` (o preset) y se dibuja arriba del PH
+# ============================================================
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(cowplot)
+
+# -------------------------
+# 1) Data ficticia (ancha)
+# -------------------------
+set.seed(123)
+
+df_fake <- tibble::tibble(
+  categoria = c("Atención", "Infraestructura", "Información", "Resolución de casos", "Trato"),
+  N         = c(180, 160, 150, 170, 180),
+  pct_1     = runif(5, 0.05, 0.20),
+  pct_2     = runif(5, 0.10, 0.25),
+  pct_3     = runif(5, 0.15, 0.30),
+  pct_4     = runif(5, 0.15, 0.35),
+  pct_5     = runif(5, 0.10, 0.30)
+)
+
+# Normalizar a 1 por fila (tu función igual normaliza, pero ok)
+df_fake <- df_fake |>
+  rowwise() |>
+  mutate(
+    s = sum(c_across(starts_with("pct_"))),
+    across(starts_with("pct_"), ~ .x / s)
+  ) |>
+  ungroup() |>
+  select(-s)
+
+cols_porcentaje <- c("pct_1","pct_2","pct_3","pct_4","pct_5")
+
+etiquetas_grupos <- c(
+  pct_1 = "Muy insatisfecho",
+  pct_2 = "Insatisfecho",
+  pct_3 = "Neutral",
+  pct_4 = "Satisfecho",
+  pct_5 = "Muy satisfecho"
+)
+
+colores_grupos <- c(
+  "Muy insatisfecho" = "#C0392B",
+  "Insatisfecho"     = "#E67E22",
+  "Neutral"          = "#F1C40F",
+  "Satisfecho"       = "#27AE60",
+  "Muy satisfecho"   = "#1E8449"
+)
+
+# -------------------------
+# 2) Llamada — CANVAS ON
+# -------------------------
+p <- graficar_barras_apiladas(
+  data             = df_fake,
+  var_categoria    = "categoria",
+  var_n            = "N",
+  cols_porcentaje  = cols_porcentaje,
+  etiquetas_grupos = etiquetas_grupos,
+  escala_valor     = "proporcion_1",
+  colores_grupos   = colores_grupos,
+
+  # comportamiento
+  mostrar_valores     = TRUE,
+  umbral_etiqueta     = 0.06,
+  umbral_etiqueta_peq = 0.035,
+  decimales           = 1,
+
+  # barra extra
+  mostrar_barra_extra = TRUE,
+  barra_extra_preset  = "totales",
+  # --- CANVAS ---
+  usar_canvas = TRUE,
+
+  canvas_w_etiquetas      = 0.12,
+  canvas_w_buf_etq_bars   = 0.02,   
+  canvas_w_bars           = 0.60,
+  canvas_w_buf_bars_extra = 0.02,   
+  canvas_w_extra          = 0.12,
+  canvas_h_toprow_in      = 0.10,
+
+  # control altura del panel
+  alto_por_categoria  = 0.52,
+  # alternativo:
+  # canvas_h_panel_in  = 2.2,
+
+  # --- LEYENDA: cuadrados perfectos ---
+  legend_key_cm = 0.35,
+
+  # grosor (modo auto recomendado)
+  grosor_modo        = "auto",
+  grosor_barras      = 0.72,
+  grosor_barras_mult = 1.10,
+
+  # textos
+  titulo    = "Satisfacción con el servicio (FAKE)",
+  subtitulo = "Canvas: etiquetas | buf | barras | buf | extra (medible)",
+  nota_pie  = "Fuente: simulación",
+  nota_pie_derecha = "N total = 840",
+
+  # estilo de texto (tamaños y colores)
+  size_titulo      = 12,
+  size_subtitulo   = 9,
+  size_leyenda     = 10,
+  size_ejes        = 10,
+  size_nota_pie    = 8,
+  size_barra_extra = 10,
+  size_titulo_extra = 10,
+  ancho_max_eje_y = 15,
+  size_texto_barras = 4,
+
+  
+  color_titulo     = "#000000",
+  color_subtitulo  = "#000000",
+  color_leyenda    = "#000000",
+  color_ejes       = "#000000",
+  color_nota_pie   = "#000000",
+
+  textos_negrita = c("titulo", "leyenda", "barra_extra", "eje_y"),
+  
+  encabezado_desplazamiento_in = 0,  
+  encabezado_separacion_in     = 0.20,  
+  leyenda_desplazamiento_in    = 0, 
+
+  # debug: bordes de placeholders
+  debug_ph_bordes = TRUE,
+  debug_ph_col    = "#FF00FF",
+  debug_ph_lwd    = 0.6,
+
+  # salida
+  exportar = "rplot"
+)
+
+p
+```
+
+
+# Ejemplo 2
+
+```{r}
+# ============================================================
+# EJEMPLO (FAKE DATA) — 2 FILAS + 8 CATEGORÍAS — CANVAS ON
+# - 8 categorías (filas)
+# - 5 segmentos (Likert)
+# - título / subtítulo distintos
+# ============================================================
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(cowplot)
+
+set.seed(2026)
+
+# ------------------------------------------------------------
+# 1) Data ficticia (8 categorías)
+# ------------------------------------------------------------
+df_fake2 <- tibble::tibble(
+  categoria = c(
+    "Acceso y orientación",
+    "Infraestructura del local",
+    "Trato del personal",
+    "Tiempo de espera",
+    "Claridad de la información",
+    "Solución del caso",
+    "Seguimiento posterior",
+    "Satisfacción general"
+  ),
+  N     = sample(120:260, 8, replace = TRUE),
+  pct_1 = runif(8, 0.03, 0.18),
+  pct_2 = runif(8, 0.05, 0.22),
+  pct_3 = runif(8, 0.10, 0.30),
+  pct_4 = runif(8, 0.18, 0.40),
+  pct_5 = runif(8, 0.08, 0.35)
+)
+
+# Normalizar a 1 por fila (tu función igual normaliza y “cierra” a 1, pero ok)
+df_fake2 <- df_fake2 |>
+  rowwise() |>
+  mutate(
+    s = sum(c_across(starts_with("pct_"))),
+    across(starts_with("pct_"), ~ .x / s)
+  ) |>
+  ungroup() |>
+  select(-s)
+
+cols_porcentaje <- c("pct_1","pct_2","pct_3","pct_4","pct_5")
+
+etiquetas_grupos <- c(
+  pct_1 = "Muy insatisfecho",
+  pct_2 = "Insatisfecho",
+  pct_3 = "Neutral",
+  pct_4 = "Satisfecho",
+  pct_5 = "Muy satisfecho"
+)
+
+colores_grupos <- c(
+  "Muy insatisfecho" = "#C0392B",
+  "Insatisfecho"     = "#E67E22",
+  "Neutral"          = "#F1C40F",
+  "Satisfecho"       = "#27AE60",
+  "Muy satisfecho"   = "#1E8449"
+)
+
+# ------------------------------------------------------------
+# 2) Llamada — CANVAS ON (ajustes para 8 filas)
+# ------------------------------------------------------------
+p2 <- graficar_barras_apiladas(
+  data             = df_fake2,
+  var_categoria    = "categoria",
+  var_n            = "N",
+  cols_porcentaje  = cols_porcentaje,
+  etiquetas_grupos = etiquetas_grupos,
+  escala_valor     = "proporcion_1",
+  colores_grupos   = colores_grupos,
+
+  # comportamiento
+  mostrar_valores     = TRUE,
+  umbral_etiqueta     = 0.055,
+  umbral_etiqueta_peq = 0.030,
+  decimales           = 1,
+
+  # barra extra
+  mostrar_barra_extra = TRUE,
+  barra_extra_preset  = "totales",
+
+  # --- CANVAS ---
+  usar_canvas = TRUE,
+
+  # columnas: etiquetas | buf | barras | buf | extra
+  canvas_w_etiquetas      = 0.12,
+  canvas_w_buf_etq_bars   = 0.02,   
+  canvas_w_bars           = 0.60,
+  canvas_w_buf_bars_extra = 0.02,   
+  canvas_w_extra          = 0.12,
+  canvas_h_toprow_in      = 0.10,
+
+  # alturas (pulgadas)
+  canvas_h_header_in  = 0.75,
+  canvas_h_legend_in  = 0.75,
+  canvas_h_caption_in = 0.20,
+
+  # panel: 8 filas -> bajar un poco para que no se “aplasten”
+  alto_por_categoria  = 0.46,
+
+  # --- LEYENDA: cuadrados perfectos ---
+  legend_key_cm = 0.34,
+
+  # grosor
+  grosor_modo        = "auto",
+  grosor_barras      = 0.72,
+  grosor_barras_mult = 1.05,
+
+  # textos (distintos)
+  titulo    = "Evaluación de componentes del servicio (FAKE)",
+  subtitulo = "8 categorías · barras apiladas (100%) · N por fila (columna extra)",
+  nota_pie  = "Fuente: simulación",
+  nota_pie_derecha = paste0("N total = ", sum(df_fake2$N)),
+
+ # estilo de texto (tamaños y colores)
+  size_titulo      = 12,
+  size_subtitulo   = 9,
+  size_leyenda     = 10,
+  size_ejes        = 10,
+  size_nota_pie    = 8,
+  size_barra_extra = 10,
+  size_titulo_extra = 10,
+  ancho_max_eje_y = 15,
+  size_texto_barras = 4,
+  
+        
+  
+  color_titulo     = "#000000",
+  color_subtitulo  = "#000000",
+  color_leyenda    = "#000000",
+  color_ejes       = "#000000",
+  color_nota_pie   = "#000000",
+
+  textos_negrita = c("titulo", "leyenda", "barra_extra", "eje_y"),
+ 
+  encabezado_desplazamiento_in = 0,  
+  encabezado_separacion_in     = 0.20,  
+  leyenda_desplazamiento_in    = 0,  
+
+  # debug: bordes de placeholders
+  debug_ph_bordes = TRUE,
+  debug_ph_col    = "#FF00FF",
+  debug_ph_lwd    = 0.6,
+
+  # salida
+  exportar = "rplot"
+)
+
+p2
+```
+
+# Ejemplo 3
+
+```{r}
+# ============================================================
+# EJEMPLO (FAKE DATA) — 2 CATEGORÍAS (2 BARRAS) + 8 OPCIONES (8 SEGMENTOS)
+# - 2 filas (categorías)
+# - 8 segmentos apilados (100%)
+# ============================================================
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(cowplot)
+
+set.seed(2026)
+
+# ------------------------------------------------------------
+# 1) Data ficticia (2 categorías x 8 opciones)
+# ------------------------------------------------------------
+df_fake3 <- tibble::tibble(
+  categoria = c("Grupo A", "Grupo B"),
+  N         = sample(250:450, 2, replace = TRUE),
+
+  pct_1 = runif(2, 0.02, 0.18),
+  pct_2 = runif(2, 0.02, 0.18),
+  pct_3 = runif(2, 0.02, 0.18),
+  pct_4 = runif(2, 0.02, 0.18),
+  pct_5 = runif(2, 0.02, 0.18),
+  pct_6 = runif(2, 0.02, 0.18),
+  pct_7 = runif(2, 0.02, 0.18),
+  pct_8 = runif(2, 0.02, 0.18)
+)
+
+# Normalizar a 1 por fila
+df_fake3 <- df_fake3 |>
+  rowwise() |>
+  mutate(
+    s = sum(c_across(starts_with("pct_"))),
+    across(starts_with("pct_"), ~ .x / s)
+  ) |>
+  ungroup() |>
+  select(-s)
+
+cols_porcentaje_8 <- paste0("pct_", 1:8)
+
+etiquetas_grupos_8 <- c(
+  pct_1 = "Opción 1",
+  pct_2 = "Opción 2",
+  pct_3 = "Opción 3",
+  pct_4 = "Opción 4",
+  pct_5 = "Opción 5",
+  pct_6 = "Opción 6",
+  pct_7 = "Opción 7",
+  pct_8 = "Opción 8"
+)
+
+# Paleta simple (8)
+colores_grupos_8 <- c(
+  "Opción 1" = "#1B9E77",
+  "Opción 2" = "#D95F02",
+  "Opción 3" = "#7570B3",
+  "Opción 4" = "#E7298A",
+  "Opción 5" = "#66A61E",
+  "Opción 6" = "#E6AB02",
+  "Opción 7" = "#A6761D",
+  "Opción 8" = "#666666"
+)
+
+# ------------------------------------------------------------
+# 2) Llamada — CANVAS ON
+# ------------------------------------------------------------
+p3 <- graficar_barras_apiladas(
+  data             = df_fake3,
+  var_categoria    = "categoria",
+  var_n            = "N",
+  cols_porcentaje  = cols_porcentaje_8,
+  etiquetas_grupos = etiquetas_grupos_8,
+  escala_valor     = "proporcion_1",
+  colores_grupos   = colores_grupos_8,
+
+  # comportamiento (2 barras => umbral puede ser más alto)
+  mostrar_valores     = TRUE,
+  umbral_etiqueta     = 0.08,
+  umbral_etiqueta_peq = 0.045,
+  decimales           = 0,
+
+  # barra extra
+  mostrar_barra_extra = TRUE,
+  barra_extra_preset  = "totales",
+
+  usar_canvas = TRUE,
+
+  # columnas
+  canvas_w_etiquetas      = 0.12,
+  canvas_w_buf_etq_bars   = 0.02,   
+  canvas_w_bars           = 0.60,
+  canvas_w_buf_bars_extra = 0.02,   
+  canvas_w_extra          = 0.12,
+  canvas_h_toprow_in      = 0.10,
+
+  # alturas
+  canvas_h_header_in  = 0.35,
+  canvas_h_legend_in  = 0.35,
+  canvas_h_caption_in = 0.20,
+
+  # 2 filas => panel compacto
+  alto_por_categoria  = 0.3,
+
+  legend_key_cm = 0.34,
+
+  grosor_modo        = "auto",
+  grosor_barras      = 0.72,
+  grosor_barras_mult = 1.10,
+
+  titulo    = "Distribución por opción (FAKE)",
+  subtitulo = "2 categorías · 8 opciones · barras apiladas (100%)",
+  nota_pie  = "Fuente: simulación",
+  nota_pie_derecha = paste0("N total = ", sum(df_fake3$N)),
+
+  size_titulo       = 13,
+  size_subtitulo    = 9,
+  size_leyenda      = 10,
+  size_ejes         = 11,
+  size_nota_pie     = 8,
+  size_texto_barras = 4,
+  size_barra_extra  = 10,
+  size_titulo_extra = 10,
+
+  # wrap eje Y (por si “Grupo A/B” se vuelve largo en tu caso real)
+  ancho_max_eje_y = 18,
+
+  textos_negrita = c("titulo", "leyenda", "barra_extra", "eje_y"),
+  
+  encabezado_desplazamiento_in = -0.08,  
+  encabezado_separacion_in     = 0.10,  
+  leyenda_desplazamiento_in    = 0.08,   
+
+  debug_ph_bordes = TRUE,
+  debug_ph_col    = "#FF00FF",
+  debug_ph_lwd    = 0.6,
+
+  exportar = "rplot"
+)
+
+p3
+```
+
 

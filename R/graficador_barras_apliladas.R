@@ -1,3 +1,95 @@
+#' Graficar barras apiladas con canvas controlado y placeholders independientes
+#'
+#' Genera un gráfico de barras apiladas horizontales (100%) por categoría, con opción
+#' de construir un **canvas** (vía {cowplot}) que separa en **placeholders independientes**
+#' las **etiquetas del eje Y**, el **panel de barras**, y una **columna extra** (p.ej. `N=`),
+#' preservando además buffers entre columnas y permitiendo alineación vertical **milimétrica**
+#' mediante coordenadas NPC por fila.
+#'
+#' La función normaliza los porcentajes por fila a suma 1 y aplica un “cierre exacto”
+#' que ajusta solo un segmento por categoría para absorber residuales numéricos y evitar
+#' warnings tipo “Removed 1 row … outside the scale range”.
+#'
+#' @param data data.frame con las columnas requeridas.
+#' @param var_categoria Nombre (string) de la variable categórica (eje Y).
+#' @param var_n Nombre (string) de la variable numérica para la barra extra (p.ej. N).
+#' @param cols_porcentaje Vector de nombres (string) de columnas de porcentajes (formato ancho).
+#' @param etiquetas_grupos Vector nombrado que mapea `cols_porcentaje` -> etiqueta del grupo
+#'   (p.ej. `c(pct_1="Muy insatisfecho", ...)`). Los `names()` deben coincidir con `cols_porcentaje`.
+#' @param escala_valor Escala de entrada: `"proporcion_1"` (0-1) o `"proporcion_100"` (0-100).
+#' @param colores_grupos Vector nombrado (opcional) de colores por etiqueta de grupo.
+#' @param mostrar_valores Si `TRUE`, dibuja etiquetas % dentro de segmentos (cuando superan umbrales).
+#' @param decimales Legacy/compat: se conserva, pero el % mostrado se asigna por entero (suma 100).
+#' @param umbral_etiqueta Umbral (0-1) para etiquetar como “grande”.
+#' @param umbral_etiqueta_peq Umbral (0-1) para etiquetar como “peq”. Si `NULL`, usa `umbral_etiqueta`.
+#' @param mostrar_barra_extra Si `TRUE`, dibuja columna extra (texto) alineada por fila.
+#' @param barra_extra_preset Preset de extra: `"ninguno"`, `"totales"`, `"top2box"`, `"top3box"`, `"bottom2box"`.
+#' @param prefijo_barra_extra Prefijo para el texto extra (p.ej. `"N = "`).
+#' @param titulo_barra_extra Título arriba del placeholder extra (solo en canvas).
+#' @param barra_extra_vjust Legacy (sin uso en canvas); se conserva por compatibilidad.
+#' @param titulo Título general.
+#' @param subtitulo Subtítulo general.
+#' @param nota_pie Nota al pie izquierda.
+#' @param nota_pie_derecha Nota al pie derecha.
+#' @param pos_titulo Alineación horizontal del título: `"centro"`, `"izquierda"`, `"derecha"`.
+#' @param pos_nota_pie Alineación horizontal del caption: `"derecha"`, `"izquierda"`, `"centro"`.
+#' @param centro_cowplot Centro horizontal de la leyenda en canvas (0-1). `NA` usa 0.5.
+#'
+#' @param color_titulo,color_subtitulo,color_nota_pie,color_leyenda,color_texto_barras,color_barra_extra,color_ejes Colores.
+#' @param size_titulo,size_subtitulo,size_nota_pie,size_leyenda,size_texto_barras,size_texto_barras_peq,size_barra_extra,size_titulo_extra,size_ejes Tamaños (puntos).
+#' @param color_fondo Color de fondo del plot/canvas (NA para transparente).
+#'
+#' @param grosor_barras Grosor de barras (solo cuando `grosor_modo="manual"`).
+#' @param extra_derecha_rel Expansión derecha del eje x cuando NO canvas y se quiere espacio extra.
+#' @param espacio_izquierda_rel Expansión izquierda del eje x cuando NO canvas.
+#' @param ancho_max_eje_y Si se define, aplica `stringr::str_wrap()` a etiquetas del eje Y.
+#'
+#' @param mostrar_leyenda Si `TRUE`, incluye leyenda (en canvas, debajo del panel).
+#' @param usar_leyenda_cowplot Legacy.
+#' @param invertir_leyenda Si `TRUE`, invierte el orden de la leyenda.
+#' @param invertir_barras Si `TRUE`, invierte el orden de categorías.
+#' @param invertir_segmentos Si `TRUE`, invierte el orden de apilamiento.
+#' @param textos_negrita Vector de claves que activa negrita: `c("titulo","leyenda","barra_extra","eje_y","porcentajes")`.
+#'
+#' @param usar_canvas Si `TRUE`, construye un canvas con placeholders independientes.
+#' @param canvas_w_etiquetas Ancho relativo de placeholder etiquetas (columna izquierda).
+#' @param canvas_w_labels Alias legacy de `canvas_w_etiquetas`.
+#' @param canvas_w_buf_etq_bars Ancho relativo buffer entre etiquetas y barras.
+#' @param canvas_w_buf_bars_extra Ancho relativo buffer entre barras y extra.
+#' @param canvas_w_bars Ancho relativo placeholder barras.
+#' @param canvas_w_extra Ancho relativo placeholder extra (columna derecha).
+#'
+#' @param canvas_h_header_in Altura del header en pulgadas (cuando hay título/subtítulo).
+#' @param canvas_h_legend_in Altura de la leyenda en pulgadas (cuando hay leyenda).
+#' @param canvas_h_caption_in Altura del caption en pulgadas (cuando hay caption).
+#' @param canvas_h_panel_in Altura del panel en pulgadas (si `NULL`, se usa `alto_por_categoria * n_categorias`).
+#' @param canvas_h_toprow_in Altura (en pulgadas) de la fila superior del panel (para título del extra).
+#'
+#' @param grosor_modo `"manual"` o `"auto"`. En `"auto"` el grosor se ajusta por número de categorías.
+#' @param grosor_barras_mult Multiplicador del grosor en modo `"auto"`.
+#'
+#' @param legend_key_cm Tamaño de keys de la leyenda (cm), buscando cuadrados “perfectos”.
+#'
+#'#' @param encabezado_desplazamiento_in Desplazamiento vertical (pulgadas) del bloque título/subtítulo
+#'   dentro de su placeholder. Por defecto el bloque queda centrado. Valores positivos bajan el bloque;
+#'   valores negativos lo suben.
+#' @param encabezado_separacion_in Separación vertical total (pulgadas) entre título y subtítulo.
+#'   Por defecto separa poco y mantiene el bloque centrado.
+#' @param leyenda_desplazamiento_in Desplazamiento vertical (pulgadas) de la leyenda dentro de su
+#'   placeholder. Por defecto queda centrada. Valores positivos suben la leyenda; negativos la bajan.
+#'
+#' @param debug_ph_bordes Si `TRUE`, dibuja bordes de placeholders (debug).
+#' @param debug_ph_col Color de borde debug.
+#' @param debug_ph_lwd Grosor de borde debug.
+#'
+#' @param exportar `"rplot"`, `"png"`, `"ppt"` o `"word"`. En este bloque solo se implementa `"rplot"`.
+#' @param path_salida Ruta de salida (no implementado aquí).
+#' @param ancho,alto Tamaños para exportación (no implementado aquí).
+#' @param alto_por_categoria Altura por categoría (pulgadas) para definir el panel cuando `canvas_h_panel_in` es `NULL`.
+#' @param dpi DPI para exportación (no implementado aquí).
+#'
+#' @return Un objeto ggplot/cowplot. Si `exportar="rplot"`, retorna el plot/canvas listo para imprimir.
+#' @export
 graficar_barras_apiladas <- function(
     data,
     var_categoria,
@@ -8,13 +100,13 @@ graficar_barras_apiladas <- function(
     colores_grupos        = NULL,
     mostrar_valores       = TRUE,
     decimales             = 1,
-    umbral_etiqueta       = 0.03,
+    umbral_etiqueta       = 0.001,
     umbral_etiqueta_peq   = NULL,
     mostrar_barra_extra   = TRUE,
     barra_extra_preset    = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
     prefijo_barra_extra   = NULL,
     titulo_barra_extra    = NULL,
-    barra_extra_vjust     = NULL,   # legacy (ya no se usa para título en canvas)
+    barra_extra_vjust     = NULL,   # legacy
     titulo                = NULL,
     subtitulo             = NULL,
     nota_pie              = NULL,
@@ -82,9 +174,16 @@ graficar_barras_apiladas <- function(
     grosor_barras_mult    = 1.00,
 
     # ==========================
-    # LEYENDA (cuadrados perfectos)
+    # LEYENDA
     # ==========================
     legend_key_cm         = 0.30,
+
+    # ==========================
+    # AJUSTES POSICIONALES
+    # ==========================
+    encabezado_desplazamiento_in = 0,
+    encabezado_separacion_in     = 0.14,
+    leyenda_desplazamiento_in    = 0,
 
     # ==========================
     # DEBUG PH
@@ -92,6 +191,10 @@ graficar_barras_apiladas <- function(
     debug_ph_bordes       = FALSE,
     debug_ph_col          = "#FF00FF",
     debug_ph_lwd          = 0.6,
+
+    # ==========================
+    # EXPORTAR
+    # ==========================
 
     exportar              = c("rplot", "png", "ppt", "word"),
     path_salida           = NULL,
@@ -102,22 +205,13 @@ graficar_barras_apiladas <- function(
 ) {
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
+  hjust_from_pos <- function(x) switch(x, "izquierda" = 0, "centro" = 0.5, "derecha" = 1, 0.5)
 
   # deps
   if (!requireNamespace("ggplot2", quietly = TRUE)) stop("Requiere ggplot2.", call. = FALSE)
   if (!requireNamespace("dplyr", quietly = TRUE))  stop("Requiere dplyr.", call. = FALSE)
   if (!requireNamespace("tidyr", quietly = TRUE))  stop("Requiere tidyr.", call. = FALSE)
-
-  hjust_from_pos <- function(x) {
-    switch(x,
-           "izquierda" = 0,
-           "centro"    = 0.5,
-           "derecha"   = 1,
-           0.5
-    )
-  }
-
-  .pt_to_mm <- function(pt) as.numeric(pt) * 0.3527777778
+  if (!requireNamespace("grid", quietly = TRUE))   stop("Requiere grid.", call. = FALSE)
 
   escala_valor       <- match.arg(escala_valor)
   exportar           <- match.arg(exportar)
@@ -127,14 +221,11 @@ graficar_barras_apiladas <- function(
   grosor_modo        <- match.arg(grosor_modo)
 
   # legacy alias
-  if (!is.null(canvas_w_labels) && is.finite(canvas_w_labels)) {
-    canvas_w_etiquetas <- canvas_w_labels
-  }
+  if (!is.null(canvas_w_labels) && is.finite(canvas_w_labels)) canvas_w_etiquetas <- canvas_w_labels
 
   # normalizaciones
   decimales <- suppressWarnings(as.numeric(decimales))
   if (length(decimales) < 1L || !is.finite(decimales[1])) decimales <- 1 else decimales <- decimales[1]
-
   size_texto_barras_peq <- size_texto_barras_peq %||% size_texto_barras
   if (is.null(umbral_etiqueta_peq)) umbral_etiqueta_peq <- umbral_etiqueta
 
@@ -185,37 +276,52 @@ graficar_barras_apiladas <- function(
     ) |>
     dplyr::ungroup()
 
-  # Blindaje (evita fuera de rango por ruido numérico)
+  # Blindaje
   df_long$.valor_plot <- pmax(0, pmin(1, df_long$.valor_plot))
 
-  # Orden de segmentos
+  # Orden de segmentos (DEBE IR ANTES del cierre exacto)
   niveles_originales <- unname(etiquetas_grupos)
-  niveles_stack   <- if (invertir_segmentos) niveles_originales else rev(niveles_originales)
-  niveles_leyenda <- if (invertir_leyenda)  rev(niveles_originales) else niveles_originales
-  df_long$.grupo  <- factor(df_long$.grupo, levels = niveles_stack)
+  niveles_stack      <- if (invertir_segmentos) niveles_originales else rev(niveles_originales)
+  niveles_leyenda    <- if (invertir_leyenda)  rev(niveles_originales) else niveles_originales
+  df_long$.grupo     <- factor(df_long$.grupo, levels = niveles_stack)
 
   # ---------------------------------------------------------------------------
-  # 1.1) ORDEN MASTER de categorías (FIJO y consistente)
+  # 1.05) CIERRE EXACTO A 1
+  # Ajusta SOLO el ÚLTIMO del stack (derecha) para absorber residuo numérico.
   # ---------------------------------------------------------------------------
-  cat_chr <- as.character(df_long[[var_categoria]])
+  target_level <- tail(niveles_stack, 1)
 
-  # Niveles en el orden en que aparecen (pero como CHARACTER)
+  df_long <- df_long |>
+    dplyr::group_by(.data[[var_categoria]]) |>
+    dplyr::mutate(
+      .sum1  = sum(.valor_plot, na.rm = TRUE),
+      .delta = 1 - .sum1,
+      .valor_plot = dplyr::if_else(
+        .data$.grupo == target_level,
+        .valor_plot + .delta,
+        .valor_plot
+      ),
+      .valor_plot = pmax(0, .valor_plot)
+    ) |>
+    dplyr::mutate(
+      .sum2 = sum(.valor_plot, na.rm = TRUE),
+      .valor_plot = dplyr::if_else(.sum2 > 0, .valor_plot / .sum2, 0)
+    ) |>
+    dplyr::ungroup() |>
+    dplyr::select(-.sum1, -.delta, -.sum2)
+
+  # ---------------------------------------------------------------------------
+  # 1.1) ORDEN MASTER de categorías (FIJO)
+  # ---------------------------------------------------------------------------
+  cat_chr  <- as.character(df_long[[var_categoria]])
   cat_lvls <- unique(cat_chr)
-
-  # invertir si corresponde
   if (invertir_barras) cat_lvls <- rev(cat_lvls)
 
-  # factor único y consistente para TODOS los plots
   df_long[[var_categoria]] <- factor(cat_chr, levels = cat_lvls)
   n_categorias <- length(cat_lvls)
 
-  cats_df <- dplyr::tibble(
-    .cat_chr = cat_lvls,
-    .cat     = factor(cat_lvls, levels = cat_lvls)
-  )
-
   # ---------------------------------------------------------------------------
-  # 1.5) Grosor de barras  ✅ (define grosor_eff)
+  # 1.5) Grosor de barras
   # ---------------------------------------------------------------------------
   if (grosor_modo == "auto") {
     base <- 0.78
@@ -227,14 +333,10 @@ graficar_barras_apiladas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 2) BARRAS — Y DISCRETA (clave para geom_col y para alinear con PH)
+  # 2) BARRAS
   # ---------------------------------------------------------------------------
   max_suma <- 1
-  x_max_bars <- if (usar_canvas) {
-    1
-  } else {
-    if (mostrar_barra_extra) max_suma * (1 + extra_derecha_rel) else max_suma
-  }
+  x_max_bars <- if (usar_canvas) 1 else if (mostrar_barra_extra) max_suma * (1 + extra_derecha_rel) else max_suma
 
   expand_x <- if (usar_canvas) {
     ggplot2::expansion(mult = c(0, 0), add = c(0, 0))
@@ -259,23 +361,23 @@ graficar_barras_apiladas <- function(
     ggplot2::coord_cartesian(clip = if (usar_canvas) "on" else "off") +
     ggplot2::theme_minimal(base_size = 9) +
     ggplot2::theme(
-      panel.grid.major   = ggplot2::element_blank(),
-      panel.grid.minor   = ggplot2::element_blank(),
-      axis.title         = ggplot2::element_blank(),
-      axis.text.x        = ggplot2::element_blank(),
-      axis.ticks.x       = ggplot2::element_blank(),
-      plot.background    = ggplot2::element_rect(fill = color_fondo, color = NA),
-      panel.background   = ggplot2::element_rect(fill = color_fondo, color = NA),
-      legend.position    = "none",
-      axis.text.y        = ggplot2::element_blank(),
-      axis.ticks.y       = ggplot2::element_blank(),
-      plot.margin        = ggplot2::margin(0, 0, 0, 0)
+      panel.grid.major = ggplot2::element_blank(),
+      panel.grid.minor = ggplot2::element_blank(),
+      axis.title       = ggplot2::element_blank(),
+      axis.text.x      = ggplot2::element_blank(),
+      axis.ticks.x     = ggplot2::element_blank(),
+      legend.position  = "none",
+      axis.text.y      = ggplot2::element_blank(),
+      axis.ticks.y     = ggplot2::element_blank(),
+      plot.background  = ggplot2::element_rect(fill = color_fondo, color = NA),
+      panel.background = ggplot2::element_rect(fill = color_fondo, color = NA),
+      plot.margin      = ggplot2::margin(0,0,0,0)
     )
 
   # ---------------------------------------------------------------------------
   # 3) Etiquetas internas (%)
   # ---------------------------------------------------------------------------
-  if (mostrar_valores) {
+  if (isTRUE(mostrar_valores)) {
 
     niveles_fill       <- levels(df_long$.grupo)
     niveles_stack_real <- rev(niveles_fill)
@@ -344,7 +446,7 @@ graficar_barras_apiladas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 4) Colores + leyenda (solo para extraer grob)
+  # 4) Colores + leyenda (para extraer grob)
   # ---------------------------------------------------------------------------
   wrap_fun <- NULL
   if (requireNamespace("stringr", quietly = TRUE)) wrap_fun <- function(x) stringr::str_wrap(x, width = 40)
@@ -387,56 +489,14 @@ graficar_barras_apiladas <- function(
     ggplot2::guides(fill = ggplot2::guide_legend(nrow = n_filas_leyenda, byrow = TRUE))
 
   # ---------------------------------------------------------------------------
-  # 5) PH ETIQUETAS — Y DISCRETA
+  # 5) Etiquetas Y y extra como texto (sin ggplot)
   # ---------------------------------------------------------------------------
-  etiquetas_df <- cats_df |>
-    dplyr::mutate(.lab = .cat_chr)
-
+  etiquetas_vec <- cat_lvls
   if (!is.null(ancho_max_eje_y)) {
     if (!requireNamespace("stringr", quietly = TRUE)) stop("Para `ancho_max_eje_y` se requiere stringr.", call. = FALSE)
-    etiquetas_df$.lab <- stringr::str_wrap(etiquetas_df$.lab, width = ancho_max_eje_y)
+    etiquetas_vec <- stringr::str_wrap(etiquetas_vec, width = ancho_max_eje_y)
   }
 
-  p_etiquetas <- ggplot2::ggplot(etiquetas_df, ggplot2::aes(y = .data$.cat)) +
-    ggplot2::geom_text(
-      ggplot2::aes(x = 1, label = .data$.lab),
-      hjust = 1, vjust = 0.5,
-      color = color_ejes,
-      size  = .pt_to_mm(size_ejes),
-      fontface = if ("eje_y" %in% textos_negrita) "bold" else "plain"
-    ) +
-    ggplot2::scale_x_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0, 0), add = c(0, 0))) +
-    ggplot2::scale_y_discrete(
-      limits = cat_lvls, drop = FALSE,
-      expand = ggplot2::expansion(mult = c(0, 0), add = c(0, 0))
-    ) +
-    ggplot2::coord_cartesian(clip = "on") +
-    ggplot2::theme_void() +
-    ggplot2::theme(
-      plot.background  = ggplot2::element_rect(fill = color_fondo, color = NA),
-      panel.background = ggplot2::element_rect(fill = color_fondo, color = NA),
-      plot.margin      = ggplot2::margin(0, 0, 0, 0)
-    )
-
-  # buffers (vacíos)
-  p_buf <- ggplot2::ggplot(etiquetas_df, ggplot2::aes(y = .data$.cat, x = 0)) +
-    ggplot2::geom_blank() +
-    ggplot2::scale_x_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0, 0), add = c(0, 0))) +
-    ggplot2::scale_y_discrete(
-      limits = cat_lvls, drop = FALSE,
-      expand = ggplot2::expansion(mult = c(0, 0), add = c(0, 0))
-    ) +
-    ggplot2::coord_cartesian(clip = "on") +
-    ggplot2::theme_void() +
-    ggplot2::theme(
-      plot.background  = ggplot2::element_rect(fill = color_fondo, color = NA),
-      panel.background = ggplot2::element_rect(fill = color_fondo, color = NA),
-      plot.margin      = ggplot2::margin(0, 0, 0, 0)
-    )
-
-  # ---------------------------------------------------------------------------
-  # 6) PH EXTRA — Y DISCRETA + valores
-  # ---------------------------------------------------------------------------
   df_wide_extra <- df |>
     dplyr::select(dplyr::all_of(c(var_categoria, var_n, cols_porcentaje))) |>
     dplyr::mutate(valor_extra = .data[[var_n]])
@@ -447,14 +507,12 @@ graficar_barras_apiladas <- function(
   fontface_barra_extra  <- if ("barra_extra" %in% textos_negrita) "bold" else "plain"
 
   if (barra_extra_preset != "ninguno") {
-
     if (barra_extra_preset == "totales") {
       if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) titulo_extra_int <- "Total"
       if (is.null(prefijo_barra_extra)) prefijo_extra_int <- "N = "
       if (is.null(color_barra_extra))   color_barra_extra_int <- pulso_azul
       fontface_barra_extra <- "bold"
     } else {
-
       base_mat <- df_wide_extra[, cols_porcentaje, drop = FALSE]
       if (escala_valor == "proporcion_100") base_mat <- base_mat / 100
       ordenado <- t(apply(as.matrix(base_mat), 1, sort, decreasing = TRUE))
@@ -477,93 +535,34 @@ graficar_barras_apiladas <- function(
     }
   }
 
-  p_extra <- ggplot2::ggplot(etiquetas_df, ggplot2::aes(y = .data$.cat)) +
-    ggplot2::geom_blank() +
-    ggplot2::scale_x_continuous(limits = c(0, 1), expand = ggplot2::expansion(mult = c(0, 0), add = c(0, 0))) +
-    ggplot2::scale_y_discrete(
-      limits = cat_lvls, drop = FALSE,
-      expand = ggplot2::expansion(mult = c(0, 0), add = c(0, 0))
-    ) +
-    ggplot2::coord_cartesian(clip = "on") +
-    ggplot2::theme_void() +
-    ggplot2::theme(
-      plot.background  = ggplot2::element_rect(fill = color_fondo, color = NA),
-      panel.background = ggplot2::element_rect(fill = color_fondo, color = NA),
-      plot.margin      = ggplot2::margin(0, 0, 0, 0)
-    )
+  .format_pct_clean <- function(x) {
+    x_round <- round(x, 1)
+    txt <- format(x_round, nsmall = 1, trim = TRUE, scientific = FALSE)
+    sub("\\.0$", "", txt)
+  }
 
-  if (mostrar_barra_extra) {
+  extra_map <- df_wide_extra |>
+    dplyr::mutate(.cat_chr = as.character(.data[[var_categoria]])) |>
+    dplyr::select(.cat_chr, valor_extra)
 
-    .format_pct_clean <- function(x) {
-      x_round <- round(x, 1)
-      txt <- format(x_round, nsmall = 1, trim = TRUE, scientific = FALSE)
-      sub("\\.0$", "", txt)
+  extra_vals <- vapply(cat_lvls, function(cc) {
+    vv <- extra_map$valor_extra[match(cc, extra_map$.cat_chr)]
+    if (length(vv) == 0 || is.na(vv)) vv <- NA_real_
+    vv
+  }, numeric(1))
+
+  extra_labels <- rep("", length(cat_lvls))
+  if (isTRUE(mostrar_barra_extra)) {
+    extra_labels <- if (barra_extra_preset %in% c("top2box", "top3box", "bottom2box")) {
+      paste0(prefijo_extra_int, .format_pct_clean(extra_vals), "%")
+    } else {
+      paste0(prefijo_extra_int, format(extra_vals, big.mark = ",", scientific = FALSE, trim = TRUE))
     }
-
-    df_extra_vals <- df_wide_extra |>
-      dplyr::select(dplyr::all_of(c(var_categoria, "valor_extra"))) |>
-      dplyr::mutate(
-        .cat_chr = as.character(.data[[var_categoria]]),
-        .cat     = factor(.cat_chr, levels = cat_lvls),
-        lab_valor = dplyr::case_when(
-          barra_extra_preset %in% c("top2box", "top3box", "bottom2box") ~ paste0(.format_pct_clean(valor_extra), "%"),
-          TRUE ~ format(valor_extra, big.mark = ",", scientific = FALSE, trim = TRUE)
-        ),
-        lab_extra = paste0(prefijo_extra_int, lab_valor)
-      ) |>
-      dplyr::arrange(.data$.cat)
-
-    p_extra <- p_extra +
-      ggplot2::geom_text(
-        data = df_extra_vals,
-        ggplot2::aes(y = .data$.cat, x = 0.5, label = lab_extra),
-        inherit.aes = FALSE,
-        hjust = 0.5, vjust = 0.5,
-        color = color_barra_extra_int,
-        size  = .pt_to_mm(size_barra_extra),
-        fontface = fontface_barra_extra
-      )
+    extra_labels[!is.finite(extra_vals)] <- ""
   }
 
   # ---------------------------------------------------------------------------
-  # 6.9) SINCRONIZAR ALTURAS DE PANEL (gtable) -> alineación vertical real
-  # ---------------------------------------------------------------------------
-  if (!requireNamespace("cowplot", quietly = TRUE)) stop("Requiere cowplot.", call. = FALSE)
-
-  # helper: iguala alturas del PANEL (y, si quieres, de todo el gtable)
-  .sync_panel_heights <- function(g_target, g_ref, full = TRUE) {
-    # filas del panel
-    pr <- unique(g_ref$layout$t[g_ref$layout$name == "panel"])
-    pt <- unique(g_target$layout$t[g_target$layout$name == "panel"])
-
-    if (length(pr) == 1 && length(pt) == 1) {
-      # copia altura panel
-      g_target$heights[pt] <- g_ref$heights[pr]
-    }
-
-    # opcional: copia TODAS las alturas -> elimina diferencias sutiles arriba/abajo
-    if (isTRUE(full) && length(g_target$heights) == length(g_ref$heights)) {
-      g_target$heights <- g_ref$heights
-    }
-
-    g_target
-  }
-
-  # pasar a grobs
-  g_bars <- ggplot2::ggplotGrob(p_bars)
-  g_etq  <- ggplot2::ggplotGrob(p_etiquetas)
-  g_ext  <- ggplot2::ggplotGrob(p_extra)
-
-  # sincronizar alturas contra barras (referencia)
-  g_etq <- .sync_panel_heights(g_etq, g_bars, full = TRUE)
-  g_ext <- .sync_panel_heights(g_ext, g_bars, full = TRUE)
-
-  # buffers como grob (spacer)
-  g_buf1 <- grid::nullGrob()
-  g_buf2 <- grid::nullGrob()
-
-  # ---------------------------------------------------------------------------
-  # 7) Caption
+  # 7) Caption (texto)
   # ---------------------------------------------------------------------------
   caption_text <- NULL
   if (!is.null(nota_pie) && nzchar(nota_pie) && !is.null(nota_pie_derecha) && nzchar(nota_pie_derecha)) {
@@ -577,11 +576,9 @@ graficar_barras_apiladas <- function(
   # ---------------------------------------------------------------------------
   # 8) No canvas
   # ---------------------------------------------------------------------------
-  if (!usar_canvas) {
+  if (!isTRUE(usar_canvas)) {
     out <- p_bars +
-      ggplot2::theme(
-        legend.position = if (mostrar_leyenda) "bottom" else "none"
-      ) +
+      ggplot2::theme(legend.position = if (mostrar_leyenda) "bottom" else "none") +
       ggplot2::labs(title = titulo, subtitle = subtitulo, caption = caption_text)
 
     if (exportar == "rplot") return(out)
@@ -589,10 +586,19 @@ graficar_barras_apiladas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 9) CANVAS
+  # 9) CANVAS (cowplot)
   # ---------------------------------------------------------------------------
   if (!requireNamespace("cowplot", quietly = TRUE)) stop("Para `usar_canvas=TRUE` se requiere cowplot.", call. = FALSE)
-  if (!requireNamespace("grid", quietly = TRUE))    stop("Para `usar_canvas=TRUE` se requiere grid.", call. = FALSE)
+
+  # barras “panel puro”
+  p_bars_panel <- p_bars +
+    ggplot2::theme_void() +
+    ggplot2::theme(
+      legend.position  = "none",
+      plot.background  = ggplot2::element_rect(fill = color_fondo, color = NA),
+      panel.background = ggplot2::element_rect(fill = color_fondo, color = NA),
+      plot.margin      = ggplot2::margin(0,0,0,0)
+    )
 
   .ph_border <- function(x, y, w, h) {
     cowplot::draw_grob(
@@ -606,6 +612,7 @@ graficar_barras_apiladas <- function(
     )
   }
 
+  # alturas en pulgadas
   alto_por_cat_eff <- alto_por_categoria %||% 0.42
   h_panel_in <- if (!is.null(canvas_h_panel_in) && is.finite(canvas_h_panel_in) && canvas_h_panel_in > 0) {
     canvas_h_panel_in
@@ -634,7 +641,7 @@ graficar_barras_apiladas <- function(
   y_legend0  <- y_panel0  - legend_h
   y_caption0 <- y_legend0 - caption_h
 
-  # widths (5 columnas)
+  # widths (5 columnas) — placeholders independientes
   w_etq   <- canvas_w_etiquetas
   w_buf1  <- canvas_w_buf_etq_bars
   w_bars  <- canvas_w_bars
@@ -656,7 +663,7 @@ graficar_barras_apiladas <- function(
   x_buf20  <- x_bars0 + w_bars
   x_extra0 <- x_buf20 + w_buf2
 
-  # top row (pulgadas -> fracción)
+  # top row (título del extra)
   top_in <- canvas_h_toprow_in %||% 0
   if (!is.finite(top_in) || is.na(top_in) || top_in < 0) top_in <- 0
   top_in <- min(top_in, h_panel_in * 0.45)
@@ -680,16 +687,37 @@ graficar_barras_apiladas <- function(
 
   canvas <- cowplot::ggdraw()
 
-  # HEADER
+  # ============================================================
+  # HEADER: centrado + desplazamiento + separación
+  # ============================================================
   if (has_header) {
-    header_text <- titulo %||% ""
-    sub_text    <- subtitulo %||% ""
+    # Centro vertical del placeholder header (NPC)
+    y_header_center <- y_header0 + (header_h * 0.5)
 
-    if (nzchar(header_text)) {
+    # Convertir pulgadas -> NPC (respecto al alto total)
+    dy_head <- encabezado_desplazamiento_in / h_total_in
+    sep     <- encabezado_separacion_in     / h_total_in
+
+    # Posiciones: bloque centrado (título arriba, subtítulo abajo)
+    has_t <- (!is.null(titulo) && nzchar(titulo))
+    has_s <- (!is.null(subtitulo) && nzchar(subtitulo))
+
+    if (has_t && has_s) {
+      y_title <- y_header_center + (sep * 0.5) + dy_head
+      y_sub   <- y_header_center - (sep * 0.5) + dy_head
+    } else if (has_t) {
+      y_title <- y_header_center + dy_head
+      y_sub   <- NA_real_
+    } else {
+      y_title <- NA_real_
+      y_sub   <- y_header_center + dy_head
+    }
+
+    if (has_t) {
       canvas <- canvas + cowplot::draw_text(
-        text  = header_text,
+        text  = titulo,
         x     = hjust_titulo,
-        y     = 1 - (header_h * 0.35),
+        y     = y_title,
         hjust = hjust_titulo,
         vjust = 0.5,
         size  = size_titulo,
@@ -697,11 +725,12 @@ graficar_barras_apiladas <- function(
         fontface = if ("titulo" %in% textos_negrita) "bold" else "plain"
       )
     }
-    if (nzchar(sub_text)) {
+
+    if (has_s) {
       canvas <- canvas + cowplot::draw_text(
-        text  = sub_text,
+        text  = subtitulo,
         x     = hjust_titulo,
-        y     = 1 - (header_h * 0.78),
+        y     = y_sub,
         hjust = hjust_titulo,
         vjust = 0.5,
         size  = size_subtitulo,
@@ -712,7 +741,7 @@ graficar_barras_apiladas <- function(
     if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_header0, 1, header_h)
   }
 
-  # TOP ROW (3 PH): etiquetas | barras | extra
+  # TOP ROW (título extra)
   if (top_h > 0) {
 
     if (debug_ph_bordes) {
@@ -726,7 +755,7 @@ graficar_barras_apiladas <- function(
       canvas <- canvas + cowplot::draw_text(
         text     = titulo_extra_int,
         x        = x_extra0 + (w_extra * 0.5),
-        y        = y_top0 + (top_h * 0.08),
+        y        = y_top0 + (top_h * 0.2),
         hjust    = 0.5,
         vjust    = 0,
         size     = size_titulo_extra,
@@ -736,13 +765,48 @@ graficar_barras_apiladas <- function(
     }
   }
 
-  # MAIN ROW (5 PH): etiquetas | buf | barras | buf | extra
+  # MAIN ROW: barras (columna central)
   canvas <- canvas +
-    cowplot::draw_grob(g_etq,  x = x_etq0,   y = y_main0, width = w_etq,   height = main_h) +
-    cowplot::draw_grob(g_buf1, x = x_buf10,  y = y_main0, width = w_buf1,  height = main_h) +
-    cowplot::draw_grob(g_bars, x = x_bars0,  y = y_main0, width = w_bars,  height = main_h) +
-    cowplot::draw_grob(g_buf2, x = x_buf20,  y = y_main0, width = w_buf2,  height = main_h) +
-    cowplot::draw_grob(g_ext,  x = x_extra0, y = y_main0, width = w_extra, height = main_h)
+    cowplot::draw_plot(p_bars_panel, x = x_bars0, y = y_main0, width = w_bars, height = main_h)
+
+  # Coordenadas Y “milimétricas” por fila
+  y_npc <- (seq_len(n_categorias) - 0.5) / n_categorias
+  y_abs <- y_main0 + y_npc * main_h
+
+  # Etiquetas (columna izquierda)
+  pad_x <- 0.012
+  x_lab <- x_etq0 + w_etq * (1 - pad_x)
+  fontface_etq <- if ("eje_y" %in% textos_negrita) "bold" else "plain"
+
+  for (i in seq_len(n_categorias)) {
+    canvas <- canvas + cowplot::draw_text(
+      text     = etiquetas_vec[i],
+      x        = x_lab,
+      y        = y_abs[i],
+      hjust    = 1,
+      vjust    = 0.5,
+      size     = size_ejes,
+      colour   = color_ejes,
+      fontface = fontface_etq
+    )
+  }
+
+  # Extra (columna derecha)
+  x_extra_txt <- x_extra0 + (w_extra * 0.5)
+  for (i in seq_len(n_categorias)) {
+    if (nzchar(extra_labels[i])) {
+      canvas <- canvas + cowplot::draw_text(
+        text     = extra_labels[i],
+        x        = x_extra_txt,
+        y        = y_abs[i],
+        hjust    = 0.5,
+        vjust    = 0.5,
+        size     = size_barra_extra,
+        colour   = color_barra_extra_int,
+        fontface = fontface_barra_extra
+      )
+    }
+  }
 
   if (debug_ph_bordes) {
     canvas <- canvas +
@@ -753,17 +817,29 @@ graficar_barras_apiladas <- function(
       .ph_border(x_extra0, y_main0, w_extra, main_h)
   }
 
-  # LEYENDA
+  # ============================================================
+  # LEYENDA (simplificada): centrada + desplazamiento
+  # ============================================================
   if (has_legend && !is.null(leg_grob)) {
     pos_leyenda_x <- 0.5
     if (!is.na(centro_cowplot) && is.finite(centro_cowplot)) pos_leyenda_x <- centro_cowplot
 
+    # Centro vertical del placeholder de leyenda
+    y_legend_center <- y_legend0 + (legend_h * 0.5)
+
+    # + sube / - baja (en NPC)
+    dy_leg <- leyenda_desplazamiento_in / h_total_in
+
     canvas <- canvas + cowplot::draw_grob(
       leg_grob,
-      x = pos_leyenda_x, y = y_legend0,
-      width = 1, height = legend_h,
-      hjust = 0.5, vjust = 0
+      x = pos_leyenda_x,
+      y = y_legend_center + dy_leg,
+      width  = 1,
+      height = legend_h,
+      hjust  = 0.5,
+      vjust  = 0.5
     )
+
     if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_legend0, 1, legend_h)
   }
 
