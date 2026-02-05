@@ -74,7 +74,7 @@ p <- graficar_barras_apiladas(
   mostrar_valores     = TRUE,
   umbral_etiqueta     = 0.06,
   umbral_etiqueta_peq = 0.035,
-  decimales           = 1,
+  decimales           = 0,
 
   # barra extra
   mostrar_barra_extra = TRUE,
@@ -89,24 +89,29 @@ p <- graficar_barras_apiladas(
   canvas_w_extra          = 0.12,
   canvas_h_toprow_in      = 0.10,
 
-  # control altura del panel
-  alto_por_categoria  = 0.52,
-  # alternativo:
-  # canvas_h_panel_in  = 2.2,
 
-  # --- LEYENDA: cuadrados perfectos ---
-  legend_key_cm = 0.35,
+  legend_key_cm = 0.30,
+  legend_spacing_x_cm = 346,
+  legend_spacing_y_cm = 0.10,
+  legend_n_por_fila = 6,
 
-  # grosor (modo auto recomendado)
+  # alturas (pulgadas)
+  canvas_h_header_in  = 0.75,
+  canvas_h_legend_in  = 0.35,
+  canvas_h_caption_in = 0.20,
+
+  # panel: 8 filas -> bajar un poco para que no se “aplasten”
+  alto_por_categoria  = 0.46,
+
+  # grosor
   grosor_modo        = "auto",
   grosor_barras      = 0.72,
-  grosor_barras_mult = 1.10,
+  grosor_barras_mult = 1.05,
 
   # textos
-  titulo    = "Satisfacción con el servicio (FAKE)",
-  subtitulo = "Canvas: etiquetas | buf | barras | buf | extra (medible)",
-  nota_pie  = "Fuente: simulación",
-  nota_pie_derecha = "N total = 840",
+  titulo    = "Lorem ipsum dolor sit amet, consectetur adipiscing elit",
+  subtitulo = "Nulla pulvinar ligula laoreet nulla sollicitudin sodales",
+
 
   # estilo de texto (tamaños y colores)
   size_titulo      = 12,
@@ -133,12 +138,13 @@ p <- graficar_barras_apiladas(
   leyenda_desplazamiento_in    = 0, 
 
   # debug: bordes de placeholders
-  debug_ph_bordes = TRUE,
+  debug_ph_bordes = T,
   debug_ph_col    = "#FF00FF",
   debug_ph_lwd    = 0.6,
 
   # salida
-  exportar = "rplot"
+  exportar = "ppt",
+  path_salida = "prueba.pptx"
 )
 
 p
@@ -228,7 +234,7 @@ p2 <- graficar_barras_apiladas(
   mostrar_valores     = TRUE,
   umbral_etiqueta     = 0.055,
   umbral_etiqueta_peq = 0.030,
-  decimales           = 1,
+  decimales           = 0,
 
   # barra extra
   mostrar_barra_extra = TRUE,
@@ -253,19 +259,14 @@ p2 <- graficar_barras_apiladas(
   # panel: 8 filas -> bajar un poco para que no se “aplasten”
   alto_por_categoria  = 0.46,
 
-  # --- LEYENDA: cuadrados perfectos ---
-  legend_key_cm = 0.34,
-
   # grosor
   grosor_modo        = "auto",
   grosor_barras      = 0.72,
   grosor_barras_mult = 1.05,
 
-  # textos (distintos)
-  titulo    = "Evaluación de componentes del servicio (FAKE)",
-  subtitulo = "8 categorías · barras apiladas (100%) · N por fila (columna extra)",
-  nota_pie  = "Fuente: simulación",
-  nota_pie_derecha = paste0("N total = ", sum(df_fake2$N)),
+  # textos
+  titulo    = "Lorem ipsum dolor sit amet, consectetur adipiscing elit",
+  subtitulo = "Nulla pulvinar ligula laoreet nulla sollicitudin sodales",
 
  # estilo de texto (tamaños y colores)
   size_titulo      = 12,
@@ -291,6 +292,11 @@ p2 <- graficar_barras_apiladas(
   encabezado_desplazamiento_in = 0,  
   encabezado_separacion_in     = 0.20,  
   leyenda_desplazamiento_in    = 0,  
+ 
+  legend_key_cm = 0.30,
+  legend_spacing_x_cm = 346,
+  legend_spacing_y_cm = 0.10,
+  legend_n_por_fila = 5,
 
   # debug: bordes de placeholders
   debug_ph_bordes = TRUE,
@@ -298,7 +304,8 @@ p2 <- graficar_barras_apiladas(
   debug_ph_lwd    = 0.6,
 
   # salida
-  exportar = "rplot"
+  exportar = "ppt",
+  path_salida = "prueba.pptx"
 )
 
 p2
@@ -412,16 +419,14 @@ p3 <- graficar_barras_apiladas(
   # 2 filas => panel compacto
   alto_por_categoria  = 0.3,
 
-  legend_key_cm = 0.34,
 
   grosor_modo        = "auto",
   grosor_barras      = 0.72,
-  grosor_barras_mult = 1.10,
+  grosor_barras_mult = 0.9,
 
-  titulo    = "Distribución por opción (FAKE)",
-  subtitulo = "2 categorías · 8 opciones · barras apiladas (100%)",
-  nota_pie  = "Fuente: simulación",
-  nota_pie_derecha = paste0("N total = ", sum(df_fake3$N)),
+  # textos
+  titulo    = "Lorem ipsum dolor sit amet, consectetur adipiscing elit",
+  subtitulo = "Nulla pulvinar ligula laoreet nulla sollicitudin sodales",
 
   size_titulo       = 13,
   size_subtitulo    = 9,
@@ -437,15 +442,19 @@ p3 <- graficar_barras_apiladas(
 
   textos_negrita = c("titulo", "leyenda", "barra_extra", "eje_y"),
   
-  encabezado_desplazamiento_in = -0.08,  
-  encabezado_separacion_in     = 0.10,  
-  leyenda_desplazamiento_in    = 0.08,   
+  legend_key_cm = 0.30,
+  legend_spacing_x_cm = 346,
+  legend_spacing_y_cm = 0.2,
+  legend_n_por_fila = 4,
+  
 
   debug_ph_bordes = TRUE,
   debug_ph_col    = "#FF00FF",
   debug_ph_lwd    = 0.6,
 
-  exportar = "rplot"
+  # salida
+  exportar = "ppt",
+  path_salida = "prueba.pptx"
 )
 
 p3

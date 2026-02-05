@@ -1,3 +1,4 @@
+
 #' Graficar barras apiladas con canvas controlado y placeholders independientes
 #'
 #' Genera un gráfico de barras apiladas horizontales (100%) por categoría, con opción
@@ -19,7 +20,8 @@
 #' @param escala_valor Escala de entrada: `"proporcion_1"` (0-1) o `"proporcion_100"` (0-100).
 #' @param colores_grupos Vector nombrado (opcional) de colores por etiqueta de grupo.
 #' @param mostrar_valores Si `TRUE`, dibuja etiquetas % dentro de segmentos (cuando superan umbrales).
-#' @param decimales Legacy/compat: se conserva, pero el % mostrado se asigna por entero (suma 100).
+#' @param decimales Número de decimales para etiquetas % (se asignan por “largest remainder”
+#'   en la escala 100*10^decimales, garantizando suma exacta).
 #' @param umbral_etiqueta Umbral (0-1) para etiquetar como “grande”.
 #' @param umbral_etiqueta_peq Umbral (0-1) para etiquetar como “peq”. Si `NULL`, usa `umbral_etiqueta`.
 #' @param mostrar_barra_extra Si `TRUE`, dibuja columna extra (texto) alineada por fila.
@@ -45,7 +47,6 @@
 #' @param ancho_max_eje_y Si se define, aplica `stringr::str_wrap()` a etiquetas del eje Y.
 #'
 #' @param mostrar_leyenda Si `TRUE`, incluye leyenda (en canvas, debajo del panel).
-#' @param usar_leyenda_cowplot Legacy.
 #' @param invertir_leyenda Si `TRUE`, invierte el orden de la leyenda.
 #' @param invertir_barras Si `TRUE`, invierte el orden de categorías.
 #' @param invertir_segmentos Si `TRUE`, invierte el orden de apilamiento.
@@ -69,24 +70,27 @@
 #' @param grosor_barras_mult Multiplicador del grosor en modo `"auto"`.
 #'
 #' @param legend_key_cm Tamaño de keys de la leyenda (cm), buscando cuadrados “perfectos”.
+#' @param legend_spacing_x_cm Espacio horizontal entre ítems de leyenda (cm).
+#' @param legend_spacing_y_cm Espacio vertical entre filas de leyenda (cm).
+#' @param legend_margin_cm Padding interno del bloque de leyenda (cm).
+#' @param legend_box_margin_cm Margen externo del bloque de leyenda (cm).
+#' @param legend_n_por_fila Ítems por fila de leyenda (usa `ncol`).
 #'
-#'#' @param encabezado_desplazamiento_in Desplazamiento vertical (pulgadas) del bloque título/subtítulo
-#'   dentro de su placeholder. Por defecto el bloque queda centrado. Valores positivos bajan el bloque;
-#'   valores negativos lo suben.
+#' @param encabezado_desplazamiento_in Desplazamiento vertical (pulgadas) del bloque título/subtítulo.
 #' @param encabezado_separacion_in Separación vertical total (pulgadas) entre título y subtítulo.
-#'   Por defecto separa poco y mantiene el bloque centrado.
-#' @param leyenda_desplazamiento_in Desplazamiento vertical (pulgadas) de la leyenda dentro de su
-#'   placeholder. Por defecto queda centrada. Valores positivos suben la leyenda; negativos la bajan.
+#' @param leyenda_desplazamiento_in Desplazamiento vertical (pulgadas) de la leyenda dentro de su placeholder.
 #'
 #' @param debug_ph_bordes Si `TRUE`, dibuja bordes de placeholders (debug).
 #' @param debug_ph_col Color de borde debug.
 #' @param debug_ph_lwd Grosor de borde debug.
 #'
-#' @param exportar `"rplot"`, `"png"`, `"ppt"` o `"word"`. En este bloque solo se implementa `"rplot"`.
-#' @param path_salida Ruta de salida (no implementado aquí).
-#' @param ancho,alto Tamaños para exportación (no implementado aquí).
+#' @param exportar `"rplot"`, `"png"`, `"ppt"` o `"word"`.
+#' @param path_salida Ruta de salida para exportación.
+#' @param ancho,alto Tamaños (pulgadas) para exportación (png/ppt/word).
 #' @param alto_por_categoria Altura por categoría (pulgadas) para definir el panel cuando `canvas_h_panel_in` es `NULL`.
-#' @param dpi DPI para exportación (no implementado aquí).
+#' @param dpi DPI para exportación PNG.
+#' @param ppt_append Si `TRUE` y el archivo existe, agrega una diapositiva al final.
+#' @param ppt_layout,ppt_master Layout/master para la diapositiva.
 #'
 #' @return Un objeto ggplot/cowplot. Si `exportar="rplot"`, retorna el plot/canvas listo para imprimir.
 #' @export
@@ -99,7 +103,7 @@ graficar_barras_apiladas <- function(
     escala_valor          = c("proporcion_1", "proporcion_100"),
     colores_grupos        = NULL,
     mostrar_valores       = TRUE,
-    decimales             = 1,
+    decimales             = 0,
     umbral_etiqueta       = 0.001,
     umbral_etiqueta_peq   = NULL,
     mostrar_barra_extra   = TRUE,
@@ -140,7 +144,6 @@ graficar_barras_apiladas <- function(
     ancho_max_eje_y       = NULL,
 
     mostrar_leyenda       = TRUE,
-    usar_leyenda_cowplot  = FALSE, # legacy
     invertir_leyenda      = FALSE,
     invertir_barras       = FALSE,
     invertir_segmentos    = FALSE,
@@ -151,20 +154,17 @@ graficar_barras_apiladas <- function(
     # ==========================
     usar_canvas           = FALSE,
 
-    canvas_w_etiquetas    = 0.38,
-    canvas_w_labels       = NULL,   # legacy alias
-
+    canvas_w_etiquetas      = 0.38,
+    canvas_w_labels         = NULL,   # legacy alias
     canvas_w_buf_etq_bars   = 0.00,
     canvas_w_buf_bars_extra = 0.00,
-
-    canvas_w_bars         = 0.52,
-    canvas_w_extra        = 0.10,
+    canvas_w_bars           = 0.52,
+    canvas_w_extra          = 0.10,
 
     canvas_h_header_in    = 0.75,
     canvas_h_legend_in    = 0.75,
     canvas_h_caption_in   = 0.40,
     canvas_h_panel_in     = NULL,
-
     canvas_h_toprow_in    = 0.18,
 
     # ==========================
@@ -177,6 +177,11 @@ graficar_barras_apiladas <- function(
     # LEYENDA
     # ==========================
     legend_key_cm         = 0.30,
+    legend_spacing_x_cm   = 0.28,   # <- ESPACIO HORIZONTAL ENTRE CATEGORÍAS (Ítems)
+    legend_spacing_y_cm   = 0.10,
+    legend_margin_cm      = 0.00,
+    legend_box_margin_cm  = 0.00,
+    legend_n_por_fila     = 6L,
 
     # ==========================
     # AJUSTES POSICIONALES
@@ -195,13 +200,16 @@ graficar_barras_apiladas <- function(
     # ==========================
     # EXPORTAR
     # ==========================
-
     exportar              = c("rplot", "png", "ppt", "word"),
     path_salida           = NULL,
     ancho                 = 10,
     alto                  = 6,
     alto_por_categoria    = NULL,
-    dpi                   = 300
+    dpi                   = 300,
+
+    ppt_append            = TRUE,
+    ppt_layout            = "Blank",
+    ppt_master            = "Office Theme"
 ) {
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
@@ -224,8 +232,8 @@ graficar_barras_apiladas <- function(
   if (!is.null(canvas_w_labels) && is.finite(canvas_w_labels)) canvas_w_etiquetas <- canvas_w_labels
 
   # normalizaciones
-  decimales <- suppressWarnings(as.numeric(decimales))
-  if (length(decimales) < 1L || !is.finite(decimales[1])) decimales <- 1 else decimales <- decimales[1]
+  decimales <- suppressWarnings(as.integer(decimales))
+  if (length(decimales) < 1L || !is.finite(decimales[1]) || decimales[1] < 0L) decimales <- 0L else decimales <- decimales[1]
   size_texto_barras_peq <- size_texto_barras_peq %||% size_texto_barras
   if (is.null(umbral_etiqueta_peq)) umbral_etiqueta_peq <- umbral_etiqueta
 
@@ -375,7 +383,7 @@ graficar_barras_apiladas <- function(
     )
 
   # ---------------------------------------------------------------------------
-  # 3) Etiquetas internas (%)
+  # 3) Etiquetas internas (%) con asignación exacta (suma 100.00 si decimales=2, etc.)
   # ---------------------------------------------------------------------------
   if (isTRUE(mostrar_valores)) {
 
@@ -388,26 +396,40 @@ graficar_barras_apiladas <- function(
       dplyr::mutate(x_center = cumsum(.valor_plot) - .valor_plot / 2) |>
       dplyr::ungroup()
 
-    .asignar_pct_100 <- function(p) {
+    .asignar_pct_exacto <- function(p, dec) {
       p[is.na(p) | !is.finite(p)] <- 0
       s <- sum(p)
-      if (s <= 0) return(rep(0L, length(p)))
+      if (s <= 0) return(rep.int(0L, length(p)))
       p <- p / s
-      x <- p * 100
-      base <- floor(x)
-      resto <- 100L - sum(base)
-      if (resto > 0) {
-        frac <- x - base
+
+      escala <- 10^dec
+      target_units <- as.integer(100L * escala)
+
+      x_units <- p * target_units
+      base <- floor(x_units)
+      resto <- target_units - sum(base)
+
+      if (resto > 0L) {
+        frac <- x_units - base
         idx <- order(frac, decreasing = TRUE)
         base[idx[seq_len(resto)]] <- base[idx[seq_len(resto)]] + 1L
       }
       as.integer(base)
     }
 
+    .fmt_units_pct <- function(units, dec){
+      escala <- 10^dec
+      val <- units / escala
+      out <- format(val, nsmall = dec, trim = TRUE, scientific = FALSE)
+      paste0(out, "%")
+    }
+
     df_lab <- df_lab |>
       dplyr::group_by(.data[[var_categoria]]) |>
-      dplyr::mutate(.pct_int = .asignar_pct_100(.valor_plot),
-                    lab = paste0(.pct_int, "%")) |>
+      dplyr::mutate(
+        .pct_units = .asignar_pct_exacto(.valor_plot, decimales),
+        lab        = .fmt_units_pct(.pct_units, decimales)
+      ) |>
       dplyr::ungroup() |>
       dplyr::mutate(
         .tamano_etq = dplyr::case_when(
@@ -446,7 +468,7 @@ graficar_barras_apiladas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 4) Colores + leyenda (para extraer grob)
+  # 4) Colores + leyenda (para extraer grob) — con separación horizontal REAL
   # ---------------------------------------------------------------------------
   wrap_fun <- NULL
   if (requireNamespace("stringr", quietly = TRUE)) wrap_fun <- function(x) stringr::str_wrap(x, width = 40)
@@ -454,7 +476,6 @@ graficar_barras_apiladas <- function(
   if (!is.null(colores_grupos)) {
     if (is.null(names(colores_grupos))) colores_grupos <- stats::setNames(colores_grupos, niveles_originales)
     valores_leyenda <- colores_grupos[niveles_leyenda]
-
     p_bars <- p_bars +
       ggplot2::scale_fill_manual(
         breaks = niveles_leyenda,
@@ -470,8 +491,8 @@ graficar_barras_apiladas <- function(
   }
 
   n_items_leyenda <- length(niveles_leyenda)
-  n_por_fila      <- 6L
-  n_filas_leyenda <- max(1L, ceiling(n_items_leyenda / n_por_fila))
+  n_por_fila <- as.integer(legend_n_por_fila)
+  if (!is.finite(n_por_fila) || n_por_fila < 1L) n_por_fila <- 6L
 
   p_for_legend <- p_bars +
     ggplot2::theme(
@@ -484,9 +505,27 @@ graficar_barras_apiladas <- function(
       ),
       legend.key.width  = grid::unit(legend_key_cm, "cm"),
       legend.key.height = grid::unit(legend_key_cm, "cm"),
+
+      # ESPACIADO REAL ENTRE ÍTEMS / FILAS
+      legend.spacing.x  = grid::unit(legend_spacing_x_cm, "cm"),
+      legend.spacing.y  = grid::unit(legend_spacing_y_cm, "cm"),
+
+      legend.margin     = ggplot2::margin(
+        t = legend_margin_cm, r = legend_margin_cm,
+        b = legend_margin_cm, l = legend_margin_cm, unit = "cm"
+      ),
+      legend.box.margin = ggplot2::margin(
+        t = legend_box_margin_cm, r = legend_box_margin_cm,
+        b = legend_box_margin_cm, l = legend_box_margin_cm, unit = "cm"
+      ),
       plot.margin       = ggplot2::margin(0, 0, 0, 0)
     ) +
-    ggplot2::guides(fill = ggplot2::guide_legend(nrow = n_filas_leyenda, byrow = TRUE))
+    ggplot2::guides(
+      fill = ggplot2::guide_legend(
+        byrow = TRUE,
+        ncol  = n_por_fila
+      )
+    )
 
   # ---------------------------------------------------------------------------
   # 5) Etiquetas Y y extra como texto (sin ggplot)
@@ -535,10 +574,9 @@ graficar_barras_apiladas <- function(
     }
   }
 
-  .format_pct_clean <- function(x) {
-    x_round <- round(x, 1)
-    txt <- format(x_round, nsmall = 1, trim = TRUE, scientific = FALSE)
-    sub("\\.0$", "", txt)
+  .format_pct_clean <- function(x, dec){
+    x_round <- round(x, dec)
+    format(x_round, nsmall = dec, trim = TRUE, scientific = FALSE)
   }
 
   extra_map <- df_wide_extra |>
@@ -554,7 +592,7 @@ graficar_barras_apiladas <- function(
   extra_labels <- rep("", length(cat_lvls))
   if (isTRUE(mostrar_barra_extra)) {
     extra_labels <- if (barra_extra_preset %in% c("top2box", "top3box", "bottom2box")) {
-      paste0(prefijo_extra_int, .format_pct_clean(extra_vals), "%")
+      paste0(prefijo_extra_int, .format_pct_clean(extra_vals, decimales), "%")
     } else {
       paste0(prefijo_extra_int, format(extra_vals, big.mark = ",", scientific = FALSE, trim = TRUE))
     }
@@ -582,7 +620,45 @@ graficar_barras_apiladas <- function(
       ggplot2::labs(title = titulo, subtitle = subtitulo, caption = caption_text)
 
     if (exportar == "rplot") return(out)
-    stop("Exportación fuera de canvas no está activada en este bloque.", call. = FALSE)
+
+    # EXPORT PNG / PPT / WORD (sin canvas): se exporta el ggplot directamente
+    if (is.null(path_salida) || !nzchar(path_salida)) stop("`path_salida` es requerido para exportar.", call. = FALSE)
+
+    if (exportar == "png") {
+      ggplot2::ggsave(filename = path_salida, plot = out, width = ancho, height = alto, units = "in", dpi = dpi, bg = "transparent")
+      return(invisible(out))
+    }
+
+    if (exportar %in% c("ppt", "word")) {
+      if (!requireNamespace("officer", quietly = TRUE)) stop("Para exportar a PPT/Word se requiere officer.", call. = FALSE)
+      if (!requireNamespace("rvg", quietly = TRUE))     stop("Para exportar a PPT/Word se requiere rvg (dml).", call. = FALSE)
+
+      if (exportar == "ppt") {
+        doc <- if (ppt_append && file.exists(path_salida)) officer::read_pptx(path_salida) else officer::read_pptx()
+        doc <- officer::add_slide(doc, layout = ppt_layout, master = ppt_master)
+        doc <- officer::ph_with(
+          doc,
+          value = rvg::dml(ggobj = out),
+          location = officer::ph_location_fullsize()
+        )
+        print(doc, target = path_salida)
+        return(invisible(out))
+      }
+
+      if (exportar == "word") {
+        doc <- if (file.exists(path_salida)) officer::read_docx(path_salida) else officer::read_docx()
+        doc <- officer::body_add_par(doc, value = "", style = "Normal")
+        doc <- officer::body_add_dml(
+          doc,
+          value = rvg::dml(ggobj = out),
+          width = ancho, height = alto
+        )
+        print(doc, target = path_salida)
+        return(invisible(out))
+      }
+    }
+
+    stop("Tipo de exportación no soportado.", call. = FALSE)
   }
 
   # ---------------------------------------------------------------------------
@@ -691,14 +767,10 @@ graficar_barras_apiladas <- function(
   # HEADER: centrado + desplazamiento + separación
   # ============================================================
   if (has_header) {
-    # Centro vertical del placeholder header (NPC)
     y_header_center <- y_header0 + (header_h * 0.5)
-
-    # Convertir pulgadas -> NPC (respecto al alto total)
     dy_head <- encabezado_desplazamiento_in / h_total_in
     sep     <- encabezado_separacion_in     / h_total_in
 
-    # Posiciones: bloque centrado (título arriba, subtítulo abajo)
     has_t <- (!is.null(titulo) && nzchar(titulo))
     has_s <- (!is.null(subtitulo) && nzchar(subtitulo))
 
@@ -818,23 +890,24 @@ graficar_barras_apiladas <- function(
   }
 
   # ============================================================
-  # LEYENDA (simplificada): centrada + desplazamiento
+  # LEYENDA: centrada + desplazamiento
   # ============================================================
   if (has_legend && !is.null(leg_grob)) {
+
     pos_leyenda_x <- 0.5
     if (!is.na(centro_cowplot) && is.finite(centro_cowplot)) pos_leyenda_x <- centro_cowplot
 
-    # Centro vertical del placeholder de leyenda
     y_legend_center <- y_legend0 + (legend_h * 0.5)
-
-    # + sube / - baja (en NPC)
     dy_leg <- leyenda_desplazamiento_in / h_total_in
+
+    leg_w_npc <- grid::convertWidth(sum(leg_grob$widths), "npc", valueOnly = TRUE)
+    if (!is.finite(leg_w_npc) || leg_w_npc <= 0) leg_w_npc <- 1
 
     canvas <- canvas + cowplot::draw_grob(
       leg_grob,
       x = pos_leyenda_x,
       y = y_legend_center + dy_leg,
-      width  = 1,
+      width  = leg_w_npc,
       height = legend_h,
       hjust  = 0.5,
       vjust  = 0.5
@@ -857,10 +930,49 @@ graficar_barras_apiladas <- function(
     if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_caption0, 1, caption_h)
   }
 
+  # ---------------------------------------------------------------------------
+  # 10) EXPORT
+  # ---------------------------------------------------------------------------
   if (exportar == "rplot") {
     attr(canvas, "alto_word_sugerido") <- h_total_in
     return(canvas)
   }
 
-  stop("Exportación: primero validar en rplot; luego se integra a tu pipeline.", call. = FALSE)
+  if (is.null(path_salida) || !nzchar(path_salida)) stop("`path_salida` es requerido para exportar.", call. = FALSE)
+
+  if (exportar == "png") {
+    ggplot2::ggsave(filename = path_salida, plot = canvas, width = ancho, height = alto, units = "in", dpi = dpi, bg = "transparent")
+    return(invisible(canvas))
+  }
+
+  if (exportar %in% c("ppt", "word")) {
+    if (!requireNamespace("officer", quietly = TRUE)) stop("Para exportar a PPT/Word se requiere officer.", call. = FALSE)
+    if (!requireNamespace("rvg", quietly = TRUE))     stop("Para exportar a PPT/Word se requiere rvg (dml).", call. = FALSE)
+
+    if (exportar == "ppt") {
+      doc <- if (ppt_append && file.exists(path_salida)) officer::read_pptx(path_salida) else officer::read_pptx()
+      doc <- officer::add_slide(doc, layout = ppt_layout, master = ppt_master)
+      doc <- officer::ph_with(
+        doc,
+        value = rvg::dml(ggobj = canvas),
+        location = officer::ph_location_fullsize()
+      )
+      print(doc, target = path_salida)
+      return(invisible(canvas))
+    }
+
+    if (exportar == "word") {
+      doc <- if (file.exists(path_salida)) officer::read_docx(path_salida) else officer::read_docx()
+      doc <- officer::body_add_par(doc, value = "", style = "Normal")
+      doc <- officer::body_add_dml(
+        doc,
+        value = rvg::dml(ggobj = canvas),
+        width = ancho, height = alto
+      )
+      print(doc, target = path_salida)
+      return(invisible(canvas))
+    }
+  }
+
+  stop("Tipo de exportación no soportado.", call. = FALSE)
 }
