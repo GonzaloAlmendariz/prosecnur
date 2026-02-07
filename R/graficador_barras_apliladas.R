@@ -491,8 +491,7 @@ graficar_barras_apiladas <- function(
         color = color_leyenda,
         size  = size_leyenda,
         face  = if ("leyenda" %in% textos_negrita) "bold" else "plain",
-        # esto crea separación real entre categorías sin deformar el key
-        margin = ggplot2::margin(r = legend_espaciado, unit = "pt")
+        margin = ggplot2::margin(l = legend_espaciado/2, r = legend_espaciado/2, unit = "pt")
       ),
 
       legend.key.width  = grid::unit(legend_key_cm, "cm"),
@@ -878,7 +877,8 @@ graficar_barras_apiladas <- function(
   # ============================================================
   if (has_legend && !is.null(leg_grob)) {
 
-    pos_leyenda_x <- 0.5
+    # centro del placeholder de barras
+    pos_leyenda_x <- x_bars0 + (w_bars * 0.5)
     if (!is.na(centro_cowplot) && is.finite(centro_cowplot)) pos_leyenda_x <- centro_cowplot
 
     y_legend_center <- y_legend0 + (legend_h * 0.5)
