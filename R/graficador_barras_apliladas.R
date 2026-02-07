@@ -69,12 +69,9 @@
 #' @param grosor_modo `"manual"` o `"auto"`. En `"auto"` el grosor se ajusta por número de categorías.
 #' @param grosor_barras_mult Multiplicador del grosor en modo `"auto"`.
 #'
-#' @param legend_key_cm Tamaño de keys de la leyenda (cm), buscando cuadrados “perfectos”.
-#' @param legend_spacing_x_cm Espacio horizontal entre ítems de leyenda (cm).
-#' @param legend_spacing_y_cm Espacio vertical entre filas de leyenda (cm).
-#' @param legend_margin_cm Padding interno del bloque de leyenda (cm).
-#' @param legend_box_margin_cm Margen externo del bloque de leyenda (cm).
-#' @param legend_n_por_fila Ítems por fila de leyenda (usa `ncol`).
+#' @param legend_key_cm Tamaño del `key` de la leyenda (en cm).
+#' @param legend_espaciado Espaciado horizontal entre ítems de la leyenda.
+#' @param legend_n_por_fila Número de ítems por fila en la leyenda.
 #'
 #' @param encabezado_desplazamiento_in Desplazamiento vertical (pulgadas) del bloque título/subtítulo.
 #' @param encabezado_separacion_in Separación vertical total (pulgadas) entre título y subtítulo.
@@ -155,7 +152,6 @@ graficar_barras_apiladas <- function(
     usar_canvas           = FALSE,
 
     canvas_w_etiquetas      = 0.38,
-    canvas_w_labels         = NULL,   # legacy alias
     canvas_w_buf_etq_bars   = 0.00,
     canvas_w_buf_bars_extra = 0.00,
     canvas_w_bars           = 0.52,
@@ -177,10 +173,7 @@ graficar_barras_apiladas <- function(
     # LEYENDA
     # ==========================
     legend_key_cm         = 0.30,
-    legend_spacing_x_cm   = 0.28,   # <- ESPACIO HORIZONTAL ENTRE CATEGORÍAS (Ítems)
-    legend_spacing_y_cm   = 0.10,
-    legend_margin_cm      = 0.00,
-    legend_box_margin_cm  = 0.00,
+    legend_espaciado      = 0.20,
     legend_n_por_fila     = 6L,
 
     # ==========================
@@ -498,32 +491,27 @@ graficar_barras_apiladas <- function(
     ggplot2::theme(
       legend.position = "bottom",
       legend.title    = ggplot2::element_blank(),
-      legend.text     = ggplot2::element_text(
+      legend.text = ggplot2::element_text(
         color = color_leyenda,
         size  = size_leyenda,
-        face  = if ("leyenda" %in% textos_negrita) "bold" else "plain"
+        face  = if ("leyenda" %in% textos_negrita) "bold" else "plain",
+        # esto crea separación real entre categorías sin deformar el key
+        margin = ggplot2::margin(r = legend_espaciado, unit = "pt")
       ),
+
       legend.key.width  = grid::unit(legend_key_cm, "cm"),
       legend.key.height = grid::unit(legend_key_cm, "cm"),
 
-      # ESPACIADO REAL ENTRE ÍTEMS / FILAS
-      legend.spacing.x  = grid::unit(legend_spacing_x_cm, "cm"),
-      legend.spacing.y  = grid::unit(legend_spacing_y_cm, "cm"),
+      legend.key.spacing.x = grid::unit(0.10, "cm"),
 
-      legend.margin     = ggplot2::margin(
-        t = legend_margin_cm, r = legend_margin_cm,
-        b = legend_margin_cm, l = legend_margin_cm, unit = "cm"
-      ),
-      legend.box.margin = ggplot2::margin(
-        t = legend_box_margin_cm, r = legend_box_margin_cm,
-        b = legend_box_margin_cm, l = legend_box_margin_cm, unit = "cm"
-      ),
-      plot.margin       = ggplot2::margin(0, 0, 0, 0)
+      plot.margin = ggplot2::margin(0, 0, 0, 0)
     ) +
     ggplot2::guides(
       fill = ggplot2::guide_legend(
         byrow = TRUE,
-        ncol  = n_por_fila
+        ncol  = n_por_fila,
+        keywidth  = grid::unit(legend_key_cm, "cm"),
+        keyheight = grid::unit(legend_key_cm, "cm")
       )
     )
 

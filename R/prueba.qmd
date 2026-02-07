@@ -90,9 +90,8 @@ p <- graficar_barras_apiladas(
   canvas_h_toprow_in      = 0.10,
 
 
-  legend_key_cm = 0.30,
-  legend_spacing_x_cm = 346,
-  legend_spacing_y_cm = 0.10,
+  legend_key_cm = 0.40,
+  legend_espaciado = 20,
   legend_n_por_fila = 6,
 
   # alturas (pulgadas)
@@ -143,7 +142,7 @@ p <- graficar_barras_apiladas(
   debug_ph_lwd    = 0.6,
 
   # salida
-  exportar = "ppt",
+  exportar = "rplot",
   path_salida = "prueba.pptx"
 )
 
@@ -293,9 +292,8 @@ p2 <- graficar_barras_apiladas(
   encabezado_separacion_in     = 0.20,  
   leyenda_desplazamiento_in    = 0,  
  
-  legend_key_cm = 0.30,
-  legend_spacing_x_cm = 346,
-  legend_spacing_y_cm = 0.10,
+  legend_key_cm = 0.40,
+  legend_espaciado = 20,
   legend_n_por_fila = 5,
 
   # debug: bordes de placeholders
@@ -304,7 +302,7 @@ p2 <- graficar_barras_apiladas(
   debug_ph_lwd    = 0.6,
 
   # salida
-  exportar = "ppt",
+  exportar = "rplot",
   path_salida = "prueba.pptx"
 )
 
@@ -442,10 +440,10 @@ p3 <- graficar_barras_apiladas(
 
   textos_negrita = c("titulo", "leyenda", "barra_extra", "eje_y"),
   
-  legend_key_cm = 0.30,
-  legend_spacing_x_cm = 346,
-  legend_spacing_y_cm = 0.2,
-  legend_n_por_fila = 4,
+  legend_key_cm = 0.40,
+  legend_espaciado = 20,
+  legend_n_por_fila = 8,
+  leyenda_desplazamiento_in = 0.1,
   
 
   debug_ph_bordes = TRUE,
@@ -453,11 +451,148 @@ p3 <- graficar_barras_apiladas(
   debug_ph_lwd    = 0.6,
 
   # salida
-  exportar = "ppt",
+  exportar = "rplot",
   path_salida = "prueba.pptx"
 )
 
 p3
 ```
+
+# Ejemplo 4
+
+```{r}
+# ============================================================
+# EJEMPLO RÁPIDO (FAKE DATA) — "AGRUPADAS" + CANVAS ON (SIN LEYENDA)
+# SOLO 1 SERIE: % de menciones por alternativa (pregunta abierta codificada)
+# 8 filas (alternativas tipo Lorem ipsum), % independientes (NO suman 100)
+# ============================================================
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(cowplot)
+
+set.seed(129)
+
+# -------------------------
+# 1) Data ficticia (ancha)
+# -------------------------
+df_fake <- tibble::tibble(
+  alternativa = c(
+    "Lorem ipsum dolor",
+    "Sit amet consectetur",
+    "Adipiscing elit sed",
+    "Do eiusmod tempor",
+    "Incididunt ut labore",
+    "Et dolore magna",
+    "Aliqua ut enim",
+    "Ad minim veniam"
+  ),
+  N = sample(140:520, 8, replace = TRUE),
+
+  # % 0–100 por alternativa (independiente; NO suma 100)
+  pct_mencion = runif(8,  5, 65)
+)
+
+cols_porcentaje <- c("pct_mencion")
+
+# OJO: names deben coincidir con cols_porcentaje (solo una serie)
+etiquetas_series <- c(
+  pct_mencion = "Mención"
+)
+
+colores_series <- c(
+  "Mención" = "#002768"
+)
+
+# -------------------------
+# 2) Llamada — CANVAS ON (SIN LEYENDA)
+# -------------------------
+p <- graficar_barras_agrupadas(
+  data             = df_fake,
+  var_categoria    = "alternativa",
+  var_n            = "N",
+  cols_porcentaje  = cols_porcentaje,
+  etiquetas_series = etiquetas_series,
+  escala_valor     = "proporcion_100",
+  orientacion      = "horizontal",
+  colores_series   = colores_series,
+
+  # comportamiento
+  mostrar_valores   = TRUE,
+  decimales         = 0,
+  umbral_etiqueta   = 0.001,
+  umbral_posicion   = 0.07,
+  sufijo_etiqueta   = "",
+
+  # REGLA: eje fijo 0–100% salvo TRUE
+  usar_eje_libre    = FALSE,
+
+  # barra extra (columna derecha independiente)
+  mostrar_barra_extra = TRUE,
+  prefijo_barra_extra = "N = ",
+  titulo_barra_extra  = "Base",
+  invertir_barras = T,
+
+  # --- CANVAS ---
+  usar_canvas = TRUE,
+
+  canvas_w_etiquetas      = 0.12,
+  canvas_w_buf_etq_bars   = 0.02,   
+  canvas_w_bars           = 0.60,
+  canvas_w_buf_bars_extra = 0.02,   
+  canvas_w_extra          = 0.12,
+
+  canvas_h_header_in  = 0.70,
+  canvas_h_legend_in  = 0.00,  # SIN LEYENDA
+  canvas_h_caption_in = 0.30,
+  canvas_h_toprow_in  = 0.10,
+  alto_por_categoria  = 0.48,
+  ancho_max_eje_y = 18,
+
+  # textos
+  titulo    = "Alternativas codificadas (pregunta abierta) — % de menciones",
+  subtitulo = "Porcentaje independiente por alternativa (respuesta múltiple; no suma 100%)",
+
+  size_titulo       = 12,
+  size_subtitulo    = 9,
+  size_ejes         = 10,
+  size_nota_pie     = 8,
+  size_texto_barras = 3.8,
+  size_barra_extra  = 9,
+
+  color_titulo      = "#000000",
+  color_subtitulo   = "#000000",
+  color_ejes        = "#000000",
+  color_nota_pie    = "#000000",
+  color_barra_extra = "#000000",
+
+  textos_negrita = c("titulo", "barra_extra", "eje_y"),
+
+  # SIN LEYENDA
+  mostrar_leyenda = FALSE,
+
+  # debug placeholders
+  debug_ph_bordes = TRUE,
+  debug_ph_col    = "#FF00FF",
+  debug_ph_lwd    = 0.6,
+
+  # salida
+  exportar = "rplot"
+)
+
+p
+```
+
+
+
+
+
+
+
+
+
+
+
 
 
