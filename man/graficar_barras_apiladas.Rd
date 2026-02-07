@@ -64,6 +64,7 @@ graficar_barras_apiladas(
   canvas_h_caption_in = 0.4,
   canvas_h_panel_in = NULL,
   canvas_h_toprow_in = 0.18,
+  canvas_pad_bars_y_in = 0.12,
   grosor_modo = c("manual", "auto"),
   grosor_barras_mult = 1,
   legend_key_cm = 0.3,

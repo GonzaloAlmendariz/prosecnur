@@ -160,6 +160,7 @@ graficar_barras_apiladas <- function(
     canvas_h_caption_in   = 0.40,
     canvas_h_panel_in     = NULL,
     canvas_h_toprow_in    = 0.18,
+    canvas_pad_bars_y_in  = 0.12,   #  NUEVO
 
     # ==========================
     # CONTROL DE GROSOR
@@ -820,13 +821,75 @@ graficar_barras_apiladas <- function(
     }
   }
 
-  # MAIN ROW: barras (columna central)
-  canvas <- canvas +
-    cowplot::draw_plot(p_bars_panel, x = x_bars0, y = y_main0, width = w_bars, height = main_h)
+  # ============================================================
+  # MAIN ROW: sub-placeholders verticales (pad_top + bars_area + pad_bottom)
+  # ============================================================
 
-  # Coordenadas Y “milimétricas” por fila
-  y_npc <- (seq_len(n_categorias) - 0.5) / n_categorias
-  y_abs <- y_main0 + y_npc * main_h
+  # padding en pulgadas -> npc (respecto al alto total del canvas)
+  pad_in <- canvas_pad_bars_y_in %||% 0
+  if (!is.finite(pad_in) || is.na(pad_in) || pad_in < 0) pad_in <- 0
+  pad_npc <- pad_in / h_total_in
+
+  # clamp: no permitir que el padding "mate" el área útil
+  pad_npc <- min(pad_npc, main_h * 0.45)
+
+  # sub-PH
+  y_padbot0 <- y_main0
+  h_padbot  <- pad_npc
+
+  y_bars_area0 <- y_padbot0 + h_padbot
+  h_bars_area  <- main_h - 2 * pad_npc
+
+  y_padtop0 <- y_bars_area0 + h_bars_area
+  h_padtop  <- pad_npc
+
+  # dibujar barras SOLO en el área útil
+  if (h_bars_area > 0) {
+    canvas <- canvas +
+      cowplot::draw_plot(
+        p_bars_panel,
+        x = x_bars0, y = y_bars_area0,
+        width = w_bars, height = h_bars_area
+      )
+  }
+
+  # ============================================================
+  # Y del panel: usar y.range NUMÉRICO del panel (estable)
+  # ============================================================
+  gb <- ggplot2::ggplot_build(p_bars_panel)
+
+  pp <- gb$layout$panel_params[[1]]
+  y_rng <- pp$y.range  # <- numérico (ej: c(0.5, n+0.5))
+
+  if (!is.numeric(y_rng) || length(y_rng) != 2 || any(!is.finite(y_rng))) {
+    # fallback ultra seguro
+    y_rng <- c(0.5, n_categorias + 0.5)
+  }
+
+  # centros teóricos en coords del panel discreto: 1..n
+  y_centros <- seq_len(n_categorias)
+
+  # normalizar a [0,1] con el rango real del panel
+  den <- diff(y_rng); if (!is.finite(den) || den <= 0) den <- 1
+  y_npc <- (y_centros - y_rng[1]) / den
+  y_npc <- pmax(0, pmin(1, y_npc))
+
+  # OJO: por defecto ggplot pone el 1 ABAJO en eje Y.
+  # Si tu gráfico muestra "Total" ARRIBA (como en tu imagen), invierte:
+  y_npc <- rev(y_npc)
+
+  # llevar a coordenadas absolutas del canvas (área útil)
+  y_abs <- y_bars_area0 + y_npc * h_bars_area
+
+  # debug: bordes del PH total + pads + área útil
+  if (debug_ph_bordes) {
+    # borde total (ya lo tienes abajo; si quieres, lo puedes dejar duplicado o remover el viejo)
+    canvas <- canvas +
+      .ph_border(x_bars0, y_main0,      w_bars, main_h) +
+      .ph_border(x_bars0, y_padtop0,    w_bars, h_padtop) +
+      .ph_border(x_bars0, y_bars_area0, w_bars, h_bars_area) +
+      .ph_border(x_bars0, y_padbot0,    w_bars, h_padbot)
+  }
 
   # Etiquetas (columna izquierda)
   pad_x <- 0.012
@@ -867,7 +930,6 @@ graficar_barras_apiladas <- function(
     canvas <- canvas +
       .ph_border(x_etq0,   y_main0, w_etq,   main_h) +
       .ph_border(x_buf10,  y_main0, w_buf1,  main_h) +
-      .ph_border(x_bars0,  y_main0, w_bars,  main_h) +
       .ph_border(x_buf20,  y_main0, w_buf2,  main_h) +
       .ph_border(x_extra0, y_main0, w_extra, main_h)
   }
