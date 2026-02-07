@@ -54,7 +54,6 @@
 #'
 #' @param usar_canvas Si `TRUE`, construye un canvas con placeholders independientes.
 #' @param canvas_w_etiquetas Ancho relativo de placeholder etiquetas (columna izquierda).
-#' @param canvas_w_labels Alias legacy de `canvas_w_etiquetas`.
 #' @param canvas_w_buf_etq_bars Ancho relativo buffer entre etiquetas y barras.
 #' @param canvas_w_buf_bars_extra Ancho relativo buffer entre barras y extra.
 #' @param canvas_w_bars Ancho relativo placeholder barras.
@@ -107,7 +106,6 @@ graficar_barras_apiladas <- function(
     barra_extra_preset    = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
     prefijo_barra_extra   = NULL,
     titulo_barra_extra    = NULL,
-    barra_extra_vjust     = NULL,   # legacy
     titulo                = NULL,
     subtitulo             = NULL,
     nota_pie              = NULL,
@@ -221,8 +219,6 @@ graficar_barras_apiladas <- function(
   pos_nota_pie       <- match.arg(pos_nota_pie)
   grosor_modo        <- match.arg(grosor_modo)
 
-  # legacy alias
-  if (!is.null(canvas_w_labels) && is.finite(canvas_w_labels)) canvas_w_etiquetas <- canvas_w_labels
 
   # normalizaciones
   decimales <- suppressWarnings(as.integer(decimales))

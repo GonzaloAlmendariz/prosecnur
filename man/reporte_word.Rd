@@ -35,44 +35,11 @@ reporte_word(
 )
 }
 \arguments{
-\item{data}{Data frame o tibble con la base de reporte (idealmente el
-resultado de \code{reporte_data()}), que contiene los atributos \code{label}
-y \code{labels} en sus variables.}
-
-\item{instrumento}{Objeto devuelto por \code{reporte_instrumento()}. Si es
-\code{NULL}, se intentará recuperar desde \code{attr(data, "instrumento_reporte")}.
-Debe contener al menos las tibbles \code{survey} y \code{choices}, y,
-opcionalmente, \code{orders_list}.}
-
-\item{secciones}{Lista nombrada que define qué variables se incluyen en cada
-sección, de forma análoga a \code{reporte_frecuencias()}. Si es \code{NULL},
-se intentará inferir desde una columna \code{section} o \code{seccion} del
-\code{survey}.}
-
 \item{path_word}{Ruta del archivo DOCX a generar cuando \code{solo_lista = FALSE}.}
 
 \item{fuente}{Texto de fuente que se mostrará debajo de cada gráfico
 en el documento Word (por ejemplo, \code{" estudiantes. Fuente: Pulso PUCP 2025."},
 que se concatenará luego de \code{"N = <N> "}).}
-
-\item{sm_vars_force}{Vector opcional de nombres de variables que deben tratarse
-como \code{select_multiple} aunque el instrumento no las marque como tales.}
-
-\item{mostrar_todo}{Lógico; se pasa a \code{freq_table_spss()} como
-\code{mostrar_todo}. Controla si las tablas de frecuencias incluyen
-categorías con frecuencia 0 definidas en el instrumento. En todos los casos,
-el generador de PPT excluye categorías con \code{n == 0} al graficar.}
-
-\item{solo_lista}{Lógico; si \code{TRUE}, no se genera PPT y solo se devuelve
-una lista con \code{plots} y \code{log_decisiones}. Si \code{FALSE}, además
-se construye \code{path_ppt}.}
-
-\item{incluir_titulo_var}{Lógico; si \code{TRUE}, el label de la variable se
-usa como título de la diapositiva de gráfico (placeholder de título del
-layout de PowerPoint). Los gráficos en sí se generan sin título.}
-
-\item{mensajes_progreso}{Lógico; si \code{TRUE}, muestra mensajes por sección
-y por variable indicando qué tipo de gráfico se está usando y por qué.}
 
 \item{template_docx}{Ruta a una plantilla DOCX. Si es \code{NULL}, se intenta
 usar una plantilla interna \code{"plantillas/plantilla_pulso.docx"} y, si
@@ -82,70 +49,6 @@ no existe, se usa la plantilla por defecto de Word.}
 multi-apiladas. Cada elemento debe ser una lista con al menos
 \code{vars = c("p101","p102",...)} y opcionalmente:
 \code{titulo}, \code{wrap_y}, \code{grosor_barras}, \code{invertir_barras}.}
-
-\item{vars_dico}{Vector de nombres de variables que se deben graficar como
-dicotómicas mediante \code{graficar_dico()}, siempre que exista una pareja
-de etiquetas en \code{dico_labels_por_var} o \code{dico_labels_por_listname}.}
-
-\item{vars_barras_apiladas}{Vector de nombres de variables que se deben
-graficar como barras horizontales apiladas mediante
-\code{graficar_barras_apiladas()}.}
-
-\item{vars_barras_agrupadas}{Vector de nombres de variables que se deben
-graficar como barras agrupadas mediante \code{graficar_barras_agrupadas()}.}
-
-\item{vars_radar}{Vector de nombres de variables que se desean reservar para
-un tratamiento tipo radar. Actualmente se registra en el log, pero no se
-construye automáticamente una tabla para \code{graficar_radar()}.}
-
-\item{listnames_dico}{Vector de \code{list_name} (del \code{survey}) para los
-que, si una variable no aparece en \code{vars_dico}, se intentará por
-defecto tratarla como dicotómica.}
-
-\item{listnames_apiladas}{Vector de \code{list_name} para los que, si una
-variable no aparece en \code{vars_barras_apiladas} ni en \code{vars_dico},
-se intentará por defecto graficar como barras apiladas.}
-
-\item{dico_labels_por_var}{Lista nombrada donde cada elemento es un vector
-de dos etiquetas \code{c("Positiva","Negativa")} para la variable
-correspondiente.}
-
-\item{dico_labels_por_listname}{Lista nombrada por \code{list_name} donde cada
-elemento es un vector de dos etiquetas \code{c("Positiva","Negativa")} que
-se usan cuando la variable no tiene entrada propia en \code{dico_labels_por_var}.}
-
-\item{colores_apiladas_por_listname}{Lista nombrada por \code{list_name} donde
-cada elemento es un vector de colores HEX con nombre para los segmentos de
-las barras apiladas. Los nombres de estos colores deben coincidir con los
-labels de las categorías (\code{Opciones}) que se graficarán, o una lista
-con elementos \code{colores} y \code{preset_barra_extra}.}
-
-\item{default_so}{Tipo de gráfico por defecto para variables \code{select_one}
-cuando no se encuentren en ninguna lista de overrides. Puede ser
-\code{"barras_agrupadas"} o \code{"barras_apiladas"}.}
-
-\item{default_sm}{Tipo de gráfico por defecto para variables \code{select_multiple}
-cuando no se encuentren en ninguna lista de overrides. Igual que
-\code{default_so}, puede ser \code{"barras_agrupadas"} o
-\code{"barras_apiladas"}.}
-
-\item{barra_extra}{Controla si se agrega o no una barra final con el N total
-(o algún agregado) en las barras apiladas/agrupadas. Puede ser:
-\itemize{
-\item \code{"ninguna"}: no se agrega barra extra.
-\item \code{"total_n"}: se agrega barra extra con el N total (\code{"N = ..."}).
-}}
-
-\item{estilos_barras_agrupadas}{Lista de parámetros de estilo que se pasan
-directamente a \code{graficar_barras_agrupadas()}.}
-
-\item{estilos_barras_apiladas}{Lista de parámetros de estilo que se pasan
-directamente a \code{graficar_barras_apiladas()}. Aquí puedes incluir,
-si quieres, argumentos como \code{invertir_barras}, \code{invertir_leyenda}
-o \code{invertir_segmentos}, que llegarán solo al graficador.}
-
-\item{estilos_dico}{Lista de parámetros de estilo que se pasan directamente a
-\code{graficar_dico()}.}
 }
 \value{
 Una lista con:

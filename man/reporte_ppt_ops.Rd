@@ -14,20 +14,6 @@ reporte_ppt_ops(
 )
 }
 \arguments{
-\item{data}{Data frame o tibble con la base de reporte (idealmente el
-resultado de \code{reporte_data()}), que contiene los atributos \code{label}
-y \code{labels} en sus variables.}
-
-\item{instrumento}{Objeto devuelto por \code{reporte_instrumento()}. Si es
-\code{NULL}, se intentará recuperar desde \code{attr(data, "instrumento_reporte")}.
-Debe contener al menos las tibbles \code{survey} y \code{choices}, y,
-opcionalmente, \code{orders_list}.}
-
-\item{secciones}{Lista nombrada que define qué variables se incluyen en cada
-sección, de forma análoga a \code{reporte_frecuencias()}. Si es \code{NULL},
-se intentará inferir desde una columna \code{section} o \code{seccion} del
-\code{survey}.}
-
 \item{path_pptx}{Ruta del archivo PPTX a generar. Por defecto
 \code{"reporte_ppt_ops.pptx"}.}
 

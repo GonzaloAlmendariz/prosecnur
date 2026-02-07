@@ -13,7 +13,7 @@ graficar_barras_agrupadas <- function(
     umbral_posicion           = 0.15,
     sufijo_etiqueta           = "",
     mostrar_barra_extra       = TRUE,
-    prefijo_barra_extra       = "N=",
+    prefijo_barra_extra       = NULL,
     titulo_barra_extra        = NULL,
     titulo                    = NULL,
     subtitulo                 = NULL,
@@ -58,7 +58,6 @@ graficar_barras_agrupadas <- function(
     usar_canvas               = FALSE,
 
     canvas_w_etiquetas        = 0.38,
-    canvas_w_labels           = NULL,   # legacy alias
     canvas_w_buf_etq_bars     = 0.00,
     canvas_w_buf_bars_extra   = 0.00,
     canvas_w_bars             = 0.52,
@@ -114,9 +113,6 @@ graficar_barras_agrupadas <- function(
   exportar     <- match.arg(exportar)
   pos_titulo   <- match.arg(pos_titulo)
   pos_nota_pie <- match.arg(pos_nota_pie)
-
-  # legacy alias
-  if (!is.null(canvas_w_labels) && is.finite(canvas_w_labels)) canvas_w_etiquetas <- canvas_w_labels
 
   textos_negrita <- textos_negrita %||% character(0)
   hjust_titulo    <- hjust_from_pos(pos_titulo)

@@ -2,7 +2,7 @@
 % Please edit documentation in R/graficador_barras_apliladas.R
 \name{graficar_barras_apiladas}
 \alias{graficar_barras_apiladas}
-\title{Graficar barras horizontales apiladas a partir de una tabla ancha}
+\title{Graficar barras apiladas con canvas controlado y placeholders independientes}
 \usage{
 graficar_barras_apiladas(
   data,
@@ -13,14 +13,13 @@ graficar_barras_apiladas(
   escala_valor = c("proporcion_1", "proporcion_100"),
   colores_grupos = NULL,
   mostrar_valores = TRUE,
-  decimales = 1,
-  umbral_etiqueta = 0.03,
+  decimales = 0,
+  umbral_etiqueta = 0.001,
   umbral_etiqueta_peq = NULL,
   mostrar_barra_extra = TRUE,
   barra_extra_preset = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
   prefijo_barra_extra = NULL,
   titulo_barra_extra = NULL,
-  barra_extra_vjust = NULL,
   titulo = NULL,
   subtitulo = NULL,
   nota_pie = NULL,
@@ -41,6 +40,7 @@ graficar_barras_apiladas(
   size_texto_barras_peq = NULL,
   color_barra_extra = "#000000",
   size_barra_extra = 3,
+  size_titulo_extra = 3,
   color_ejes = "#000000",
   size_ejes = 9,
   color_fondo = NA,
@@ -49,203 +49,186 @@ graficar_barras_apiladas(
   espacio_izquierda_rel = 0,
   ancho_max_eje_y = NULL,
   mostrar_leyenda = TRUE,
-  usar_leyenda_cowplot = FALSE,
   invertir_leyenda = FALSE,
   invertir_barras = FALSE,
   invertir_segmentos = FALSE,
   textos_negrita = NULL,
+  usar_canvas = FALSE,
+  canvas_w_etiquetas = 0.38,
+  canvas_w_buf_etq_bars = 0,
+  canvas_w_buf_bars_extra = 0,
+  canvas_w_bars = 0.52,
+  canvas_w_extra = 0.1,
+  canvas_h_header_in = 0.75,
+  canvas_h_legend_in = 0.75,
+  canvas_h_caption_in = 0.4,
+  canvas_h_panel_in = NULL,
+  canvas_h_toprow_in = 0.18,
+  grosor_modo = c("manual", "auto"),
+  grosor_barras_mult = 1,
+  legend_key_cm = 0.3,
+  legend_espaciado = 0.2,
+  legend_n_por_fila = 6L,
+  encabezado_desplazamiento_in = 0,
+  encabezado_separacion_in = 0.14,
+  leyenda_desplazamiento_in = 0,
+  debug_ph_bordes = FALSE,
+  debug_ph_col = "#FF00FF",
+  debug_ph_lwd = 0.6,
   exportar = c("rplot", "png", "ppt", "word"),
   path_salida = NULL,
   ancho = 10,
   alto = 6,
   alto_por_categoria = NULL,
-  dpi = 300
+  dpi = 300,
+  ppt_append = TRUE,
+  ppt_layout = "Blank",
+  ppt_master = "Office Theme"
 )
 }
 \arguments{
-\item{data}{Data frame en formato ancho que contiene la categoría, la base N
-y las columnas de porcentajes.}
+\item{data}{data.frame con las columnas requeridas.}
 
-\item{var_categoria}{Nombre (string) de la columna que define cada barra
-(por ejemplo, \code{"condicion"}).}
+\item{var_categoria}{Nombre (string) de la variable categórica (eje Y).}
 
-\item{var_n}{Nombre (string) de la columna con el N total por categoría
-(se usa como base para la barra extra; típicamente el N).}
+\item{var_n}{Nombre (string) de la variable numérica para la barra extra (p.ej. N).}
 
-\item{cols_porcentaje}{Vector de nombres de columnas con los porcentajes
-que deben formar los segmentos apilados.}
+\item{cols_porcentaje}{Vector de nombres (string) de columnas de porcentajes (formato ancho).}
 
-\item{etiquetas_grupos}{Vector de caracteres con nombre (named) que asigna
-etiquetas legibles a las columnas de \code{cols_porcentaje}. Los nombres
-deben coincidir exactamente con los nombres de \code{cols_porcentaje}.}
+\item{etiquetas_grupos}{Vector nombrado que mapea \code{cols_porcentaje} -> etiqueta del grupo
+(p.ej. \code{c(pct_1="Muy insatisfecho", ...)}). Los \code{names()} deben coincidir con \code{cols_porcentaje}.}
 
-\item{escala_valor}{Escala de los porcentajes: \code{"proporcion_1"} si los
-valores están en 0–1, o \code{"proporcion_100"} si están en 0–100.}
+\item{escala_valor}{Escala de entrada: \code{"proporcion_1"} (0-1) o \code{"proporcion_100"} (0-100).}
 
-\item{colores_grupos}{Vector de colores HEX con nombre (opcional) para los
-segmentos, usando como nombres las etiquetas de \code{etiquetas_grupos}.
-Si se omite, \pkg{ggplot2} asignará colores por defecto.}
+\item{colores_grupos}{Vector nombrado (opcional) de colores por etiqueta de grupo.}
 
-\item{mostrar_valores}{Lógico; si \code{TRUE}, muestra porcentajes dentro
-de cada segmento.}
+\item{mostrar_valores}{Si \code{TRUE}, dibuja etiquetas \% dentro de segmentos (cuando superan umbrales).}
 
-\item{decimales}{Número de decimales para los porcentajes internos.}
+\item{decimales}{Número de decimales para etiquetas \% (se asignan por “largest remainder”
+en la escala 100*10^decimales, garantizando suma exacta).}
 
-\item{umbral_etiqueta}{Mínima proporción para mostrar texto en tamaño
-normal dentro de un segmento (por ejemplo, 0.03 equivale a 3\\%).}
+\item{umbral_etiqueta}{Umbral (0-1) para etiquetar como “grande”.}
 
-\item{umbral_etiqueta_peq}{Mínima proporción para mostrar texto en tamaño
-reducido. Los segmentos con proporción entre \code{umbral_etiqueta_peq}
-y \code{umbral_etiqueta} se muestran con letra más pequeña. Si es
-\code{NULL}, se asume igual a \code{umbral_etiqueta}.}
+\item{umbral_etiqueta_peq}{Umbral (0-1) para etiquetar como “peq”. Si \code{NULL}, usa \code{umbral_etiqueta}.}
 
-\item{mostrar_barra_extra}{Lógico; si \code{TRUE}, agrega una “barra extra”
-de texto al extremo derecho de cada barra (típicamente para mostrar el N
-o algún indicador agregado como “Top 2 Box”).}
+\item{mostrar_barra_extra}{Si \code{TRUE}, dibuja columna extra (texto) alineada por fila.}
 
-\item{barra_extra_preset}{Preset para la barra extra. Puede ser:
-\itemize{
-\item \code{"ninguno"}: comportamiento manual, usa \code{prefijo_barra_extra}
-y \code{titulo_barra_extra} con el valor de \code{var_n}.
-\item \code{"totales"}: muestra N total; por defecto
-\code{prefijo_barra_extra = "N="}, \code{titulo_barra_extra = "Total"}.
-\item \code{"top2box"}: suma los 2 valores más altos de cada fila.
-\item \code{"top3box"}: suma los 3 valores más altos de cada fila.
-\item \code{"bottom2box"}: suma los 2 valores más bajos de cada fila.
-}}
+\item{barra_extra_preset}{Preset de extra: \code{"ninguno"}, \code{"totales"}, \code{"top2box"}, \code{"top3box"}, \code{"bottom2box"}.}
 
-\item{prefijo_barra_extra}{Texto añadido antes del valor mostrado en la
-barra extra (por defecto \code{"N="}). Puede ser sobreescrito por el preset.}
+\item{prefijo_barra_extra}{Prefijo para el texto extra (p.ej. \code{"N = "}).}
 
-\item{titulo_barra_extra}{Texto que se coloca como encabezado encima de la
-columna de barra extra (por ejemplo, "Total", "Top 2 Box"). Si es
-\code{NULL}, no se agrega encabezado. Puede ser sobreescrito por el preset.}
+\item{titulo_barra_extra}{Título arriba del placeholder extra (solo en canvas).}
 
-\item{titulo}{Título del gráfico.}
+\item{titulo}{Título general.}
 
-\item{subtitulo}{Subtítulo opcional del gráfico.}
+\item{subtitulo}{Subtítulo general.}
 
-\item{nota_pie}{Nota o fuente para colocar en el pie de página del gráfico.}
+\item{nota_pie}{Nota al pie izquierda.}
 
-\item{nota_pie_derecha}{Texto adicional para el pie de página que se
-concatenará a la derecha de \code{nota_pie} (por ejemplo, "N total = 52").
-Ambos se muestran en una única línea de caption.}
+\item{nota_pie_derecha}{Nota al pie derecha.}
 
-\item{pos_titulo}{Alineación horizontal del título. Puede ser
-\code{"centro"}, \code{"izquierda"} o \code{"derecha"}.}
+\item{pos_titulo}{Alineación horizontal del título: \code{"centro"}, \code{"izquierda"}, \code{"derecha"}.}
 
-\item{pos_nota_pie}{Alineación horizontal de la nota al pie (caption). Puede ser
-\code{"derecha"}, \code{"izquierda"} o \code{"centro"}.}
+\item{pos_nota_pie}{Alineación horizontal del caption: \code{"derecha"}, \code{"izquierda"}, \code{"centro"}.}
 
-\item{centro_cowplot}{Posición horizontal de la leyenda cuando se use un
-lienzo compuesto con \pkg{cowplot}. Debe ser un número entre 0 y 1 que
-se interpreta como la coordenada \code{x} de la leyenda en
-\code{draw_grob()} (\code{0} = totalmente a la izquierda,
-\code{1} = totalmente a la derecha). Si se deja como \code{NA},
-la función puede calcular una posición automática en función del número
-de categorías de la leyenda.}
+\item{centro_cowplot}{Centro horizontal de la leyenda en canvas (0-1). \code{NA} usa 0.5.}
 
-\item{color_titulo}{Color del título.}
+\item{color_titulo, color_subtitulo, color_nota_pie, color_leyenda, color_texto_barras, color_barra_extra, color_ejes}{Colores.}
 
-\item{size_titulo}{Tamaño del título.}
+\item{size_titulo, size_subtitulo, size_nota_pie, size_leyenda, size_texto_barras, size_texto_barras_peq, size_barra_extra, size_titulo_extra, size_ejes}{Tamaños (puntos).}
 
-\item{color_subtitulo}{Color del subtítulo.}
+\item{color_fondo}{Color de fondo del plot/canvas (NA para transparente).}
 
-\item{size_subtitulo}{Tamaño del subtítulo.}
+\item{grosor_barras}{Grosor de barras (solo cuando \code{grosor_modo="manual"}).}
 
-\item{color_nota_pie}{Color del texto del pie de página.}
+\item{extra_derecha_rel}{Expansión derecha del eje x cuando NO canvas y se quiere espacio extra.}
 
-\item{size_nota_pie}{Tamaño del texto del pie de página.}
+\item{espacio_izquierda_rel}{Expansión izquierda del eje x cuando NO canvas.}
 
-\item{color_leyenda}{Color del texto de la leyenda.}
+\item{ancho_max_eje_y}{Si se define, aplica \code{stringr::str_wrap()} a etiquetas del eje Y.}
 
-\item{size_leyenda}{Tamaño del texto de la leyenda.}
+\item{mostrar_leyenda}{Si \code{TRUE}, incluye leyenda (en canvas, debajo del panel).}
 
-\item{color_texto_barras}{Color del texto dentro de los segmentos.}
+\item{invertir_leyenda}{Si \code{TRUE}, invierte el orden de la leyenda.}
 
-\item{size_texto_barras}{Tamaño del texto dentro de los segmentos.}
+\item{invertir_barras}{Si \code{TRUE}, invierte el orden de categorías.}
 
-\item{size_texto_barras_peq}{Tamaño del texto para etiquetas de segmentos
-pequeños (ver \code{umbral_etiqueta_peq}). Si es \code{NULL}, se usa el
-mismo valor de \code{size_texto_barras}.}
+\item{invertir_segmentos}{Si \code{TRUE}, invierte el orden de apilamiento.}
 
-\item{color_barra_extra}{Color base del texto de la barra extra (se puede
-sobreescribir internamente si se usa un preset).}
+\item{textos_negrita}{Vector de claves que activa negrita: \code{c("titulo","leyenda","barra_extra","eje_y","porcentajes")}.}
 
-\item{size_barra_extra}{Tamaño del texto de la barra extra.}
+\item{usar_canvas}{Si \code{TRUE}, construye un canvas con placeholders independientes.}
 
-\item{color_ejes}{Color del texto de las categorías en el eje Y.}
+\item{canvas_w_etiquetas}{Ancho relativo de placeholder etiquetas (columna izquierda).}
 
-\item{size_ejes}{Tamaño del texto de las categorías en el eje Y.}
+\item{canvas_w_buf_etq_bars}{Ancho relativo buffer entre etiquetas y barras.}
 
-\item{color_fondo}{Color de fondo del gráfico. Si es \code{NA} (por defecto),
-el fondo será transparente (útil para insertar en PPT/Word).}
+\item{canvas_w_buf_bars_extra}{Ancho relativo buffer entre barras y extra.}
 
-\item{grosor_barras}{Ancho relativo de las barras (argumento \code{width} de
-\code{geom_col()}). Toma valores típicos entre 0 y 1. Por defecto 0.7.}
+\item{canvas_w_bars}{Ancho relativo placeholder barras.}
 
-\item{extra_derecha_rel}{Porcentaje adicional a la derecha para ubicar la
-barra extra, relativo a la longitud de la barra más larga.}
+\item{canvas_w_extra}{Ancho relativo placeholder extra (columna derecha).}
 
-\item{espacio_izquierda_rel}{Proporción del rango del eje X que se deja
-como espacio en blanco a la izquierda (entre el borde del panel y el
-comienzo de las barras). Por defecto 0.05 (5\\%).}
+\item{canvas_h_header_in}{Altura del header en pulgadas (cuando hay título/subtítulo).}
 
-\item{ancho_max_eje_y}{Número aproximado de caracteres por línea para las
-etiquetas del eje Y. Si no es \code{NULL}, se insertan saltos de línea
-automáticos entre palabras usando \pkg{stringr}.}
+\item{canvas_h_legend_in}{Altura de la leyenda en pulgadas (cuando hay leyenda).}
 
-\item{mostrar_leyenda}{Lógico; si \code{FALSE}, oculta la leyenda.}
+\item{canvas_h_caption_in}{Altura del caption en pulgadas (cuando hay caption).}
 
-\item{usar_leyenda_cowplot}{Lógico; si \code{TRUE}, recompone el gráfico
-usando \pkg{cowplot} para colocar la leyenda en un bloque inferior que
-ocupa ~5\\% del alto total, manteniendo las barras en ~95\\%. Requiere
-tener instalado el paquete \pkg{cowplot}.}
+\item{canvas_h_panel_in}{Altura del panel en pulgadas (si \code{NULL}, se usa \code{alto_por_categoria * n_categorias}).}
 
-\item{invertir_leyenda}{Lógico; si \code{TRUE}, invierte el orden de los
-ítems de la leyenda sin alterar el orden de las barras ni de los segmentos.}
+\item{canvas_h_toprow_in}{Altura (en pulgadas) de la fila superior del panel (para título del extra).}
 
-\item{invertir_barras}{Lógico; si \code{TRUE}, invierte el orden en que las
-categorías aparecen en el eje Y (orden vertical de las barras).}
+\item{grosor_modo}{\code{"manual"} o \code{"auto"}. En \code{"auto"} el grosor se ajusta por número de categorías.}
 
-\item{invertir_segmentos}{Lógico; si \code{TRUE}, invierte el orden en que se
-apilan los segmentos dentro de cada barra (orden horizontal de los colores).}
+\item{grosor_barras_mult}{Multiplicador del grosor en modo \code{"auto"}.}
 
-\item{textos_negrita}{Vector de caracteres que indica qué elementos deben
-mostrarse en negrita. Puede incluir cualquiera de:
-\code{"titulo"}, \code{"porcentajes"}, \code{"leyenda"},
-\code{"barra_extra"}, \code{"eje_y"}.}
+\item{legend_key_cm}{Tamaño del \code{key} de la leyenda (en cm).}
 
-\item{exportar}{Método de salida:
-\itemize{
-\item \code{"rplot"}: devuelve un objeto \code{ggplot}.
-\item \code{"png"}: exporta un archivo PNG.
-\item \code{"ppt"}: exporta un PPTX con el gráfico vectorial editable.
-\item \code{"word"}: exporta un DOCX con el gráfico vectorial editable.
-}}
+\item{legend_espaciado}{Espaciado horizontal entre ítems de la leyenda.}
 
-\item{path_salida}{Ruta del archivo a crear cuando \code{exportar} no es
-\code{"rplot"}.}
+\item{legend_n_por_fila}{Número de ítems por fila en la leyenda.}
 
-\item{ancho}{Ancho del gráfico (cuando se exporta a archivo).}
+\item{encabezado_desplazamiento_in}{Desplazamiento vertical (pulgadas) del bloque título/subtítulo.}
 
-\item{alto}{Alto del gráfico (cuando se exporta a archivo).}
+\item{encabezado_separacion_in}{Separación vertical total (pulgadas) entre título y subtítulo.}
 
-\item{alto_por_categoria}{Alto (en pulgadas) a asignar por categoría en el
-área de barras cuando no se especifica \code{alto}.}
+\item{leyenda_desplazamiento_in}{Desplazamiento vertical (pulgadas) de la leyenda dentro de su placeholder.}
 
-\item{dpi}{Resolución en puntos por pulgada (solo para PNG).}
+\item{debug_ph_bordes}{Si \code{TRUE}, dibuja bordes de placeholders (debug).}
+
+\item{debug_ph_col}{Color de borde debug.}
+
+\item{debug_ph_lwd}{Grosor de borde debug.}
+
+\item{exportar}{\code{"rplot"}, \code{"png"}, \code{"ppt"} o \code{"word"}.}
+
+\item{path_salida}{Ruta de salida para exportación.}
+
+\item{ancho, alto}{Tamaños (pulgadas) para exportación (png/ppt/word).}
+
+\item{alto_por_categoria}{Altura por categoría (pulgadas) para definir el panel cuando \code{canvas_h_panel_in} es \code{NULL}.}
+
+\item{dpi}{DPI para exportación PNG.}
+
+\item{ppt_append}{Si \code{TRUE} y el archivo existe, agrega una diapositiva al final.}
+
+\item{ppt_layout, ppt_master}{Layout/master para la diapositiva.}
+
+\item{barra_extra_vjust}{Legacy (sin uso en canvas); se conserva por compatibilidad.}
 }
 \value{
-Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
-invisible, el gráfico exportado si se utiliza \code{"png"}, \code{"ppt"}
-o \code{"word"}.
+Un objeto ggplot/cowplot. Si \code{exportar="rplot"}, retorna el plot/canvas listo para imprimir.
 }
 \description{
-Genera un gráfico de barras horizontales apiladas donde cada categoría
-(por ejemplo, enfermedades, regiones o grupos etarios) se muestra como una
-barra compuesta por proporciones asociadas a diferentes estados o respuestas.
-La función está pensada para usarse directamente con tablas de indicadores
-ya calculadas (formato ancho), sin necesidad de reestructurar los datos
-manualmente.
+Genera un gráfico de barras apiladas horizontales (100\%) por categoría, con opción
+de construir un \strong{canvas} (vía {cowplot}) que separa en \strong{placeholders independientes}
+las \strong{etiquetas del eje Y}, el \strong{panel de barras}, y una \strong{columna extra} (p.ej. \verb{N=}),
+preservando además buffers entre columnas y permitiendo alineación vertical \strong{milimétrica}
+mediante coordenadas NPC por fila.
+}
+\details{
+La función normaliza los porcentajes por fila a suma 1 y aplica un “cierre exacto”
+que ajusta solo un segmento por categoría para absorber residuales numéricos y evitar
+warnings tipo “Removed 1 row … outside the scale range”.
 }

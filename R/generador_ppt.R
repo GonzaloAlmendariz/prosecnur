@@ -1,171 +1,18 @@
 # =============================================================================
 # reporte_ppt()
 # -----------------------------------------------------------------------------
-# Generar PPT con gráficos a partir de tablas de frecuencias (SO / SM)
-# usando los graficadores ya existentes del paquete.
+# Generar PPT con gráficos a partir de tablas de frecuencias (SO / SM),
+# usando graficadores del paquete.
+#
+# NUEVO ENFOQUE (POST-CANVAS):
+# - Se asume que los graficadores (especialmente apiladas) manejan el layout
+#   internamente con CANVAS (cowplot) y, por tanto, el PPT solo “coloca” el
+#   vector (dml) dentro del placeholder.
+# - Se eliminan hacks/temas antiguos pensados para “no-canvas” (p.ej. recortes,
+#   ajustes de ejes para que el placeholder no estire raro).
+# - La exportación a PPT se mantiene vía officer + rvg::dml.
 # =============================================================================
 
-#' Generar un reporte PPT a partir de frecuencias (SO/SM) con graficadores propios
-#'
-#' `reporte_ppt()` toma una base de reporte (idealmente la misma que se usa en
-#' `reporte_frecuencias()`), el instrumento y una definición de secciones, y
-#' genera:
-#' \itemize{
-#'   \item Una lista de gráficos \code{ggplot} (uno por variable válida).
-#'   \item Opcionalmente, un archivo PPT donde cada gráfico ocupa una diapositiva.
-#' }
-#'
-#' El tipo de gráfico para cada variable se decide en tres niveles:
-#' \enumerate{
-#'   \item Sobrescritura explícita por variable:
-#'     \itemize{
-#'       \item \code{vars_dico}: variables que deben usarse como dicotómicas
-#'             con \code{graficar_dico()}.
-#'       \item \code{vars_barras_apiladas}: variables para \code{graficar_barras_apiladas()}.
-#'       \item \code{vars_barras_agrupadas}: variables para \code{graficar_barras_agrupadas()}.
-#'       \item \code{vars_radar}: reservado para futuros usos (por ahora no se
-#'             construye tabla radar automáticamente).
-#'     }
-#'   \item Decisión por \code{list_name} de la pregunta en el instrumento:
-#'     \itemize{
-#'       \item \code{listnames_dico}: todas las variables cuyo \code{list_name}
-#'             esté aquí tienden a graficarse como dicotómicas.
-#'       \item \code{listnames_apiladas}: todas las variables cuyo \code{list_name}
-#'             esté aquí tienden a graficarse como barras apiladas.
-#'     }
-#'   \item Defaults por tipo de pregunta:
-#'     \itemize{
-#'       \item \code{default_so}: tipo de gráfico por defecto para \code{select_one}.
-#'       \item \code{default_sm}: tipo de gráfico por defecto para \code{select_multiple}.
-#'     }
-#' }
-#'
-#' Para las variables dicotómicas, \strong{no se asume ninguna pareja de categorías
-#' por defecto}. En su lugar, se requiere que este par se defina explícitamente en:
-#' \itemize{
-#'   \item \code{dico_labels_por_var[[var]]} (prioridad más alta), o
-#'   \item \code{dico_labels_por_listname[[list_name]]}.
-#' }
-#' Si no se encuentra una pareja de etiquetas válida, la variable se grafica con
-#' el tipo de barras por defecto (típicamente \code{"barras_agrupadas"}), dejando
-#' constancia en \code{log_decisiones}.
-#'
-#' Internamente, las tablas de frecuencias se construyen con
-#' \code{freq_table_spss()}, por lo que solo se grafican variables que:
-#' \itemize{
-#'   \item Existen como columna en \code{data}, o
-#'   \item Tienen dummies asociadas (\code{var/cod} o \code{var.cod}) para
-#'         el caso de \code{select_multiple}.
-#' }
-#'
-#' @param data Data frame o tibble con la base de reporte (idealmente el
-#'   resultado de \code{reporte_data()}), que contiene los atributos \code{label}
-#'   y \code{labels} en sus variables.
-#' @param instrumento Objeto devuelto por \code{reporte_instrumento()}. Si es
-#'   \code{NULL}, se intentará recuperar desde \code{attr(data, "instrumento_reporte")}.
-#'   Debe contener al menos las tibbles \code{survey} y \code{choices}, y,
-#'   opcionalmente, \code{orders_list}.
-#' @param secciones Lista nombrada que define qué variables se incluyen en cada
-#'   sección, de forma análoga a \code{reporte_frecuencias()}. Si es \code{NULL},
-#'   se intentará inferir desde una columna \code{section} o \code{seccion} del
-#'   \code{survey}.
-#' @param path_ppt Ruta del archivo PPTX a generar cuando \code{solo_lista = FALSE}.
-#' @param fuente Texto de fuente que se mostrará en el bloque de texto inferior
-#'   izquierdo de cada diapositiva de gráficos (por ejemplo,
-#'   `"Fuente: Pulso PUCP 2025"`). No se usa como caption interno del gráfico.
-#' @param sm_vars_force Vector opcional de nombres de variables que deben tratarse
-#'   como \code{select_multiple} aunque el instrumento no las marque como tales.
-#' @param mostrar_todo Lógico; se pasa a \code{freq_table_spss()} como
-#'   \code{mostrar_todo}. Controla si las tablas de frecuencias incluyen
-#'   categorías con frecuencia 0 definidas en el instrumento. En todos los casos,
-#'   el generador de PPT excluye categorías con \code{n == 0} al graficar.
-#' @param solo_lista Lógico; si \code{TRUE}, no se genera PPT y solo se devuelve
-#'   una lista con \code{plots} y \code{log_decisiones}. Si \code{FALSE}, además
-#'   se construye \code{path_ppt}.
-#' @param incluir_titulo_var Lógico; si \code{TRUE}, el label de la variable se
-#'   usa como título de la diapositiva de gráfico (placeholder de título del
-#'   layout de PowerPoint). Los gráficos en sí se generan sin título.
-#' @param mensajes_progreso Lógico; si \code{TRUE}, muestra mensajes por sección
-#'   y por variable indicando qué tipo de gráfico se está usando y por qué.
-#'
-#' @param vars_dico Vector de nombres de variables que se deben graficar como
-#'   dicotómicas mediante \code{graficar_dico()}, siempre que exista una pareja
-#'   de etiquetas en \code{dico_labels_por_var} o \code{dico_labels_por_listname}.
-#' @param vars_barras_apiladas Vector de nombres de variables que se deben
-#'   graficar como barras horizontales apiladas mediante
-#'   \code{graficar_barras_apiladas()}.
-#' @param vars_barras_agrupadas Vector de nombres de variables que se deben
-#'   graficar como barras agrupadas mediante \code{graficar_barras_agrupadas()}.
-#' @param vars_radar Vector de nombres de variables que se desean reservar para
-#'   un tratamiento tipo radar. Actualmente se registra en el log, pero no se
-#'   construye automáticamente una tabla para \code{graficar_radar()}.
-#'
-#' @param listnames_dico Vector de \code{list_name} (del \code{survey}) para los
-#'   que, si una variable no aparece en \code{vars_dico}, se intentará por
-#'   defecto tratarla como dicotómica.
-#' @param listnames_apiladas Vector de \code{list_name} para los que, si una
-#'   variable no aparece en \code{vars_barras_apiladas} ni en \code{vars_dico},
-#'   se intentará por defecto graficar como barras apiladas.
-#'
-#' @param dico_labels_por_var Lista nombrada donde cada elemento es un vector
-#'   de dos etiquetas \code{c("Positiva","Negativa")} para la variable
-#'   correspondiente.
-#' @param dico_labels_por_listname Lista nombrada por \code{list_name} donde cada
-#'   elemento es un vector de dos etiquetas \code{c("Positiva","Negativa")} que
-#'   se usan cuando la variable no tiene entrada propia en \code{dico_labels_por_var}.
-#'
-#' @param colores_apiladas_por_listname Lista nombrada por \code{list_name} donde
-#'   cada elemento es un vector de colores HEX con nombre para los segmentos de
-#'   las barras apiladas. Los nombres de estos colores deben coincidir con los
-#'   labels de las categorías (\code{Opciones}) que se graficarán, o una lista
-#'   con elementos \code{colores} y \code{preset_barra_extra}.
-#'
-#' @param default_so Tipo de gráfico por defecto para variables \code{select_one}
-#'   cuando no se encuentren en ninguna lista de overrides. Puede ser
-#'   \code{"barras_agrupadas"} o \code{"barras_apiladas"}.
-#' @param default_sm Tipo de gráfico por defecto para variables \code{select_multiple}
-#'   cuando no se encuentren en ninguna lista de overrides. Igual que
-#'   \code{default_so}, puede ser \code{"barras_agrupadas"} o
-#'   \code{"barras_apiladas"}.
-#'
-#' @param barra_extra Controla si se agrega o no una barra final con el N total
-#'   (o algún agregado) en las barras apiladas/agrupadas. Puede ser:
-#'   \itemize{
-#'     \item \code{"ninguna"}: no se agrega barra extra.
-#'     \item \code{"total_n"}: se agrega barra extra con el N total (\code{"N = ..."}).
-#'   }
-#'
-#' @param estilos_barras_agrupadas Lista de parámetros de estilo que se pasan
-#'   directamente a \code{graficar_barras_agrupadas()}.
-#' @param estilos_barras_apiladas Lista de parámetros de estilo que se pasan
-#'   directamente a \code{graficar_barras_apiladas()}. Aquí puedes incluir,
-#'   si quieres, argumentos como \code{invertir_barras}, \code{invertir_leyenda}
-#'   o \code{invertir_segmentos}, que llegarán solo al graficador.
-#' @param estilos_dico Lista de parámetros de estilo que se pasan directamente a
-#'   \code{graficar_dico()}.
-#'
-#' @param template_pptx Ruta a una plantilla PPTX (por ejemplo, en formato 16:9).
-#'   Si es \code{NULL}, se intentará usar una plantilla interna del paquete
-#'   llamada \code{"plantillas/plantilla_16_9.pptx"}; si tampoco existe, se
-#'   usará la plantilla por defecto de PowerPoint a través de \code{officer::read_pptx()}.
-#'
-#' @param titulo_portada Título que se colocará en la diapositiva de portada
-#'   (layout `"Title Slide"`) cuando exista dicho layout en la plantilla.
-#' @param subtitulo_portada Subtítulo para la diapositiva de portada.
-#' @param fecha_portada Texto de fecha que se colocará en el placeholder de
-#'   fecha (`type = "dt"`) de la portada y, si existe, de la contraportada.
-#' @param mostrar_resumen_n Lógico; si \code{TRUE}, en cada diapositiva de
-#'   gráficos se escribe en el bloque de texto inferior derecho un resumen del
-#'   tipo `"N = X | Ratio de respuestas: Y%"`.
-#'
-#' @return Una lista con dos elementos:
-#' \describe{
-#'   \item{plots}{Lista de objetos \code{ggplot} generados (uno por variable).}
-#'   \item{log_decisiones}{Tibble con información sobre cada variable procesada:
-#'         sección, nombre de variable, tipo de pregunta, \code{list_name},
-#'         origen de la decisión (\code{override}) y tipo de gráfico final.}
-#' }
-#'
 #' @export
 reporte_ppt <- function(
     data,
@@ -203,7 +50,6 @@ reporte_ppt <- function(
     colores_apiladas_por_listname = list(),
 
     # Defaults por tipo de pregunta
-    # SO → apiladas por defecto, SM → agrupadas
     default_so = c("barras_apiladas", "barras_agrupadas"),
     default_sm = c("barras_agrupadas", "barras_apiladas"),
 
@@ -224,7 +70,12 @@ reporte_ppt <- function(
     fecha_portada     = NULL,
 
     # Resumen de N en bloque derecho
-    mostrar_resumen_n = TRUE
+    mostrar_resumen_n = TRUE,
+
+    # ==========================
+    # DEBUG: bordes morados de placeholders internos (canvas)
+    # ==========================
+    debug_ph_bordes = FALSE
 ) {
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
@@ -246,21 +97,60 @@ reporte_ppt <- function(
   }
 
   # ---------------------------------------------------------------------------
+  # Helpers internos (robustos a cambios de firmas)
+  # ---------------------------------------------------------------------------
+
+  .has_var_or_dummies <- function(df, v) {
+    if (v %in% names(df)) return(TRUE)
+    # dummies típicos: var/cod o var.cod
+    pat1 <- paste0("^", gsub("([\\W])", "\\\\\\1", v), "/")
+    pat2 <- paste0("^", gsub("([\\W])", "\\\\\\1", v), "\\.")
+    any(grepl(pat1, names(df))) || any(grepl(pat2, names(df)))
+  }
+
+  .safe_named_args <- function(fun, args) {
+    if (!length(args)) return(args)
+    fn <- tryCatch(match.fun(fun), error = function(e) NULL)
+    if (is.null(fn)) return(args)
+    fml <- names(formals(fn))
+    if (is.null(fml)) return(list())
+    args[names(args) %in% fml]
+  }
+
+  .safe_call <- function(fun, args) {
+    args2 <- .safe_named_args(fun, args)
+    # silenciar warnings conocidos de dependencias (aes_string, lifecycle, etc.)
+    suppressWarnings(do.call(fun, args2))
+  }
+
+  # Enfoque post-canvas: por defecto, si el graficador soporta usar_canvas,
+  # se fuerza TRUE para PPT. Si debug está activo, también.
+  .force_canvas_style <- function(estilos) {
+    estilos <- estilos %||% list()
+    estilos$usar_canvas <- estilos$usar_canvas %||% TRUE
+    if (isTRUE(debug_ph_bordes)) estilos$usar_canvas <- TRUE
+    estilos
+  }
+
+  estilos_barras_apiladas  <- .force_canvas_style(estilos_barras_apiladas)
+  estilos_barras_agrupadas <- .force_canvas_style(estilos_barras_agrupadas)
+  estilos_dico             <- .force_canvas_style(estilos_dico)
+
+  # ---------------------------------------------------------------------------
   # 1. Instrumento y survey / choices / orders_list
   # ---------------------------------------------------------------------------
   if (is.null(instrumento)) {
     instrumento <- attr(data, "instrumento_reporte", exact = TRUE)
     if (is.null(instrumento)) {
-      stop("No se proporcionó `instrumento` y `data` no tiene atributo ",
-           "`instrumento_reporte`.", call. = FALSE)
+      stop("No se proporcionó `instrumento` y `data` no tiene atributo `instrumento_reporte`.", call. = FALSE)
     }
   }
 
   survey  <- instrumento$survey
-  choices <- instrumento$choices
+  choices <- instrumento$choices %||% NULL
+
   if (is.null(survey) || !all(c("name", "label") %in% names(survey))) {
-    stop("El `instrumento` no contiene un `survey` con columnas `name` y `label`.",
-         call. = FALSE)
+    stop("El `instrumento` no contiene un `survey` con columnas `name` y `label`.", call. = FALSE)
   }
 
   orders_list <- instrumento$orders_list %||% NULL
@@ -283,38 +173,30 @@ reporte_ppt <- function(
     }
 
     if (is.null(seccion_col)) {
-      stop("No se especificaron `secciones` y el `survey` no tiene columna ",
-           "`section` ni `seccion`.", call. = FALSE)
+      stop("No se especificaron `secciones` y el `survey` no tiene columna `section` ni `seccion`.", call. = FALSE)
     }
 
     secciones_df <- survey |>
       dplyr::filter(
         !is.na(.data[[seccion_col]]),
-        !is.na(.data$name),
-        .data$name %in% names(data)
+        !is.na(.data$name)
       ) |>
       dplyr::select(seccion = !!rlang::sym(seccion_col), name)
 
     if (nrow(secciones_df) == 0) {
-      stop("No se pudieron inferir secciones desde `survey$",
-           seccion_col, "`.", call. = FALSE)
+      stop("No se pudieron inferir secciones desde `survey$", seccion_col, "`.", call. = FALSE)
     }
 
     secciones <- split(secciones_df$name, secciones_df$seccion)
   }
 
   SECCIONES <- lapply(secciones, function(vars) {
-    vars[vapply(
-      vars,
-      function(v) .has_var_or_dummies(data, v),
-      logical(1)
-    )]
+    vars[vapply(vars, function(v) .has_var_or_dummies(data, v), logical(1))]
   })
   SECCIONES <- SECCIONES[vapply(SECCIONES, length, integer(1)) > 0L]
 
   if (length(SECCIONES) == 0L) {
-    stop("Después de filtrar por presencia en `data` (variable o dummies), ",
-         "ninguna sección tiene variables válidas.", call. = FALSE)
+    stop("Después de filtrar por presencia en `data` (variable o dummies), ninguna sección tiene variables válidas.", call. = FALSE)
   }
 
   # ---------------------------------------------------------------------------
@@ -327,7 +209,7 @@ reporte_ppt <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 3. Helpers internos
+  # 3. Helpers de título / tablas (dependen de funciones del paquete)
   # ---------------------------------------------------------------------------
 
   .titulo_var_safe <- function(var) {
@@ -341,6 +223,7 @@ reporte_ppt <- function(
   }
 
   .tab_freq_var <- function(var) {
+
     tab <- freq_table_spss(
       data,
       var,
@@ -352,7 +235,7 @@ reporte_ppt <- function(
 
     if (!nrow(tab)) return(tab)
 
-    # Extraer N correcto desde la fila "Total"
+    # Extraer N correcto desde la fila "Total" (si existe)
     N_total <- NA_real_
     if ("Opciones" %in% names(tab) && "n" %in% names(tab)) {
       idx_tot <- which(tab$Opciones == "Total")
@@ -374,58 +257,41 @@ reporte_ppt <- function(
 
   .N_total_from_tab <- function(tab, total_casos = NULL) {
     N <- attr(tab, "N_total", exact = TRUE)
-
     if (is.null(N) || !is.finite(N)) {
       N <- sum(tab$n, na.rm = TRUE)
     }
-
-    # Por seguridad: nunca dejar que N supere el total de casos de la base
     if (!is.null(total_casos) &&
         is.finite(total_casos) && total_casos > 0 &&
         is.finite(N) && N > total_casos) {
       N <- total_casos
     }
-
     N
   }
 
-  # Helper: dado un vector de frecuencias n, devuelve porcentajes ENTEROS
-  # que suman exactamente 100 (pensado para barras apiladas / dico).
+  # Reparte porcentajes enteros que suman 100 (para apiladas / dico)
   .pct_enteros_100 <- function(n) {
     n <- as.numeric(n)
-    if (!length(n) || all(is.na(n))) {
-      return(numeric(0))
-    }
-
+    if (!length(n) || all(is.na(n))) return(numeric(0))
     n[is.na(n)] <- 0
     total <- sum(n)
 
-    if (!is.finite(total) || total <= 0) {
-      return(rep(0L, length(n)))
-    }
+    if (!is.finite(total) || total <= 0) return(rep(0L, length(n)))
 
-    # Porcentajes crudos en 0–100
     raw_pct   <- n / total * 100
     floor_pct <- floor(raw_pct)
-
-    # Cuánto falta o sobra para llegar a 100
     resid <- as.integer(round(100 - sum(floor_pct)))
-
     frac <- raw_pct - floor_pct
 
     if (resid > 0) {
-      # Asignar +1 a los mayores restos decimales
       ord <- order(frac, decreasing = TRUE, na.last = TRUE)
       idx <- head(ord, resid)
       floor_pct[idx] <- floor_pct[idx] + 1L
     } else if (resid < 0) {
-      # Quitar 1 a los menores restos decimales
       resid_neg <- abs(resid)
       ord <- order(frac, decreasing = FALSE, na.last = TRUE)
       idx <- head(ord, resid_neg)
       floor_pct[idx] <- pmax(0L, floor_pct[idx] - 1L)
     }
-
     floor_pct
   }
 
@@ -437,7 +303,6 @@ reporte_ppt <- function(
     pct_raw <- tab_freq$pct
     if (all(is.na(pct_raw))) return(NULL)
 
-    # Detectar escala de pct (0–1 o 0–100)
     max_pct <- max(pct_raw, na.rm = TRUE)
     if (is.finite(max_pct) && max_pct <= 1 + 1e-8) {
       pct_0_100 <- pct_raw * 100
@@ -445,7 +310,6 @@ reporte_ppt <- function(
       pct_0_100 <- pct_raw
     }
 
-    # Convertir a enteros (no imponemos suma 100, en SM puede ser > 100)
     pct_int  <- round(pct_0_100)
     pct_prop <- pct_int / 100
 
@@ -462,17 +326,14 @@ reporte_ppt <- function(
     n_total <- .N_total_from_tab(tab_freq, total_casos)
     n_cat   <- nrow(tab_freq)
 
-    # Distribución de porcentajes ENTEROS que suman 100
-    pct_int <- .pct_enteros_100(tab_freq$n)  # vector de longitud n_cat
+    pct_int <- .pct_enteros_100(tab_freq$n)
     cols_pct <- paste0("pct_", seq_len(n_cat))
 
     df_wide <- tibble::tibble(
       categoria = var_label %||% "",
       n_base    = n_total
     )
-
     for (i in seq_len(n_cat)) {
-      # Guardamos como proporción 0–1 (para escala_valor = "proporcion_1")
       df_wide[[cols_pct[i]]] <- pct_int[i] / 100
     }
 
@@ -493,6 +354,7 @@ reporte_ppt <- function(
     orders_list,
     sm_vars_force,
     mostrar_todo,
+    colores_apiladas_por_listname = list(),
     wrap_y = 50
   ) {
 
@@ -509,10 +371,8 @@ reporte_ppt <- function(
         orders_list   = orders_list,
         mostrar_todo  = mostrar_todo
       )
-
       if (!nrow(tab)) next
 
-      # N correcto = fila "Total"
       N_total_v <- NA_real_
       if ("Opciones" %in% names(tab) && "n" %in% names(tab)) {
         idx_tot <- which(tab$Opciones == "Total")
@@ -522,19 +382,16 @@ reporte_ppt <- function(
       }
 
       tab <- tab |>
-        dplyr::filter(Opciones != "Total") |>
-        dplyr::filter(!is.na(n) & n > 0)
-
+        dplyr::filter(.data$Opciones != "Total") |>
+        dplyr::filter(!is.na(.data$n) & .data$n > 0)
       if (!nrow(tab)) next
 
-      # wrap del eje Y
       label_v <- .titulo_var_safe(v)
       if (requireNamespace("stringr", quietly = TRUE)) {
         label_v <- stringr::str_wrap(label_v, width = wrap_y)
       }
 
       n_total <- if (is.finite(N_total_v)) N_total_v else sum(tab$n, na.rm = TRUE)
-
       pct_int <- .pct_enteros_100(tab$n)
 
       listas[[v]] <- list(
@@ -544,20 +401,13 @@ reporte_ppt <- function(
         pct_int   = pct_int
       )
 
-      # union() conserva el orden de primera aparición
-      # según el instrumento / freq_table_spss. NO se usa sort().
       all_opts <- union(all_opts, tab$Opciones)
     }
 
     if (!length(listas)) return(NULL)
 
-
-    # ------------------------------------------------------------------
-    # Ordenar las opciones según el orden formal de la lista en CHOICES
-    # ------------------------------------------------------------------
-
+    # Orden formal de opciones (prioridad: paleta nombrada > choices)
     list_name_block <- NA_character_
-
     if ("list_name" %in% names(survey)) {
       tmp <- survey$list_name[survey$name %in% vars]
       tmp <- tmp[!is.na(tmp) & tmp != ""]
@@ -572,19 +422,12 @@ reporte_ppt <- function(
 
       niveles_formales <- character(0)
 
-      ## 1) PRIORIDAD: orden de la PALETA por list_name
       if (!is.null(colores_apiladas_por_listname[[list_name_block]])) {
         pal <- colores_apiladas_por_listname[[list_name_block]]
-
-        # por si el objeto es lista con $colores
-        if (is.list(pal) && !is.null(pal$colores)) {
-          pal <- pal$colores
-        }
-
+        if (is.list(pal) && !is.null(pal$colores)) pal <- pal$colores
         niveles_formales <- names(pal)
       }
 
-      ## 2) Si no hay paleta o no tiene nombres, usar CHOICES como respaldo
       if (!length(niveles_formales) &&
           !is.null(choices) &&
           "list_name" %in% names(choices) &&
@@ -595,13 +438,8 @@ reporte_ppt <- function(
         )
       }
 
-      niveles_formales <- niveles_formales[
-        !is.na(niveles_formales) & niveles_formales != ""
-      ]
-
+      niveles_formales <- niveles_formales[!is.na(niveles_formales) & niveles_formales != ""]
       if (length(niveles_formales)) {
-        # Mantiene el orden de la PALETA/choices,
-        # quedándonos solo con las opciones que realmente aparecen en las barras
         all_opts <- intersect(niveles_formales, all_opts)
       }
     }
@@ -630,7 +468,8 @@ reporte_ppt <- function(
     list(
       data             = df_wide,
       cols_porcentaje  = cols_pct,
-      etiquetas_grupos = etiquetas_grupos
+      etiquetas_grupos = etiquetas_grupos,
+      list_name_block  = list_name_block
     )
   }
 
@@ -645,8 +484,7 @@ reporte_ppt <- function(
 
     if (nrow(sub) < 2) {
       warning(
-        "En la variable '", var, "' no se encontraron ambas categorías ",
-        "indicadas en `labels_dico`. Se omitirá este tratamiento dicotómico.",
+        "En la variable '", var, "' no se encontraron ambas categorías indicadas en `labels_dico`.",
         call. = FALSE
       )
       return(NULL)
@@ -655,19 +493,16 @@ reporte_ppt <- function(
     n_pos <- sub$n[sub$Opciones == pos_lab][1]
     n_neg <- sub$n[sub$Opciones == neg_lab][1]
     denom <- n_pos + n_neg
-
     if (!is.finite(denom) || denom <= 0) return(NULL)
 
-    # Repartir enteros que sumen 100 entre Sí / No
-    pct_pair    <- .pct_enteros_100(c(n_pos, n_neg))  # c(%Sí, %No)
-    pct_si_int  <- pct_pair[1]                        # 0–100 entero
-    pct_si      <- pct_si_int                         # escala 0–100 para dico
+    pct_pair   <- .pct_enteros_100(c(n_pos, n_neg))
+    pct_si_int <- pct_pair[1]
 
     indicador_val <- if (incluir_titulo_var) "" else (var_label %||% var)
 
     tibble::tibble(
       indicador = indicador_val,
-      pct_si    = pct_si,
+      pct_si    = pct_si_int,
       n_total   = denom
     )
   }
@@ -687,9 +522,7 @@ reporte_ppt <- function(
   for (sec in names(SECCIONES)) {
     vars_sec <- SECCIONES[[sec]]
 
-    if (mensajes_progreso) {
-      message("Procesando sección: ", sec)
-    }
+    if (mensajes_progreso) message("Procesando sección: ", sec)
 
     for (v in vars_sec) {
 
@@ -698,180 +531,83 @@ reporte_ppt <- function(
       # -----------------------------------------------------------------------
       if (v %in% vars_multi_all) {
 
-        # 1. Identificar a qué bloque pertenece esta variable
-        bloque_id <- names(
-          Filter(function(x) v %in% x$vars, bloques_multi_apiladas)
-        )[1]
-
+        bloque_id <- names(Filter(function(x) v %in% x$vars, bloques_multi_apiladas))[1]
         bloque_info   <- bloques_multi_apiladas[[bloque_id]]
         vars_bloque   <- bloque_info$vars
         titulo_bloque <- bloque_info$titulo %||% .titulo_var_safe(v)
         wrap_y        <- bloque_info$wrap_y %||% 50
 
-        # grosor específico del bloque (si no, hereda del estilo general o usa 0.7)
-        grosor_barras_bloque <- bloque_info$grosor_barras %||%
-          estilos_barras_apiladas$grosor_barras %||% 0.7
-
-        # invertir_barras específico del bloque (si no, hereda del estilo general o FALSE)
-        invertir_barras_bloque <- bloque_info$invertir_barras %||%
-          estilos_barras_apiladas$invertir_barras %||% FALSE
-
-        # Ejecutar SOLO en la primera variable del bloque
-        if (v != vars_bloque[1]) {
-          next
-        }
+        if (v != vars_bloque[1]) next
 
         if (mensajes_progreso) {
-          message(
-            "   - [multi_apiladas] ",
-            paste(vars_bloque, collapse = ", "),
-            " → barras_apiladas_multi (bloque = ", bloque_id, ")"
-          )
+          message("   - [multi_apiladas] ", paste(vars_bloque, collapse = ", "),
+                  " → barras_apiladas_multi (bloque = ", bloque_id, ")")
         }
 
-        # 2. Construir tabla multi-var
         tab_multi <- .build_tab_barras_apiladas_multi_vars(
           vars          = vars_bloque,
           data          = data,
           survey        = survey,
+          choices       = choices,
           orders_list   = orders_list,
           sm_vars_force = sm_vars_force,
           mostrar_todo  = mostrar_todo,
+          colores_apiladas_por_listname = colores_apiladas_por_listname,
           wrap_y        = wrap_y
         )
-
         if (is.null(tab_multi)) next
 
-        # 3. Detectar list_name del bloque (usando la primera variable)
-        list_name_bloque <- NA_character_
-        if ("list_name" %in% names(survey)) {
-          tmp <- survey$list_name[survey$name %in% vars_bloque]
-          tmp <- tmp[!is.na(tmp) & tmp != ""]
-          if (length(tmp)) list_name_bloque <- tmp[1]
-        } else if ("list_norm" %in% names(survey)) {
-          tmp <- survey$list_norm[survey$name %in% vars_bloque]
-          tmp <- tmp[!is.na(tmp) & tmp != ""]
-          if (length(tmp)) list_name_bloque <- tmp[1]
-        }
+        list_name_bloque <- tab_multi$list_name_block %||% NA_character_
 
-        # 4. Paleta y preset extra (TOP2, etc.) igual que en barras_apiladas simple
         colores_grupos <- NULL
         preset_extra   <- NULL
-
         if (!is.na(list_name_bloque) &&
             !is.null(colores_apiladas_por_listname[[list_name_bloque]])) {
 
           obj_col <- colores_apiladas_por_listname[[list_name_bloque]]
-
           if (is.list(obj_col)) {
-            if (!is.null(obj_col$colores)) {
-              colores_grupos <- obj_col$colores
-            }
-            if (!is.null(obj_col$preset_barra_extra)) {
-              preset_extra <- obj_col$preset_barra_extra
-            }
+            if (!is.null(obj_col$colores)) colores_grupos <- obj_col$colores
+            if (!is.null(obj_col$preset_barra_extra)) preset_extra <- obj_col$preset_barra_extra
           } else {
-            # Caso simple: vector nombrado de colores (paleta_p118, por ejemplo)
             colores_grupos <- obj_col
           }
         }
 
-        # 4.b Centro de leyenda:
-        #     1) por bloque (centro_leyenda_por_bloque[[bloque_id]])
-        #     2) por list_name del bloque
-        #     3) si ninguno → auto-centrado interno
-        centro_cowplot_bloque <- NULL
+        # Centro leyenda (var/listname) si existen objetos en el entorno
+        centro_cowplot <- NULL
         if (exists("centro_leyenda_por_bloque", inherits = TRUE) &&
-            !is.null(bloque_id) &&
             bloque_id %in% names(centro_leyenda_por_bloque)) {
-
-          centro_cowplot_bloque <- centro_leyenda_por_bloque[[bloque_id]]
+          centro_cowplot <- centro_leyenda_por_bloque[[bloque_id]]
         }
-
-        centro_cowplot_ln <- NULL
-        if (exists("centro_leyenda_por_listname", inherits = TRUE) &&
+        if (is.null(centro_cowplot) &&
+            exists("centro_leyenda_por_listname", inherits = TRUE) &&
             !is.na(list_name_bloque) && nzchar(list_name_bloque) &&
             list_name_bloque %in% names(centro_leyenda_por_listname)) {
-
-          centro_cowplot_ln <- centro_leyenda_por_listname[[list_name_bloque]]
+          centro_cowplot <- centro_leyenda_por_listname[[list_name_bloque]]
         }
 
-        centro_cowplot_final <- centro_cowplot_bloque %||% centro_cowplot_ln
+        # invertir por reglas (si existen)
+        ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos %||% character(0)
+        ln_inv_ley <- estilos_barras_apiladas$listnames_invertir_leyenda   %||% character(0)
+        vars_inv_seg <- estilos_barras_apiladas$vars_invertir_segmentos %||% character(0)
+        vars_inv_ley <- estilos_barras_apiladas$vars_invertir_leyenda   %||% character(0)
 
-
-        # 5. Flags de inversión por list_name / variable (misma lógica que apiladas simple)
-        ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
-        ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
-
-        ln_inv_ley <- estilos_barras_apiladas$listnames_invertir_leyenda
-        ln_inv_ley <- if (is.null(ln_inv_ley)) character(0) else ln_inv_ley
-
-        vars_inv_seg <- estilos_barras_apiladas$vars_invertir_segmentos
-        vars_inv_seg <- if (is.null(vars_inv_seg)) character(0) else vars_inv_seg
-
-        vars_inv_ley <- estilos_barras_apiladas$vars_invertir_leyenda
-        vars_inv_ley <- if (is.null(vars_inv_ley)) character(0) else vars_inv_ley
-
-        # Para el bloque usamos la primera variable como referencia
         v_ref <- vars_bloque[1]
+        invertir_segmentos_var <- (v_ref %in% vars_inv_seg) ||
+          (!is.na(list_name_bloque) && list_name_bloque %in% ln_inv_seg)
 
-        invertir_segmentos_var <- (
-          v_ref %in% vars_inv_seg ||
-            (!is.na(list_name_bloque) && list_name_bloque %in% ln_inv_seg)
-        )
+        invertir_leyenda_var <- (v_ref %in% vars_inv_ley) ||
+          (!is.na(list_name_bloque) && list_name_bloque %in% ln_inv_ley)
 
-        invertir_leyenda_var <- (
-          v_ref %in% vars_inv_ley ||
-            (!is.na(list_name_bloque) && list_name_bloque %in% ln_inv_ley)
-        )
-
-        # 6. Asegurar ORDEN consistente de segmentos y leyenda
-        niveles_originales <- unname(tab_multi$etiquetas_grupos)
-
-        # Orden para las barras (apilado real)
-        niveles_plot <- niveles_originales
-        if (invertir_segmentos_var) {
-          niveles_plot <- rev(niveles_plot)
-        }
-
-        # Orden para la leyenda (puede o no coincidir con el de las barras)
-        niveles_leyenda <- niveles_plot
-        if (invertir_leyenda_var) {
-          niveles_leyenda <- rev(niveles_leyenda)
-        }
-
-        # Ajustar paleta al orden final de la leyenda
-        if (!is.null(colores_grupos)) {
-          # Reordenamos asegurando que las etiquetas existan en la paleta
-          colores_grupos <- colores_grupos[niveles_leyenda]
-        }
-
-        # Actualizar etiquetas_grupos al orden final de la leyenda
-        # (los nombres siguen siendo las columnas de porcentaje)
-        tab_multi$etiquetas_grupos <- stats::setNames(
-          niveles_leyenda,
-          tab_multi$cols_porcentaje
-        )
-
-        # 7. Limpiar claves "meta" que el graficador no conoce
         estilos_apiladas_clean <- estilos_barras_apiladas
         estilos_apiladas_clean$listnames_invertir_segmentos <- NULL
         estilos_apiladas_clean$listnames_invertir_leyenda   <- NULL
         estilos_apiladas_clean$vars_invertir_segmentos      <- NULL
         estilos_apiladas_clean$vars_invertir_leyenda        <- NULL
-        estilos_apiladas_clean$grosor_barras                <- NULL
-        estilos_apiladas_clean$prefijo_barra_extra          <- NULL
-        estilos_apiladas_clean$titulo_barra_extra           <- NULL
-        estilos_apiladas_clean$color_barra_extra            <- NULL
-        estilos_apiladas_clean$invertir_barras              <- NULL
-
-        # 8. Construir gráfico multi-apilado usando el MISMO graficador
-        #    (centro_cowplot solo se pasa si NO es NULL)
-        extra_centro <- if (!is.null(centro_cowplot_final)) {
-          list(centro_cowplot = centro_cowplot_final)
-        } else {
-          list()
-        }
+        estilos_apiladas_clean$prefijo_barra_extra <- NULL
+        estilos_apiladas_clean$mostrar_barra_extra <- NULL
+        estilos_apiladas_clean$barra_extra_preset  <- NULL
+        estilos_apiladas_clean$titulo_barra_extra  <- NULL
 
         args_multi <- c(
           list(
@@ -883,72 +619,38 @@ reporte_ppt <- function(
             escala_valor        = "proporcion_1",
             colores_grupos      = colores_grupos,
             mostrar_valores     = TRUE,
+
             titulo              = NULL,
             subtitulo           = NULL,
             nota_pie            = NULL,
 
-            # ------------------------------------------------------------------
-            # LÓGICA DE BARRA EXTRA
-            # ------------------------------------------------------------------
-            mostrar_barra_extra = if (!is.null(preset_extra)) {
-              TRUE
-            } else {
-              barra_extra == "total_n"
-            },
-
+            mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
             barra_extra_preset  = preset_extra %||% "ninguno",
-
-            prefijo_barra_extra = if (!is.null(preset_extra)) {
-              ""
-            } else if (barra_extra == "total_n") {
-              "N = "
-            } else {
-              ""
-            },
-
-            titulo_barra_extra = if (!is.null(preset_extra) || barra_extra != "total_n") {
-              NULL
-            } else {
-              "Total"
-            },
+            prefijo_barra_extra = if (!is.null(preset_extra)) "" else if (barra_extra == "total_n") "N = " else "",
+            titulo_barra_extra  = NULL,
 
             invertir_segmentos  = invertir_segmentos_var,
             invertir_leyenda    = invertir_leyenda_var,
-            invertir_barras     = invertir_barras_bloque,
 
-            grosor_barras       = grosor_barras_bloque,
+            debug_ph_bordes     = isTRUE(debug_ph_bordes),
 
             exportar            = "rplot"
           ),
-          extra_centro,
+          if (!is.null(centro_cowplot)) list(centro_cowplot = centro_cowplot) else list(),
           estilos_apiladas_clean
         )
 
-        p <- do.call(graficar_barras_apiladas, args_multi) +
-          ggplot2::theme(
-            axis.text.y = ggplot2::element_text(
-              hjust  = 1,
-              vjust  = 0.5,
-              margin = ggplot2::margin(r = 6)
-            ),
-            plot.margin = ggplot2::margin(l = 20, r = 10, t = 5, b = 5)
-          )
+        p <- .safe_call(graficar_barras_apiladas, args_multi)
 
-        # 9. N del bloque: tomamos el máximo N_base (todas deberían compartirlo)
         n_total_bloque <- max(tab_multi$data$n_base, na.rm = TRUE)
 
         idx <- length(plots_list) + 1L
         plots_list[[idx]]       <- p
         titulos_list[[idx]]     <- titulo_bloque
-        resumenN_list[[idx]]    <- sprintf(
-          "N = %s",
-          format(n_total_bloque, big.mark = ",", scientific = FALSE)
-        )
+        resumenN_list[[idx]]    <- sprintf("N = %s", format(n_total_bloque, big.mark = ",", scientific = FALSE))
         seccion_por_plot[idx]   <- sec
-
         vars_por_plot[idx]      <- v
 
-        # Registrar en el log que este bloque reemplaza varias vars
         log_list[[length(log_list) + 1]] <- tibble::tibble(
           seccion      = sec,
           var          = paste(vars_bloque, collapse = ", "),
@@ -1020,9 +722,8 @@ reporte_ppt <- function(
         next
       }
 
-      # --- resumen N y ratio de respuestas para esta variable ---
+      # resumen N y ratio
       n_var <- .N_total_from_tab(tab_freq, total_casos)
-
       if (is.finite(n_var) && n_var >= 0 && total_casos > 0) {
         ratio <- n_var / total_casos * 100
         resumen_n_txt <- sprintf(
@@ -1031,19 +732,13 @@ reporte_ppt <- function(
           ratio
         )
       } else if (is.finite(n_var)) {
-        resumen_n_txt <- sprintf(
-          "N = %s",
-          format(n_var, big.mark = ",", scientific = FALSE)
-        )
+        resumen_n_txt <- sprintf("N = %s", format(n_var, big.mark = ",", scientific = FALSE))
       } else {
         resumen_n_txt <- NULL
       }
 
       var_label    <- .titulo_var_safe(v)
-      titulo_plot  <- NULL  # el gráfico va sin título
       titulo_slide <- if (incluir_titulo_var) var_label else NULL
-
-      nota_pie_plot <- NULL
 
       if (mensajes_progreso) {
         message("   - ", v, " → ", tipo_grafico,
@@ -1062,99 +757,59 @@ reporte_ppt <- function(
 
           cols_porcentaje  <- "pct"
           etiquetas_series <- c(pct = "Porcentaje")
+          colores_series <- estilos_barras_agrupadas$colores_series %||% c("Porcentaje" = "#004B8D")
 
-          colores_series <- estilos_barras_agrupadas$colores_series %||%
-            c("Porcentaje" = "#004B8D")
-
-          # ------------------------------------------------------------
-          # Resolver orientación de forma segura (sin romper si no hay reglas)
-          # ------------------------------------------------------------
-
-          # 1. Orientación por variable (si existe lista y entrada)
-          ori_var <- NULL
-          if (exists("orientacion_por_var", inherits = TRUE)) {
-            ori_var <- orientacion_por_var[[v]]
+          ori_final <- estilos_barras_agrupadas$orientacion %||% "horizontal"
+          if (exists("orientacion_por_var", inherits = TRUE) && v %in% names(orientacion_por_var)) {
+            ori_final <- orientacion_por_var[[v]]
+          } else if (exists("orientacion_por_listname", inherits = TRUE) &&
+                     !is.na(list_name_v) && nzchar(list_name_v) &&
+                     list_name_v %in% names(orientacion_por_listname)) {
+            ori_final <- orientacion_por_listname[[list_name_v]]
+          } else if (exists("orientacion_default", inherits = TRUE) &&
+                     is.character(orientacion_default) && length(orientacion_default) >= 1L) {
+            ori_final <- orientacion_default[1]
           }
 
-          # 2. Orientación por list_name
-          ori_list <- NULL
-          if (exists("orientacion_por_listname", inherits = TRUE) &&
-              !is.null(list_name_v) && !is.na(list_name_v) && nzchar(list_name_v) &&
-              list_name_v %in% names(orientacion_por_listname)) {
-            ori_list <- orientacion_por_listname[[list_name_v]]
-          }
-
-          # 3. Orientación default global (si no existe, asumir "horizontal")
-          ori_def <- "horizontal"
-          if (exists("orientacion_default", inherits = TRUE) &&
-              is.character(orientacion_default) && length(orientacion_default) >= 1L) {
-            ori_def <- orientacion_default[1]
-          }
-
-          # 4. Cadena de prioridad:
-          #    var → list_name → estilos_barras_agrupadas$orientacion → default
-          ori_final <- ori_var %||%
-            ori_list %||%
-            estilos_barras_agrupadas$orientacion %||%
-            ori_def
-
-          # ------------------------------------------------------------
-          # resolver ancho del wrap por list_name (independiente de la orientación)
-          # ------------------------------------------------------------
           ancho_eje_v <- estilos_barras_agrupadas$ancho_max_eje_y %||% NULL
-
           if (exists("ancho_eje_por_listname", inherits = TRUE) &&
-              !is.null(list_name_v) && !is.na(list_name_v) && nzchar(list_name_v) &&
+              !is.na(list_name_v) && nzchar(list_name_v) &&
               list_name_v %in% names(ancho_eje_por_listname)) {
-
             ancho_eje_v <- ancho_eje_por_listname[[list_name_v]]
           }
 
-          # Limpiar estilos para que no pisen nuestro ancho_eje_v
           estilos_agrupadas_clean <- estilos_barras_agrupadas
           estilos_agrupadas_clean$ancho_max_eje_y <- NULL
 
-          # ------------------------------------------------------------
-          # Construir args_barras con orientación + wrap resuelto
-          # ------------------------------------------------------------
           args_barras <- c(
-            c(
-              list(
-                data             = tab_agr,
-                var_categoria    = "categoria",
-                var_n            = "n_base",
-                cols_porcentaje  = cols_porcentaje,
-                etiquetas_series = etiquetas_series,
-                escala_valor     = "proporcion_1",
-                colores_series   = colores_series,
-                mostrar_valores  = TRUE,
-                titulo           = titulo_plot,
-                subtitulo        = NULL,
-                nota_pie         = nota_pie_plot,
-                mostrar_barra_extra = barra_extra == "total_n",
-                prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
-                titulo_barra_extra  = if (barra_extra == "total_n") "Total" else NULL,
-                exportar            = "rplot",
-                orientacion         = ori_final
-              ),
-              # Solo paso ancho_max_eje_y si realmente tengo algo
-              if (!is.null(ancho_eje_v)) list(ancho_max_eje_y = ancho_eje_v) else list()
+            list(
+              data             = tab_agr,
+              var_categoria    = "categoria",
+              var_n            = "n_base",
+              cols_porcentaje  = cols_porcentaje,
+              etiquetas_series = etiquetas_series,
+              escala_valor     = "proporcion_1",
+              colores_series   = colores_series,
+              mostrar_valores  = TRUE,
+
+              titulo           = NULL,
+              subtitulo        = NULL,
+              nota_pie         = NULL,
+
+              mostrar_barra_extra = barra_extra == "total_n",
+              prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
+              titulo_barra_extra  = if (barra_extra == "total_n") "Total" else NULL,
+
+              debug_ph_bordes     = isTRUE(debug_ph_bordes),
+
+              exportar            = "rplot",
+              orientacion         = ori_final
             ),
+            if (!is.null(ancho_eje_v)) list(ancho_max_eje_y = ancho_eje_v) else list(),
             estilos_agrupadas_clean
           )
 
-          p <- do.call(graficar_barras_agrupadas, args_barras)
-
-          # --- remover eje Y para orientación vertical ---
-          if (ori_final == "vertical") {
-            p <- p +
-              ggplot2::theme(
-                axis.text.y  = ggplot2::element_blank(),
-                axis.title.y = ggplot2::element_blank(),
-                axis.ticks.y = ggplot2::element_blank(),
-                axis.line.y  = ggplot2::element_blank()
-              )
-          }
+          p <- .safe_call(graficar_barras_agrupadas, args_barras)
         }
 
         if (tipo_grafico == "barras_apiladas") {
@@ -1165,170 +820,79 @@ reporte_ppt <- function(
           colores_grupos <- NULL
           preset_extra   <- NULL
 
-          # Paleta / preset por list_name (igual que antes)
-          if (!is.na(list_name_v) &&
-              !is.null(colores_apiladas_por_listname[[list_name_v]])) {
-
+          if (!is.na(list_name_v) && !is.null(colores_apiladas_por_listname[[list_name_v]])) {
             obj_col <- colores_apiladas_por_listname[[list_name_v]]
-
             if (is.list(obj_col)) {
-              if (!is.null(obj_col$colores)) {
-                colores_grupos <- obj_col$colores
-              }
-              if (!is.null(obj_col$preset_barra_extra)) {
-                preset_extra <- obj_col$preset_barra_extra
-              }
+              if (!is.null(obj_col$colores)) colores_grupos <- obj_col$colores
+              if (!is.null(obj_col$preset_barra_extra)) preset_extra <- obj_col$preset_barra_extra
             } else {
               colores_grupos <- obj_col
             }
           }
 
-          # --------------------------------------------
-          # Centro de leyenda:
-          #    1) por variable
-          #    2) por list_name
-          #    3) si ninguno → auto-centrado interno
-          # --------------------------------------------
           centro_cowplot <- NULL
-
-          # 1) override puntual por variable
-          if (exists("centro_leyenda_por_var", inherits = TRUE) &&
-              v %in% names(centro_leyenda_por_var)) {
-
+          if (exists("centro_leyenda_por_var", inherits = TRUE) && v %in% names(centro_leyenda_por_var)) {
             centro_cowplot <- centro_leyenda_por_var[[v]]
           }
-
-          # 2) si no hay override por var, usar listname
           if (is.null(centro_cowplot) &&
               exists("centro_leyenda_por_listname", inherits = TRUE) &&
-              !is.null(list_name_v) && !is.na(list_name_v) && nzchar(list_name_v) &&
+              !is.na(list_name_v) && nzchar(list_name_v) &&
               list_name_v %in% names(centro_leyenda_por_listname)) {
-
             centro_cowplot <- centro_leyenda_por_listname[[list_name_v]]
           }
 
-          ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos
-          ln_inv_seg <- if (is.null(ln_inv_seg)) character(0) else ln_inv_seg
+          ln_inv_seg <- estilos_barras_apiladas$listnames_invertir_segmentos %||% character(0)
+          ln_inv_ley <- estilos_barras_apiladas$listnames_invertir_leyenda   %||% character(0)
+          vars_inv_seg <- estilos_barras_apiladas$vars_invertir_segmentos %||% character(0)
+          vars_inv_ley <- estilos_barras_apiladas$vars_invertir_leyenda   %||% character(0)
 
-          ln_inv_ley <- estilos_barras_apiladas$listnames_invertir_leyenda
-          ln_inv_ley <- if (is.null(ln_inv_ley)) character(0) else ln_inv_ley
+          invertir_segmentos_var <- (v %in% vars_inv_seg) ||
+            (!is.na(list_name_v) && list_name_v %in% ln_inv_seg)
 
-          vars_inv_seg <- estilos_barras_apiladas$vars_invertir_segmentos
-          vars_inv_seg <- if (is.null(vars_inv_seg)) character(0) else vars_inv_seg
+          invertir_leyenda_var <- (v %in% vars_inv_ley) ||
+            (!is.na(list_name_v) && list_name_v %in% ln_inv_ley)
 
-          vars_inv_ley <- estilos_barras_apiladas$vars_invertir_leyenda
-          vars_inv_ley <- if (is.null(vars_inv_ley)) character(0) else vars_inv_ley
-
-          invertir_segmentos_var <- (
-            v %in% vars_inv_seg ||
-              (!is.na(list_name_v) && list_name_v %in% ln_inv_seg)
-          )
-
-          invertir_leyenda_var <- (
-            v %in% vars_inv_ley ||
-              (!is.na(list_name_v) && list_name_v %in% ln_inv_ley)
-          )
-
-          cols <- tab_apil$cols_porcentaje
-          # nombres humanos de las categorías en el mismo orden que las columnas
-          labs <- unname(tab_apil$etiquetas_grupos[cols])
-
-          # Orden real de apilado (barras)
-          niveles_plot <- labs
-          if (invertir_segmentos_var) {
-            niveles_plot <- rev(niveles_plot)
-            cols         <- rev(cols)
-          }
-
-          # Orden de la leyenda (puede coincidir o no con el de las barras)
-          niveles_leyenda <- niveles_plot
-          if (invertir_leyenda_var) {
-            niveles_leyenda <- rev(niveles_leyenda)
-          }
-
-          # Actualizar objeto tab_apil con el nuevo orden
-          tab_apil$cols_porcentaje <- cols
-          tab_apil$etiquetas_grupos <- stats::setNames(niveles_leyenda, cols)
-
-          # Ajustar paleta a ese orden de leyenda
-          if (!is.null(colores_grupos)) {
-            colores_grupos <- colores_grupos[niveles_leyenda]
-          }
-
-          invertir_segmentos_var_use <- FALSE
-          invertir_leyenda_var_use   <- FALSE
-
-          # Limpiar claves "meta" que el graficador NO conoce
           estilos_apiladas_clean <- estilos_barras_apiladas
           estilos_apiladas_clean$listnames_invertir_segmentos <- NULL
           estilos_apiladas_clean$listnames_invertir_leyenda   <- NULL
           estilos_apiladas_clean$vars_invertir_segmentos      <- NULL
           estilos_apiladas_clean$vars_invertir_leyenda        <- NULL
-
-          args_extra <- list()
-          if (!is.null(colores_grupos)) {
-            args_extra$colores_grupos <- colores_grupos
-          }
-
-          args_centro <- list()
-          if (!is.null(centro_cowplot)) {
-            args_centro$centro_cowplot <- centro_cowplot
-          }
+          estilos_apiladas_clean$prefijo_barra_extra <- NULL
+          estilos_apiladas_clean$mostrar_barra_extra <- NULL
+          estilos_apiladas_clean$barra_extra_preset  <- NULL
+          estilos_apiladas_clean$titulo_barra_extra  <- NULL
 
           args_apiladas <- c(
-            c(
-              list(
-                data                = tab_apil$data,
-                var_categoria       = "categoria",
-                var_n               = "n_base",
-                cols_porcentaje     = tab_apil$cols_porcentaje,
-                etiquetas_grupos    = tab_apil$etiquetas_grupos,
-                escala_valor        = "proporcion_1",
-                mostrar_valores     = TRUE,
-                titulo              = titulo_plot,
-                subtitulo           = NULL,
-                nota_pie            = nota_pie_plot,
+            list(
+              data                = tab_apil$data,
+              var_categoria       = "categoria",
+              var_n               = "n_base",
+              cols_porcentaje     = tab_apil$cols_porcentaje,
+              etiquetas_grupos    = tab_apil$etiquetas_grupos,
+              escala_valor        = "proporcion_1",
+              colores_grupos      = colores_grupos,
+              mostrar_valores     = TRUE,
 
-                mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
-                barra_extra_preset  = preset_extra,
+              titulo              = NULL,
+              subtitulo           = NULL,
+              nota_pie            = NULL,
 
-                prefijo_barra_extra = if (!is.null(preset_extra)) {
-                  ""
-                } else if (barra_extra == "total_n") {
-                  "N = "
-                } else {
-                  ""
-                },
+              mostrar_barra_extra = if (!is.null(preset_extra)) TRUE else (barra_extra == "total_n"),
+              barra_extra_preset  = preset_extra %||% "ninguno",
+              prefijo_barra_extra = if (!is.null(preset_extra)) "" else if (barra_extra == "total_n") "N = " else "",
+              titulo_barra_extra  = NULL,
 
-                titulo_barra_extra = NULL,
+              debug_ph_bordes     = isTRUE(debug_ph_bordes),
 
-                color_barra_extra = if (!is.null(preset_extra)) {
-                  NULL
-                } else {
-                  "#092147"
-                },
-
-                exportar           = "rplot",
-                invertir_segmentos = invertir_segmentos_var,
-                invertir_leyenda   = invertir_leyenda_var
-              ),
-              args_centro,
-              args_extra
+              exportar           = "rplot",
+              invertir_segmentos = invertir_segmentos_var,
+              invertir_leyenda   = invertir_leyenda_var
             ),
+            if (!is.null(centro_cowplot)) list(centro_cowplot = centro_cowplot) else list(),
             estilos_apiladas_clean
           )
 
-          if (!is.null(names(args_apiladas))) {
-            args_apiladas <- args_apiladas[!duplicated(names(args_apiladas))]
-          }
-
-          p <- do.call(graficar_barras_apiladas, args_apiladas)
-
-          p <- p +
-            ggplot2::theme(
-              axis.text.y  = ggplot2::element_blank(),
-              axis.title.y = ggplot2::element_blank()
-            )
+          p <- .safe_call(graficar_barras_apiladas, args_apiladas)
         }
 
         if (tipo_grafico == "dico") {
@@ -1336,16 +900,13 @@ reporte_ppt <- function(
           labels_dico <- NULL
           if (!is.null(dico_labels_por_var[[v]])) {
             labels_dico <- dico_labels_por_var[[v]]
-          } else if (!is.na(list_name_v) &&
-                     !is.null(dico_labels_por_listname[[list_name_v]])) {
+          } else if (!is.na(list_name_v) && !is.null(dico_labels_por_listname[[list_name_v]])) {
             labels_dico <- dico_labels_por_listname[[list_name_v]]
           }
 
           if (is.null(labels_dico) || length(labels_dico) < 2) {
             warning(
-              "En la variable '", v, "' no se encontraron etiquetas dicotómicas ",
-              "en `dico_labels_por_var` ni `dico_labels_por_listname`. ",
-              "Se usará barras agrupadas.",
+              "En la variable '", v, "' no se encontraron etiquetas dicotómicas en `dico_labels_por_var` ni `dico_labels_por_listname`. Se usará barras agrupadas.",
               call. = FALSE
             )
             tipo_grafico_final <- "barras_agrupadas"
@@ -1353,35 +914,33 @@ reporte_ppt <- function(
             tab_agr <- .build_tab_barras_agrupadas(tab_freq, var_label)
             if (is.null(tab_agr) || !nrow(tab_agr)) next
 
-            cols_porcentaje  <- "pct"
-            etiquetas_series <- c(pct = "Porcentaje")
-
-            colores_series <- estilos_barras_agrupadas$colores_series %||%
-              c("Porcentaje" = "#004B8D")
-
             args_barras <- c(
               list(
                 data             = tab_agr,
                 var_categoria    = "categoria",
                 var_n            = "n_base",
-                cols_porcentaje  = cols_porcentaje,
-                etiquetas_series = etiquetas_series,
+                cols_porcentaje  = "pct",
+                etiquetas_series = c(pct = "Porcentaje"),
                 escala_valor     = "proporcion_1",
-                colores_series   = colores_series,
+                colores_series   = estilos_barras_agrupadas$colores_series %||% c("Porcentaje" = "#004B8D"),
                 mostrar_valores  = TRUE,
-                titulo           = titulo_plot,
+
+                titulo           = NULL,
                 subtitulo        = NULL,
-                nota_pie         = nota_pie_plot,
+                nota_pie         = NULL,
+
                 mostrar_barra_extra = barra_extra == "total_n",
                 prefijo_barra_extra = if (barra_extra == "total_n") "N = " else "N = ",
                 titulo_barra_extra  = if (barra_extra == "total_n") "Total" else NULL,
+
+                debug_ph_bordes     = isTRUE(debug_ph_bordes),
+
                 exportar            = "rplot"
               ),
               estilos_barras_agrupadas
             )
 
-            p <- do.call(graficar_barras_agrupadas, args_barras)
-
+            p <- .safe_call(graficar_barras_agrupadas, args_barras)
 
           } else {
 
@@ -1397,16 +956,20 @@ reporte_ppt <- function(
                 escala_valor      = "proporcion_100",
                 etiqueta_si       = labels_dico[1],
                 etiqueta_no       = labels_dico[2],
-                titulo            = titulo_plot,
+
+                titulo            = NULL,
                 subtitulo         = NULL,
-                nota_pie          = nota_pie_plot,
+                nota_pie          = NULL,
+
+                debug_ph_bordes     = isTRUE(debug_ph_bordes),
+
                 incluir_n_en_titulo = FALSE,
                 exportar          = "rplot"
               ),
               estilos_dico
             )
 
-            p <- do.call(graficar_dico, args_dico)
+            p <- .safe_call(graficar_dico, args_dico)
           }
         }
 
@@ -1414,18 +977,13 @@ reporte_ppt <- function(
 
         warning(
           "Tipo de gráfico 'radar' señalado para la variable '", v,
-          "', pero el constructor genérico aún no está implementado. ",
-          "La variable se omitirá en este reporte.",
+          "', pero el constructor genérico aún no está implementado. La variable se omitirá.",
           call. = FALSE
         )
         next
 
       } else {
-        warning(
-          "Tipo de gráfico '", tipo_grafico, "' no reconocido para la variable '",
-          v, "'. Se omitirá en este reporte.",
-          call. = FALSE
-        )
+        warning("Tipo de gráfico '", tipo_grafico, "' no reconocido para la variable '", v, "'. Se omitirá.", call. = FALSE)
         next
       }
 
@@ -1450,9 +1008,8 @@ reporte_ppt <- function(
   log_decisiones <- dplyr::bind_rows(log_list)
 
   # ---------------------------------------------------------------------------
-  # Construir pares de diapositiva → índices de plots
+  # 5. Construir pares de diapositiva → índices de plots
   # ---------------------------------------------------------------------------
-
   pares_indices <- list()
 
   if (!is.null(pares_diapositiva) && length(pares_diapositiva) > 0) {
@@ -1467,92 +1024,69 @@ reporte_ppt <- function(
       idx1 <- match(v1, vars_por_plot)
       idx2 <- match(v2, vars_por_plot)
 
-      # ambos deben existir en la secuencia de plots
       if (!is.na(idx1) && !is.na(idx2) && idx1 != idx2) {
-
         idx_ordered <- sort(c(idx1, idx2))
-
         pares_indices[[nm]] <- list(
-          idx1   = idx_ordered[1],   # primero
-          idx2   = idx_ordered[2],   # segundo
+          idx1   = idx_ordered[1],
+          idx2   = idx_ordered[2],
           titulo = pares_diapositiva[[nm]]$titulo %||% NULL
         )
       }
     }
   }
 
-  # Prepara vectores de ayuda para detección rápida
-  indices_segundos_pares <- vapply(pares_indices, function(x) x$idx2, integer(1))
-  indices_primeros_pares <- vapply(pares_indices, function(x) x$idx1, integer(1))
+  indices_segundos_pares <- if (length(pares_indices)) vapply(pares_indices, function(x) x$idx2, integer(1)) else integer(0)
+  indices_primeros_pares <- if (length(pares_indices)) vapply(pares_indices, function(x) x$idx1, integer(1)) else integer(0)
 
-  .usar_layout_unabarra <- function(p, var_i) {
-    if (!tiene_layout_unabarra || is.null(layout_unabarra)) return(FALSE)
-
-    tipo_i <- NA_character_
-    if (!is.null(log_decisiones) && nrow(log_decisiones)) {
-      fila_i <- which(log_decisiones$var == var_i)
-      if (length(fila_i)) {
-        tipo_i <- log_decisiones$tipo_grafico[fila_i[1]]
-      }
-    }
-
-    # Solo barras_apiladas simples
-    if (is.na(tipo_i) || tipo_i != "barras_apiladas") {
-      return(FALSE)
-    }
-
-    TRUE
+  .usar_layout_unabarra <- function(var_i, log_decisiones, tiene_layout_unabarra) {
+    if (!isTRUE(tiene_layout_unabarra)) return(FALSE)
+    if (is.null(log_decisiones) || !nrow(log_decisiones)) return(FALSE)
+    fila_i <- which(log_decisiones$var == var_i)
+    if (!length(fila_i)) return(FALSE)
+    identical(log_decisiones$tipo_grafico[fila_i[1]], "barras_apiladas")
   }
 
   # ---------------------------------------------------------------------------
-  # 6. PPT
+  # 6. PPT (export)
   # ---------------------------------------------------------------------------
   if (!solo_lista) {
+
     if (!requireNamespace("officer", quietly = TRUE) ||
         !requireNamespace("rvg", quietly = TRUE)) {
-      stop(
-        "Para exportar a PPT se requieren los paquetes 'officer' y 'rvg'.",
-        call. = FALSE
+      stop("Para exportar a PPT se requieren los paquetes 'officer' y 'rvg'.", call. = FALSE)
+    }
+
+    # Helper: ph_location_type compatible (officer >= 0.6.7 usa type_idx)
+    .ph_loc_type <- function(type, idx = NULL) {
+      if (is.null(idx)) return(officer::ph_location_type(type = type))
+      tryCatch(
+        officer::ph_location_type(type = type, type_idx = idx),
+        error = function(e) officer::ph_location_type(type = type, id = idx)
       )
     }
 
     # 6.1. Leer plantilla
     if (is.null(template_pptx)) {
-      template_interno <- system.file("plantillas/plantilla_16_9.pptx",
-                                      package = "prosecnur")
+      template_interno <- system.file("plantillas/plantilla_16_9.pptx", package = "prosecnur")
       if (nzchar(template_interno) && file.exists(template_interno)) {
-        if (mensajes_progreso) {
-          message("Usando plantilla interna 16:9: ", template_interno)
-        }
+        if (mensajes_progreso) message("Usando plantilla interna 16:9: ", template_interno)
         doc <- officer::read_pptx(path = template_interno)
       } else {
         if (mensajes_progreso) {
-          message(
-            "No se encontró 'plantilla_16_9.pptx' dentro del paquete. ",
-            "Se usará la plantilla por defecto de PowerPoint."
-          )
+          message("No se encontró 'plantilla_16_9.pptx' dentro del paquete. Se usará la plantilla por defecto de PowerPoint.")
         }
         doc <- officer::read_pptx()
       }
     } else {
       if (!file.exists(template_pptx)) {
-        stop(
-          "No se encontró el archivo de plantilla especificado en `template_pptx`: ",
-          template_pptx,
-          call. = FALSE
-        )
+        stop("No se encontró el archivo de plantilla especificado en `template_pptx`: ", template_pptx, call. = FALSE)
       }
-      if (mensajes_progreso) {
-        message("Usando plantilla definida por el usuario: ", template_pptx)
-      }
+      if (mensajes_progreso) message("Usando plantilla definida por el usuario: ", template_pptx)
       doc <- officer::read_pptx(path = template_pptx)
     }
 
     # 6.2. Info de layouts
-    layout_info <- tryCatch(
-      officer::layout_summary(doc),
-      error = function(e) NULL
-    )
+    layout_info <- tryCatch(officer::layout_summary(doc), error = function(e) NULL)
 
     tiene_layout_graficos        <- FALSE
     layout_graficos              <- "Blank"
@@ -1561,13 +1095,10 @@ reporte_ppt <- function(
     tiene_layout_contraportada   <- FALSE
     tiene_layout_section_header  <- FALSE
 
-    # layout especial para 1 sola barra
     tiene_layout_unabarra <- FALSE
     layout_unabarra       <- NULL
 
     if (!is.null(layout_info)) {
-
-      # Prioridad: Graficos2 > Graficos > Blank
       if ("Graficos2" %in% layout_info$layout) {
         tiene_layout_graficos <- TRUE
         layout_graficos       <- "Graficos2"
@@ -1578,441 +1109,208 @@ reporte_ppt <- function(
         usar_pic_placeholder  <- TRUE
       }
 
-      # registrar layout para una sola barra
       if ("Graficos_unabarra" %in% layout_info$layout) {
         tiene_layout_unabarra <- TRUE
         layout_unabarra       <- "Graficos_unabarra"
-        if (mensajes_progreso) {
-          message("Layout 'Graficos_unabarra' disponible para gráficos de una sola barra.")
-        }
+        if (mensajes_progreso) message("Layout 'Graficos_unabarra' disponible para gráficos de una sola barra.")
       }
 
-      if ("Title Slide" %in% layout_info$layout) {
-        tiene_layout_title_slide <- TRUE
-      }
-      if ("Contraportada" %in% layout_info$layout) {
-        tiene_layout_contraportada <- TRUE
-      }
-      if ("Section Header" %in% layout_info$layout) {
-        tiene_layout_section_header <- TRUE
-      }
+      if ("Title Slide" %in% layout_info$layout)   tiene_layout_title_slide <- TRUE
+      if ("Contraportada" %in% layout_info$layout) tiene_layout_contraportada <- TRUE
+      if ("Section Header" %in% layout_info$layout) tiene_layout_section_header <- TRUE
     }
 
     tiene_layout_doble <- FALSE
     layout_doble <- NULL
-
-    if ("Graficos_2columnas" %in% layout_info$layout) {
+    if (!is.null(layout_info) && "Graficos_2columnas" %in% layout_info$layout) {
       tiene_layout_doble <- TRUE
       layout_doble <- "Graficos_2columnas"
-
-      if (mensajes_progreso) {
-        message("Layout 'Graficos_2columnas' disponible para gráficos dobles.")
-      }
+      if (mensajes_progreso) message("Layout 'Graficos_2columnas' disponible para gráficos dobles.")
     }
 
     if (mensajes_progreso) {
       if (tiene_layout_graficos) {
-        message(
-          "Las diapositivas de gráficos usarán el layout '",
-          layout_graficos, "'."
-        )
+        message("Las diapositivas de gráficos usarán el layout '", layout_graficos, "'.")
       } else {
         message("No se encontró un layout 'Graficos' ni 'Graficos2'; se usará 'Blank' a pantalla completa.")
       }
     }
 
-    # 6.3. Portada (Title Slide), si corresponde
+    # 6.3. Portada
     if (tiene_layout_title_slide &&
-        ( !is.null(titulo_portada)    && nzchar(titulo_portada)    ||
-          !is.null(subtitulo_portada) && nzchar(subtitulo_portada) ||
-          !is.null(fecha_portada)     && nzchar(fecha_portada) )) {
+        (( !is.null(titulo_portada)    && nzchar(titulo_portada)) ||
+         ( !is.null(subtitulo_portada) && nzchar(subtitulo_portada)) ||
+         ( !is.null(fecha_portada)     && nzchar(fecha_portada)))) {
 
-      if (mensajes_progreso) {
-        message("Agregando diapositiva de portada (Title Slide).")
-      }
+      if (mensajes_progreso) message("Agregando diapositiva de portada (Title Slide).")
 
-      doc <- officer::add_slide(
-        doc,
-        layout = "Title Slide",
-        master = "Office Theme"
-      )
+      doc <- officer::add_slide(doc, layout = "Title Slide", master = "Office Theme")
 
-      # Título: ctrTitle o title
       if (!is.null(titulo_portada) && nzchar(titulo_portada)) {
-        loc_title <- tryCatch(
-          officer::ph_location_type(type = "ctrTitle"),
-          error = function(e) officer::ph_location_type(type = "title")
-        )
-        doc <- tryCatch(
-          officer::ph_with(doc, titulo_portada, location = loc_title),
-          error = function(e) {
-            if (mensajes_progreso) {
-              message("No se pudo escribir el título en la portada: ", e$message)
-            }
-            doc
-          }
-        )
+        loc_title <- tryCatch(.ph_loc_type("ctrTitle"),
+                              error = function(e) .ph_loc_type("title"))
+        doc <- tryCatch(officer::ph_with(doc, titulo_portada, location = loc_title),
+                        error = function(e) doc)
       }
 
-      # Subtítulo: subTitle
       if (!is.null(subtitulo_portada) && nzchar(subtitulo_portada)) {
         doc <- tryCatch(
-          officer::ph_with(
-            doc,
-            subtitulo_portada,
-            location = officer::ph_location_type(type = "subTitle")
-          ),
-          error = function(e) {
-            if (mensajes_progreso) {
-              message("No se pudo escribir el subtítulo en la portada: ", e$message)
-            }
-            doc
-          }
+          officer::ph_with(doc, subtitulo_portada, location = .ph_loc_type("subTitle")),
+          error = function(e) doc
         )
       }
 
-      # Fecha: dt
       if (!is.null(fecha_portada) && nzchar(fecha_portada)) {
         doc <- tryCatch(
-          officer::ph_with(
-            doc,
-            fecha_portada,
-            location = officer::ph_location_type(type = "dt")
-          ),
-          error = function(e) {
-            if (mensajes_progreso) {
-              message("No se pudo escribir la fecha en la portada: ", e$message)
-            }
-            doc
-          }
+          officer::ph_with(doc, fecha_portada, location = .ph_loc_type("dt")),
+          error = function(e) doc
         )
       }
-    } else if (!is.null(fecha_portada) || !is.null(titulo_portada) || !is.null(subtitulo_portada)) {
-      if (mensajes_progreso && !tiene_layout_title_slide) {
-        message("Se solicitaron textos de portada, pero la plantilla no tiene layout 'Title Slide'.")
-      }
+    } else if (( !is.null(titulo_portada) || !is.null(subtitulo_portada) || !is.null(fecha_portada)) && mensajes_progreso) {
+      if (!tiene_layout_title_slide) message("Se solicitaron textos de portada, pero la plantilla no tiene layout 'Title Slide'.")
     }
 
-    # 6.4. Diapositivas de gráficos (con Section Header si existe)
+    # 6.4. Diapositivas de gráficos
     if (length(plots_list)) {
+
+      extract_pretty_N <- function(n_txt) {
+        if (is.null(n_txt) || !nzchar(n_txt)) return(NULL)
+        n_part   <- sub("^N\\s*=\\s*([^|]+).*", "\\1", n_txt)
+        n_digits <- gsub("[^0-9]", "", n_part)
+        if (!nzchar(n_digits)) return(NULL)
+        n_num <- suppressWarnings(as.numeric(n_digits))
+        if (!is.finite(n_num)) return(NULL)
+        format(n_num, big.mark = ",", scientific = FALSE)
+      }
+
       for (i in seq_along(plots_list)) {
 
-        # 1) Si este índice es segundo miembro de un par → saltarlo SIEMPRE
-        if (i %in% indices_segundos_pares) {
-          next
-        }
+        if (i %in% indices_segundos_pares) next
 
-        # Información básica del plot i
-        p      <- plots_list[[i]]
-        st     <- titulos_list[[i]]   %||% NULL
-        n_info <- resumenN_list[[i]]  %||% NULL
-
-        # 2) Si este índice es primer miembro de un par y hay layout doble:
+        # Pares
         if (i %in% indices_primeros_pares && tiene_layout_doble) {
 
-          # Buscar info del par
           par_nm   <- names(pares_indices)[which(indices_primeros_pares == i)]
           info_par <- pares_indices[[par_nm]]
-          j        <- info_par$idx2  # segundo índice del par
+          j        <- info_par$idx2
 
           p1 <- plots_list[[i]]
           p2 <- plots_list[[j]]
 
           t1 <- titulos_list[[i]] %||% ""
           t2 <- titulos_list[[j]] %||% ""
-
           titulo_final <- info_par$titulo %||% paste0(t1, " / ", t2)
 
-          extract_pretty_N <- function(n_txt) {
-            n_part   <- sub("^N\\s*=\\s*([^|]+).*", "\\1", n_txt)
-            n_digits <- gsub("[^0-9]", "", n_part)
-            if (!nzchar(n_digits)) return(NULL)
-            n_num <- suppressWarnings(as.numeric(n_digits))
-            if (!is.finite(n_num)) return(NULL)
-            format(n_num, big.mark = ",", scientific = FALSE)
-          }
-
           N_pretty_i <- extract_pretty_N(resumenN_list[[i]])
-          N_pretty_j <- extract_pretty_N(resumenN_list[[j]])
-
-          # 2) Base izquierda → Base: N fuente
-          if (!is.null(N_pretty_i)) {
-            if (!is.null(fuente) && nzchar(fuente)) {
-              base1 <- paste0("Base: ", N_pretty_i, " ", fuente)
-            } else {
-              base1 <- paste0("Base: ", N_pretty_i)
-            }
+          base1 <- if (!is.null(N_pretty_i)) {
+            if (!is.null(fuente) && nzchar(fuente)) paste0("Base: ", N_pretty_i, " ", fuente) else paste0("Base: ", N_pretty_i)
           } else {
-            base1 <- fuente %||% ""
+            fuente %||% ""
           }
-
-          # 3) Base derecha → siempre vacío como en diapositiva simple
           base2 <- " "
 
-          # Mensaje de progreso
-          if (mensajes_progreso) {
-            message("   · [doble] ", vars_por_plot[i], " + ", vars_por_plot[j],
-                    " → layout doble ('", layout_doble, "')")
-          }
-
-          # Si hay Section Header y cambia la sección, lo agregamos antes del doble
-          if (tiene_layout_section_header &&
-              length(seccion_por_plot) >= i) {
-
+          # Section header si cambia sección
+          if (tiene_layout_section_header && length(seccion_por_plot) >= i) {
             sec_i <- seccion_por_plot[i]
-
-            if (!is.null(sec_i) && nzchar(sec_i) &&
-                (i == 1L || !identical(sec_i, seccion_por_plot[i - 1L]))) {
-
-              doc <- officer::add_slide(
-                doc,
-                layout = "Section Header",
-                master = "Office Theme"
-              )
-
-              loc_sec_title <- tryCatch(
-                officer::ph_location_type(type = "title"),
-                error = function(e) {
-                  tryCatch(
-                    officer::ph_location_type(type = "ctrTitle"),
-                    error = function(e2) NULL
-                  )
-                }
-              )
-
+            if (!is.null(sec_i) && nzchar(sec_i) && (i == 1L || !identical(sec_i, seccion_por_plot[i - 1L]))) {
+              doc <- officer::add_slide(doc, layout = "Section Header", master = "Office Theme")
+              loc_sec_title <- tryCatch(.ph_loc_type("title"),
+                                        error = function(e) tryCatch(.ph_loc_type("ctrTitle"),
+                                                                     error = function(e2) NULL))
               if (!is.null(loc_sec_title)) {
-                doc <- tryCatch(
-                  officer::ph_with(doc, sec_i, location = loc_sec_title),
-                  error = function(e) doc
-                )
+                doc <- tryCatch(officer::ph_with(doc, sec_i, location = loc_sec_title), error = function(e) doc)
               }
             }
           }
 
-          # Ahora sí, crear la diapositiva doble
-          doc <- officer::add_slide(
-            doc,
-            layout = layout_doble,
-            master = "Office Theme"
-          )
+          doc <- officer::add_slide(doc, layout = layout_doble, master = "Office Theme")
 
-          # Título general
-          loc_title <- officer::ph_location_type(type = "title")
-          doc <- officer::ph_with(doc, titulo_final, location = loc_title)
+          doc <- tryCatch(officer::ph_with(doc, titulo_final, location = .ph_loc_type("title")),
+                          error = function(e) doc)
 
-          # Gráfico izquierdo
-          doc <- officer::ph_with(
-            doc,
-            rvg::dml(ggobj = p1, bg = "transparent"),
-            location = officer::ph_location_type(type = "pic", id = 2)
-          )
+          # Gráficos (type_idx en vez de id)
+          doc <- officer::ph_with(doc, rvg::dml(ggobj = p1, bg = "transparent"),
+                                  location = .ph_loc_type("pic", idx = 2))
+          doc <- officer::ph_with(doc, rvg::dml(ggobj = p2, bg = "transparent"),
+                                  location = .ph_loc_type("pic", idx = 1))
 
-          # Gráfico derecho
-          doc <- officer::ph_with(
-            doc,
-            rvg::dml(ggobj = p2, bg = "transparent"),
-            location = officer::ph_location_type(type = "pic", id = 1)
-          )
+          doc <- officer::ph_with(doc, base1, location = .ph_loc_type("body", idx = 2))
+          doc <- officer::ph_with(doc, base2, location = .ph_loc_type("body", idx = 3))
 
-          # Base izquierda
-          doc <- officer::ph_with(
-            doc,
-            base1,
-            location = officer::ph_location_type(type = "body", id = 2)
-          )
-
-          # Base derecha
-          doc <- officer::ph_with(
-            doc,
-            base2,
-            location = officer::ph_location_type(type = "body", id = 3)
-          )
-
-          # Pasar al siguiente i (ya no generamos diapositivas simples para i ni para j)
           next
         }
 
-        # 3) Si NO es parte de un par → flujo normal (Section Header + diapositiva simple)
-
-        # Diapositiva de sección si cambia la sección (y hay layout Section Header)
-        if (tiene_layout_section_header &&
-            length(seccion_por_plot) >= i) {
-
+        # Section header si cambia sección
+        if (tiene_layout_section_header && length(seccion_por_plot) >= i) {
           sec_i <- seccion_por_plot[i]
-
-          if (!is.null(sec_i) && nzchar(sec_i) &&
-              (i == 1L || !identical(sec_i, seccion_por_plot[i - 1L]))) {
-
-            doc <- officer::add_slide(
-              doc,
-              layout = "Section Header",
-              master = "Office Theme"
-            )
-
-            loc_sec_title <- tryCatch(
-              officer::ph_location_type(type = "title"),
-              error = function(e) {
-                tryCatch(
-                  officer::ph_location_type(type = "ctrTitle"),
-                  error = function(e2) NULL
-                )
-              }
-            )
-
+          if (!is.null(sec_i) && nzchar(sec_i) && (i == 1L || !identical(sec_i, seccion_por_plot[i - 1L]))) {
+            doc <- officer::add_slide(doc, layout = "Section Header", master = "Office Theme")
+            loc_sec_title <- tryCatch(.ph_loc_type("title"),
+                                      error = function(e) tryCatch(.ph_loc_type("ctrTitle"),
+                                                                   error = function(e2) NULL))
             if (!is.null(loc_sec_title)) {
-              doc <- tryCatch(
-                officer::ph_with(doc, sec_i, location = loc_sec_title),
-                error = function(e) doc
-              )
+              doc <- tryCatch(officer::ph_with(doc, sec_i, location = loc_sec_title), error = function(e) doc)
             }
           }
         }
 
-        # Elegir layout según si es una sola barra APILADA o no
+        # Layout unabarra si aplica
         layout_i <- layout_graficos
-        if (.usar_layout_unabarra(p, vars_por_plot[i])) {
+        if (.usar_layout_unabarra(vars_por_plot[i], log_decisiones, tiene_layout_unabarra)) {
           layout_i <- layout_unabarra
-          if (mensajes_progreso) {
-            message("   · Usando layout '", layout_i,
-                    "' para gráfico de una sola barra (", vars_por_plot[i], ").")
-          }
+          if (mensajes_progreso) message("   · Usando layout '", layout_i, "' para gráfico de una sola barra (", vars_por_plot[i], ").")
         }
 
-        # Diapositiva de gráfico simple
-        doc <- officer::add_slide(
-          doc,
-          layout = layout_i,
-          master = "Office Theme"
-        )
+        doc <- officer::add_slide(doc, layout = layout_i, master = "Office Theme")
 
-        # Escribir título de la diapositiva si hay
+        # Título del slide
+        st <- titulos_list[[i]] %||% NULL
         if (!is.null(st) && nzchar(st)) {
-          loc_gtitle <- tryCatch(
-            officer::ph_location_type(type = "title"),
-            error = function(e) {
-              tryCatch(
-                officer::ph_location_type(type = "ctrTitle"),
-                error = function(e2) NULL
-              )
-            }
-          )
+          loc_gtitle <- tryCatch(.ph_loc_type("title"),
+                                 error = function(e) tryCatch(.ph_loc_type("ctrTitle"),
+                                                              error = function(e2) NULL))
           if (!is.null(loc_gtitle)) {
-            doc <- tryCatch(
-              officer::ph_with(doc, st, location = loc_gtitle),
-              error = function(e) {
-                if (mensajes_progreso) {
-                  message("No se pudo escribir el título en la diapositiva de gráficos: ", e$message)
-                }
-                doc
-              }
-            )
+            doc <- tryCatch(officer::ph_with(doc, st, location = loc_gtitle), error = function(e) doc)
           }
         }
 
         # Insertar gráfico
-        if (usar_pic_placeholder) {
-          loc_pic <- officer::ph_location_type(type = "pic")
-        } else {
-          loc_pic <- officer::ph_location_fullsize()
-        }
+        loc_pic <- if (usar_pic_placeholder) .ph_loc_type("pic") else officer::ph_location_fullsize()
+        doc <- officer::ph_with(doc, rvg::dml(ggobj = plots_list[[i]], bg = "transparent"), location = loc_pic)
 
-        doc <- officer::ph_with(
-          doc,
-          rvg::dml(ggobj = p, bg = "transparent"),
-          location = loc_pic
-        )
-
-        # Escribir "Base: N ...fuente..." en bloque de texto izquierdo (body id = 2)
+        # Base izquierda (body idx = 2)
         if (tiene_layout_graficos) {
-
-          loc_fuente <- tryCatch(
-            officer::ph_location_type(type = "body", id = 2),
-            error = function(e) NULL
-          )
-
+          loc_fuente <- tryCatch(.ph_loc_type("body", idx = 2), error = function(e) NULL)
           if (!is.null(loc_fuente)) {
-
-            base_texto <- NULL
-
-            if (!is.null(n_info) && nzchar(n_info)) {
-
-              n_part   <- sub("^N\\s*=\\s*([^|]+).*", "\\1", n_info)
-              n_digits <- gsub("[^0-9]", "", n_part)
-
-              if (nzchar(n_digits)) {
-                n_num <- suppressWarnings(as.numeric(n_digits))
-                if (is.finite(n_num)) {
-                  n_pretty <- format(n_num, big.mark = ",", scientific = FALSE)
-
-                  if (!is.null(fuente) && nzchar(fuente)) {
-                    base_texto <- paste0("Base: ", n_pretty, " ", fuente)
-                  } else {
-                    base_texto <- paste0("Base: ", n_pretty)
-                  }
-                }
-              }
+            N_pretty <- extract_pretty_N(resumenN_list[[i]])
+            base_texto <- if (!is.null(N_pretty)) {
+              if (!is.null(fuente) && nzchar(fuente)) paste0("Base: ", N_pretty, " ", fuente) else paste0("Base: ", N_pretty)
+            } else {
+              fuente %||% ""
             }
-
-            if (is.null(base_texto)) {
-              base_texto <- fuente %||% ""
-            }
-
-            doc <- tryCatch(
-              officer::ph_with(doc, base_texto, location = loc_fuente),
-              error = function(e) { doc }
-            )
+            doc <- tryCatch(officer::ph_with(doc, base_texto, location = loc_fuente), error = function(e) doc)
           }
         }
 
-        # Placeholder vacío en bloque derecho (body id = 3)
+        # Bloque derecho (body idx = 3): vacío
         if (tiene_layout_graficos) {
-
-          loc_resumen <- tryCatch(
-            officer::ph_location_type(type = "body", id = 3),
-            error = function(e) NULL
-          )
-
+          loc_resumen <- tryCatch(.ph_loc_type("body", idx = 3), error = function(e) NULL)
           if (!is.null(loc_resumen)) {
-            doc <- tryCatch(
-              officer::ph_with(
-                doc,
-                " ",
-                location = loc_resumen
-              ),
-              error = function(e) doc
-            )
+            doc <- tryCatch(officer::ph_with(doc, " ", location = loc_resumen), error = function(e) doc)
           }
         }
       }
     }
 
-
-    # 6.5. Contraportada (si existe)
+    # 6.5. Contraportada
     if (tiene_layout_contraportada) {
-      if (mensajes_progreso) {
-        message("Agregando diapositiva de contraportada.")
-      }
+      if (mensajes_progreso) message("Agregando diapositiva de contraportada.")
+      doc <- officer::add_slide(doc, layout = "Contraportada", master = "Office Theme")
 
-      doc <- officer::add_slide(
-        doc,
-        layout = "Contraportada",
-        master = "Office Theme"
-      )
-
-      # Si hay fecha definida, intentar ponerla en el placeholder de fecha (dt)
       if (!is.null(fecha_portada) && nzchar(fecha_portada)) {
         doc <- tryCatch(
-          officer::ph_with(
-            doc,
-            fecha_portada,
-            location = officer::ph_location_type(type = "dt")
-          ),
-          error = function(e) {
-            if (mensajes_progreso) {
-              message("No se pudo escribir la fecha en la contraportada: ", e$message)
-            }
-            doc
-          }
+          officer::ph_with(doc, fecha_portada, location = .ph_loc_type("dt")),
+          error = function(e) doc
         )
       }
     }
