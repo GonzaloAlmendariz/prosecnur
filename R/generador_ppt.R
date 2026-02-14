@@ -1,18 +1,97 @@
-# =============================================================================
-# reporte_ppt()
-# -----------------------------------------------------------------------------
-# Generar PPT con gráficos a partir de tablas de frecuencias (SO / SM),
-# usando graficadores del paquete.
-#
-# NUEVO ENFOQUE (POST-CANVAS):
-# - Se asume que los graficadores (especialmente apiladas) manejan el layout
-#   internamente con CANVAS (cowplot) y, por tanto, el PPT solo “coloca” el
-#   vector (dml) dentro del placeholder.
-# - Se eliminan hacks/temas antiguos pensados para “no-canvas” (p.ej. recortes,
-#   ajustes de ejes para que el placeholder no estire raro).
-# - La exportación a PPT se mantiene vía officer + rvg::dml.
-# =============================================================================
-
+#' Crear un reporte en PowerPoint a partir de resultados de encuesta
+#'
+#' Genera un archivo **.pptx** con una diapositiva por variable (y, de forma opcional,
+#' algunas diapositivas con **dos gráficos**). El flujo general es:
+#' (1) identificar las variables a reportar (desde `secciones` o desde el instrumento),
+#' (2) calcular tablas de frecuencias,
+#' (3) elegir el tipo de gráfico según reglas y prioridades (por variable, por `list_name`
+#' o por defecto), y (4) armar el PowerPoint usando una plantilla.
+#'
+#' El tipo de gráfico se selecciona con un orden de preferencia:
+#' primero sobrescrituras explícitas (`vars_*` y `listnames_*`), y si no hay coincidencias,
+#' se aplican los valores por defecto (`default_so` y `default_sm`) según el tipo de pregunta.
+#' Además, se admite un modo especial para construir **bloques de varias preguntas** en una
+#' sola visualización apilada (`bloques_multi_apiladas`).
+#'
+#' El PowerPoint puede generarse desde una plantilla propia (`template_pptx`) o, si está
+#' disponible, desde la plantilla incluida en el paquete. Si `solo_lista = TRUE`, la función
+#' no escribe el archivo y únicamente devuelve los gráficos y el registro de decisiones.
+#'
+#' @param data `data.frame` o `tibble` con las variables (o sus dummies) a reportar.
+#' @param instrumento Objeto de instrumento con al menos `survey` (y opcionalmente `choices`
+#'   y `orders_list`). Si es `NULL`, se busca el atributo `instrumento_reporte` en `data`.
+#' @param secciones Lista nombrada donde cada elemento contiene un vector de nombres de variables
+#'   a incluir por sección. Si es `NULL`, se intenta inferir desde `survey$section` o `survey$seccion`.
+#' @param path_ppt Ruta del archivo `.pptx` de salida.
+#' @param fuente Texto opcional que se agrega como fuente/base en las diapositivas.
+#' @param sm_vars_force Vector de variables que deben tratarse como selección múltiple (si aplica
+#'   en la lógica de clasificación).
+#' @param mostrar_todo Si `TRUE`, conserva opciones con frecuencia cero al construir tablas (si la
+#'   tabla de frecuencias lo permite).
+#' @param solo_lista Si `TRUE`, no se genera el PowerPoint. Se devuelven gráficos y el log.
+#' @param incluir_titulo_var Si `TRUE`, usa el título de la pregunta como título de la diapositiva.
+#' @param mensajes_progreso Si `TRUE`, imprime mensajes de avance durante el proceso.
+#'
+#' @param bloques_multi_apiladas Lista nombrada de bloques especiales para apiladas múltiples.
+#'   Cada bloque debe incluir al menos `vars` (vector de variables) y puede incluir `titulo`
+#'   y `wrap_y`.
+#' @param pares_diapositiva Lista para definir pares de gráficos en una misma diapositiva.
+#'   Cada elemento debe incluir `vars` (vector de longitud 2) y opcionalmente `titulo`.
+#'
+#' @param vars_dico,vars_barras_apiladas,vars_barras_agrupadas,vars_radar Vectores de nombres de
+#'   variables que fuerzan el tipo de gráfico por variable.
+#' @param listnames_dico,listnames_apiladas Vectores de `list_name` que fuerzan el tipo de gráfico
+#'   por lista.
+#'
+#' @param dico_labels_por_var Lista con etiquetas dicotómicas por variable. Cada elemento debe
+#'   ser un vector de dos etiquetas (por ejemplo, `c("Sí", "No")`).
+#' @param dico_labels_por_listname Lista con etiquetas dicotómicas por `list_name`, con el mismo
+#'   formato que `dico_labels_por_var`.
+#'
+#' @param colores_apiladas_por_listname Lista con definiciones de colores para barras apiladas
+#'   por `list_name`. Puede incluir un vector nombrado de colores y, opcionalmente, parámetros
+#'   extra asociados al estilo de barra adicional.
+#'
+#' @param default_so Tipo de gráfico por defecto para variables de opción única (por ejemplo,
+#'   `"barras_apiladas"` o `"barras_agrupadas"`).
+#' @param default_sm Tipo de gráfico por defecto para variables de selección múltiple.
+#' @param barra_extra Define el tratamiento de una anotación adicional en gráficos de barras:
+#'   `"ninguna"` o `"total_n"`.
+#'
+#' @param estilos_barras_agrupadas Lista de parámetros de estilo que se pasan al graficador de
+#'   barras agrupadas.
+#' @param estilos_barras_apiladas Lista de parámetros de estilo que se pasan al graficador de
+#'   barras apiladas.
+#' @param estilos_dico Lista de parámetros de estilo que se pasan al graficador dicotómico.
+#'
+#' @param template_pptx Ruta a una plantilla `.pptx` para definir layouts y estilos. Si es `NULL`,
+#'   se intenta usar una plantilla interna y, en su defecto, la plantilla por defecto de PowerPoint.
+#'
+#' @param titulo_portada,subtitulo_portada,fecha_portada Textos opcionales para incluir una diapositiva
+#'   de portada si la plantilla cuenta con un layout compatible.
+#' @param mostrar_resumen_n Si `TRUE`, considera incluir un resumen de N (según el layout disponible).
+#'
+#' @param debug_ph_bordes Si `TRUE`, activa bordes de depuración en los gráficos que usan canvas
+#'   (útil para revisar alineaciones internas).
+#'
+#' @return Devuelve invisiblemente una lista con:
+#' \describe{
+#'   \item{plots}{Lista de gráficos generados (en el mismo orden de salida).}
+#'   \item{log_decisiones}{Tabla con las decisiones tomadas por variable (tipo, override, `list_name`, etc.).}
+#' }
+#' Si `solo_lista = TRUE`, el objeto retornado contiene los gráficos y el log, pero no se escribe el PPT.
+#'
+#' @examples
+#' \dontrun{
+#' out <- reporte_ppt(
+#'   data = rp_data,
+#'   instrumento = rp_inst,
+#'   secciones = list("Sección 1" = c("p1", "p2")),
+#'   path_ppt = "reporte.pptx",
+#'   fuente = "Pulso PUCP"
+#' )
+#' }
+#'
 #' @export
 reporte_ppt <- function(
     data,
@@ -41,6 +120,7 @@ reporte_ppt <- function(
     # Overrides por list_name
     listnames_dico        = NULL,
     listnames_apiladas    = NULL,
+    listnames_barras_agrupadas  = NULL,
 
     # Etiquetas explícitas para dicotómicas
     dico_labels_por_var      = list(),
@@ -91,6 +171,7 @@ reporte_ppt <- function(
 
   listnames_dico     <- listnames_dico     %||% character(0)
   listnames_apiladas <- listnames_apiladas %||% character(0)
+  listnames_barras_agrupadas <- listnames_barras_agrupadas %||% character(0)
 
   if (!is.data.frame(data)) {
     stop("`data` debe ser un data.frame o tibble.", call. = FALSE)
@@ -699,6 +780,9 @@ reporte_ppt <- function(
       } else if (!is.na(list_name_v) && list_name_v %in% listnames_apiladas) {
         override     <- paste0("listnames_apiladas=", list_name_v)
         tipo_grafico <- "barras_apiladas"
+      } else if (!is.na(list_name_v) && list_name_v %in% listnames_barras_agrupadas) {
+        override     <- paste0("listnames_barras_agrupadas=", list_name_v)
+        tipo_grafico <- "barras_agrupadas"
       } else {
         if (tipo_v == "sm") {
           override     <- paste0("default_sm=", default_sm)

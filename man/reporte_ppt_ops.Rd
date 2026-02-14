@@ -14,6 +14,14 @@ reporte_ppt_ops(
 )
 }
 \arguments{
+\item{data}{\code{data.frame} o \code{tibble} con las variables (o sus dummies) a reportar.}
+
+\item{instrumento}{Objeto de instrumento con al menos \code{survey} (y opcionalmente \code{choices}
+y \code{orders_list}). Si es \code{NULL}, se busca el atributo \code{instrumento_reporte} en \code{data}.}
+
+\item{secciones}{Lista nombrada donde cada elemento contiene un vector de nombres de variables
+a incluir por sección. Si es \code{NULL}, se intenta inferir desde \code{survey$section} o \code{survey$seccion}.}
+
 \item{path_pptx}{Ruta del archivo PPTX a generar. Por defecto
 \code{"reporte_ppt_ops.pptx"}.}
 

@@ -35,11 +35,31 @@ reporte_word(
 )
 }
 \arguments{
+\item{data}{\code{data.frame} o \code{tibble} con las variables (o sus dummies) a reportar.}
+
+\item{instrumento}{Objeto de instrumento con al menos \code{survey} (y opcionalmente \code{choices}
+y \code{orders_list}). Si es \code{NULL}, se busca el atributo \code{instrumento_reporte} en \code{data}.}
+
+\item{secciones}{Lista nombrada donde cada elemento contiene un vector de nombres de variables
+a incluir por sección. Si es \code{NULL}, se intenta inferir desde \code{survey$section} o \code{survey$seccion}.}
+
 \item{path_word}{Ruta del archivo DOCX a generar cuando \code{solo_lista = FALSE}.}
 
 \item{fuente}{Texto de fuente que se mostrará debajo de cada gráfico
 en el documento Word (por ejemplo, \code{" estudiantes. Fuente: Pulso PUCP 2025."},
 que se concatenará luego de \code{"N = <N> "}).}
+
+\item{sm_vars_force}{Vector de variables que deben tratarse como selección múltiple (si aplica
+en la lógica de clasificación).}
+
+\item{mostrar_todo}{Si \code{TRUE}, conserva opciones con frecuencia cero al construir tablas (si la
+tabla de frecuencias lo permite).}
+
+\item{solo_lista}{Si \code{TRUE}, no se genera el PowerPoint. Se devuelven gráficos y el log.}
+
+\item{incluir_titulo_var}{Si \code{TRUE}, usa el título de la pregunta como título de la diapositiva.}
+
+\item{mensajes_progreso}{Si \code{TRUE}, imprime mensajes de avance durante el proceso.}
 
 \item{template_docx}{Ruta a una plantilla DOCX. Si es \code{NULL}, se intenta
 usar una plantilla interna \code{"plantillas/plantilla_pulso.docx"} y, si
@@ -49,6 +69,38 @@ no existe, se usa la plantilla por defecto de Word.}
 multi-apiladas. Cada elemento debe ser una lista con al menos
 \code{vars = c("p101","p102",...)} y opcionalmente:
 \code{titulo}, \code{wrap_y}, \code{grosor_barras}, \code{invertir_barras}.}
+
+\item{vars_dico, vars_barras_apiladas, vars_barras_agrupadas, vars_radar}{Vectores de nombres de
+variables que fuerzan el tipo de gráfico por variable.}
+
+\item{listnames_dico, listnames_apiladas}{Vectores de \code{list_name} que fuerzan el tipo de gráfico
+por lista.}
+
+\item{dico_labels_por_var}{Lista con etiquetas dicotómicas por variable. Cada elemento debe
+ser un vector de dos etiquetas (por ejemplo, \code{c("Sí", "No")}).}
+
+\item{dico_labels_por_listname}{Lista con etiquetas dicotómicas por \code{list_name}, con el mismo
+formato que \code{dico_labels_por_var}.}
+
+\item{colores_apiladas_por_listname}{Lista con definiciones de colores para barras apiladas
+por \code{list_name}. Puede incluir un vector nombrado de colores y, opcionalmente, parámetros
+extra asociados al estilo de barra adicional.}
+
+\item{default_so}{Tipo de gráfico por defecto para variables de opción única (por ejemplo,
+\code{"barras_apiladas"} o \code{"barras_agrupadas"}).}
+
+\item{default_sm}{Tipo de gráfico por defecto para variables de selección múltiple.}
+
+\item{barra_extra}{Define el tratamiento de una anotación adicional en gráficos de barras:
+\code{"ninguna"} o \code{"total_n"}.}
+
+\item{estilos_barras_agrupadas}{Lista de parámetros de estilo que se pasan al graficador de
+barras agrupadas.}
+
+\item{estilos_barras_apiladas}{Lista de parámetros de estilo que se pasan al graficador de
+barras apiladas.}
+
+\item{estilos_dico}{Lista de parámetros de estilo que se pasan al graficador dicotómico.}
 }
 \value{
 Una lista con:

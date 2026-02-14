@@ -1,460 +1,498 @@
 # =============================================================================
-# graficar_dico()
+# graficar_pie_canvas() — API ESTANDARIZADA + PANEL FULL (sin márgenes)
 # -----------------------------------------------------------------------------
-# Pies dicotómicos (Sí / No) usando tabla agregada (una fila por indicador)
+# - Pie / donut (proporciones 0–1; si viene 0–100, normaliza)
+# - Etiquetas % (argumentos estandarizados)
+# - DONUT: etiquetas % DENTRO del aro (en el segmento), NO en el hueco
+# - Panel: usa el 100% del placeholder (sin márgenes / sin “anillo blanco” extra)
+# - Leyenda: control REAL del espaciado vertical SIN deformar el key
+#   * tamano_key_cm         -> key cuadrado (ancho = alto)
+#   * espaciado_vertical_cm -> separación vertical (legend.key.spacing.y)
 # =============================================================================
 
-#' Graficar pies dicotómicos (Sí / No) desde una tabla agregada
-#'
-#' Genera gráficos de torta (pie charts) para uno o varios indicadores
-#' dicotómicos a partir de una tabla agregada (una fila por indicador), donde
-#' se dispone del porcentaje de respuesta afirmativa (Sí) y del N total.
-#' Cada indicador se muestra en una faceta distinta.
-#'
-#' @param data Data frame en formato agregado: una fila por indicador.
-#' @param var_indicador Nombre (string) de la columna que identifica cada
-#'   indicador (por ejemplo, `"indicador"`).
-#' @param var_porcentaje_si Nombre (string) de la columna con el porcentaje
-#'   de respuesta afirmativa (Sí) para cada indicador.
-#' @param var_n Nombre (string) de la columna con el N total por indicador.
-#' @param escala_valor Escala de los porcentajes: \code{"proporcion_1"} si los
-#'   valores están en 0–1, o \code{"proporcion_100"} si están en 0–100.
-#'
-#' @param etiqueta_si Etiqueta a mostrar para la categoría afirmativa
-#'   (por defecto \code{"Sí"}).
-#' @param etiqueta_no Etiqueta a mostrar para la categoría negativa
-#'   (por defecto \code{"No"}).
-#'
-#' @param colores_respuesta Vector de colores HEX con nombre para las
-#'   categorías, usando como nombres \code{etiqueta_si} y \code{etiqueta_no}.
-#'   Si es \code{NULL}, se usan \code{color_cat_si} y \code{color_cat_no}.
-#'
-#' @param invertir_respuestas Lógico; si \code{TRUE}, invierte el orden de las
-#'   categorías (por ejemplo, muestra primero "No" y luego "Sí") tanto en el
-#'   gráfico como en la leyenda.
-#'
-#' @param mostrar_valores Lógico; si \code{TRUE}, muestra el porcentaje dentro
-#'   de cada sector de la torta.
-#' @param decimales Número de decimales para los porcentajes.
-#' @param umbral_etiqueta Mínima proporción (0–1) para mostrar la etiqueta
-#'   de porcentaje (por ejemplo, 0.03 equivale a 3%).
-#'
-#' @param radio_texto Posición radial del texto de porcentaje (en el eje x del
-#'   pie). Valores cercanos a 1 colocan el texto en el centro del anillo;
-#'   menores a 1 lo acercan al centro y mayores a 1 lo empujan hacia el borde.
-#'
-#' @param incluir_n_en_titulo Lógico; si \code{TRUE}, concatena
-#'   una línea adicional con \code{"N = ..."} al nombre del indicador.
-#' @param prefijo_n_titulo Texto añadido antes del valor de N.
-#'
-#' @param ncol_facetas Número de columnas en el facetado. Si es \code{NULL},
-#'   se intenta un valor razonable según el número de indicadores.
-#'
-#' @param titulo,subtitulo,nota_pie Título, subtítulo y nota de pie.
-#'
-#' @param color_titulo,size_titulo Color y tamaño del título.
-#' @param color_subtitulo,size_subtitulo Color y tamaño del subtítulo.
-#' @param color_nota_pie,size_nota_pie Color y tamaño del pie.
-#' @param color_leyenda,size_leyenda Color y tamaño de texto de la leyenda.
-#'
-#' @param color_texto_segmentos,size_texto_segmentos Color y tamaño del texto
-#'   de porcentajes cuando no se usan colores diferenciados por categoría.
-#'
-#' @param color_titulos_pie,size_titulos_pie Color y tamaño de los títulos
-#'   de cada pie (facetas).
-#'
-#' @param color_cat_si,color_cat_no Colores de relleno de Sí y No.
-#' @param color_texto_cat_si,color_texto_cat_no Colores de texto de Sí y No.
-#' @param color_fondo Color de fondo del gráfico (usar NA para transparente).
-#'
-#' @param mostrar_leyenda,posicion_leyenda,invertir_leyenda Control de leyenda.
-#'
-#' @param textos_negrita Vector con: "titulo", "porcentajes", "leyenda",
-#'   "titulos_pie" para poner en negrita.
-#'
-#' @param exportar Método de salida: "rplot", "png" o "ppt".
-#' @param path_salida,ancho,alto,dpi Parámetros de exportación.
-#'
-#' @return Un objeto ggplot si exportar = "rplot".
 #' @export
-graficar_dico <- function(
+graficar_pie <- function(
     data,
-    var_indicador,
-    var_porcentaje_si,
-    var_n,
-    escala_valor           = c("proporcion_1", "proporcion_100"),
-    etiqueta_si            = "Sí",
-    etiqueta_no            = "No",
-    colores_respuesta      = NULL,
-    invertir_respuestas    = FALSE,
-    mostrar_valores        = TRUE,
-    decimales              = 1,
-    umbral_etiqueta        = 0.03,
-    radio_texto            = 1,
-    incluir_n_en_titulo    = FALSE,
-    prefijo_n_titulo       = "N = ",
-    ncol_facetas           = NULL,
-    titulo                 = NULL,
-    subtitulo              = NULL,
-    nota_pie               = NULL,
-    color_titulo           = "#000000",
-    size_titulo            = 12,
-    color_subtitulo        = "#000000",
-    size_subtitulo         = 10,
-    color_nota_pie         = "#000000",
-    size_nota_pie          = 8,
-    color_leyenda          = "#000000",
-    size_leyenda           = 8,
-    color_texto_segmentos  = "#FFFFFF",
-    size_texto_segmentos   = 3,
-    color_titulos_pie      = "#000000",
-    size_titulos_pie       = 9,
-    color_cat_si           = "#004B8D",
-    color_cat_no           = "#D9D9D9",
-    color_texto_cat_si     = NULL,
-    color_texto_cat_no     = NULL,
-    color_fondo            = NA,
-    mostrar_leyenda        = TRUE,
-    posicion_leyenda       = "bottom",
-    invertir_leyenda       = FALSE,
-    textos_negrita         = NULL,
-    exportar               = c("rplot", "png", "ppt", "word"),
-    path_salida            = NULL,
-    ancho                  = 10,
-    alto                   = 6,
-    dpi                    = 300
+    var_categoria,
+    var_pct,
+
+    # Pie / donut
+    tipo_pie                 = c("donut", "pie"),
+    donut_hole               = 0.55,
+
+    # (compatibilidad; NO se usan cuando etiquetas van dentro)
+    donut_radio_etiqueta_out = 1.12,
+    donut_label_nudge_out    = 0.03,
+
+    # ==========================
+    # ETIQUETAS (%)
+    # ==========================
+    mostrar_etiquetas_pct = TRUE,
+    size_etiquetas_pct    = 3.2,
+    color_etiquetas_pct   = "#FFFFFF",
+    etiquetas_negrita     = FALSE,
+    decimales_pct         = 0,
+    umbral_etiqueta_pct   = 0.06,
+
+    # Radio relativo del texto dentro del grosor disponible (0–1):
+    # - PIE: entre centro y borde
+    # - DONUT: entre r_in y r_out (dentro del aro)
+    pie_radio_etiqueta    = 0.55,
+
+    # (opcional) “empuje” adicional para acercar el texto al borde
+    # (positivo: hacia afuera, negativo: hacia adentro)
+    nudge_radial_etiqueta = 0,
+
+    # Orden / top-k
+    ordenar_categorias = c("desc", "asc", "ninguno"),
+    top_k              = NULL,
+    etiqueta_otros     = "Otros",
+
+    # Colores
+    colores_categorias = NULL,
+
+    # Textos
+    titulo    = NULL,
+    subtitulo = NULL,
+    nota_pie  = NULL,
+
+    # Posición H
+    pos_titulo    = c("izquierda", "centro", "derecha"),
+    pos_subtitulo = c("izquierda", "centro", "derecha"),
+    pos_nota_pie  = c("izquierda", "centro", "derecha"),
+
+    # Posición Y dentro del placeholder de título
+    y_titulo    = 0.62,
+    y_subtitulo = 0.30,
+
+    textos_negrita = NULL,
+
+    # Estilo texto
+    color_titulo    = "#000000",
+    size_titulo     = 11,
+    color_subtitulo = "#000000",
+    size_subtitulo  = 9,
+    color_nota_pie  = "#000000",
+    size_nota_pie   = 8,
+
+    # ==========================
+    # LEYENDA (PARCHE MINIMAL)
+    # ==========================
+    color_leyenda         = "#000000",
+    size_leyenda          = 8,
+    tamano_key_cm         = 0.40,
+    espaciado_vertical_cm = 0.16,
+
+    # Leyenda
+    mostrar_leyenda    = TRUE,
+    leyenda_posicion   = c("derecha", "abajo"),
+    invertir_leyenda   = FALSE,
+    ncol_leyenda_bajo  = 2,
+
+    # ==========================
+    # CANVAS
+    # ==========================
+    usar_canvas            = TRUE,
+    canvas_h_title         = 0.16,
+    canvas_h_caption       = 0.06,
+    canvas_w_legend_right  = 0.30,
+    canvas_h_legend_bottom = 0.14,
+    canvas_pad_top         = 0.01,
+
+    # Debug
+    debug_ph_bordes = FALSE,
+    debug_color     = "#8A2BE2",
+    debug_lw        = 2.8,
+
+    # Exportación
+    exportar    = c("rplot", "png", "ppt", "word"),
+    path_salida = NULL,
+    ancho       = 10,
+    alto        = 6,
+    dpi         = 300,
+    color_fondo = NA
 ) {
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
 
-  escala_valor   <- match.arg(escala_valor)
-  exportar       <- match.arg(exportar)
+  tipo_pie           <- match.arg(tipo_pie)
+  ordenar_categorias <- match.arg(ordenar_categorias)
+  pos_titulo         <- match.arg(pos_titulo)
+  pos_subtitulo      <- match.arg(pos_subtitulo)
+  pos_nota_pie       <- match.arg(pos_nota_pie)
+  leyenda_posicion   <- match.arg(leyenda_posicion)
+  exportar           <- match.arg(exportar)
+
   textos_negrita <- textos_negrita %||% character(0)
 
-  # ---------------------------------------------------------------------------
-  # 0. Validaciones
-  # ---------------------------------------------------------------------------
-  if (!var_indicador %in% names(data)) {
-    stop("`var_indicador` no existe en `data`.", call. = FALSE)
+  if (!requireNamespace("ggplot2", quietly = TRUE) ||
+      !requireNamespace("dplyr", quietly = TRUE)) {
+    stop("Se requieren 'ggplot2' y 'dplyr'.", call. = FALSE)
   }
-  if (!var_porcentaje_si %in% names(data)) {
-    stop("`var_porcentaje_si` no existe en `data`.", call. = FALSE)
-  }
-  if (!var_n %in% names(data)) {
-    stop("`var_n` no existe en `data`.", call. = FALSE)
+  if (isTRUE(usar_canvas)) {
+    if (!requireNamespace("cowplot", quietly = TRUE)) stop("Para `usar_canvas=TRUE` se requiere 'cowplot'.", call. = FALSE)
+    if (!requireNamespace("grid", quietly = TRUE))   stop("Para debug se requiere 'grid'.", call. = FALSE)
   }
 
-  df <- data
+  # ---------------------------------------------------------------------------
+  # 0) Preparar df
+  # ---------------------------------------------------------------------------
+  if (!is.data.frame(data)) stop("`data` debe ser un data.frame/tibble.", call. = FALSE)
+  if (!var_categoria %in% names(data)) stop("`var_categoria` no existe en `data`.", call. = FALSE)
+  if (!var_pct %in% names(data))       stop("`var_pct` no existe en `data`.", call. = FALSE)
 
-  # ---------------------------------------------------------------------------
-  # 1. Tabla larga con Sí / No
-  # ---------------------------------------------------------------------------
-  df_proc <- df |>
+  df <- data |>
     dplyr::select(
-      dplyr::all_of(c(var_indicador, var_porcentaje_si, var_n))
-    )
-
-  if (!is.numeric(df_proc[[var_porcentaje_si]])) {
-    stop("`var_porcentaje_si` debe ser numérica.", call. = FALSE)
-  }
-
-  if (escala_valor == "proporcion_100") {
-    df_proc$prop_si <- df_proc[[var_porcentaje_si]] / 100
-  } else {
-    df_proc$prop_si <- df_proc[[var_porcentaje_si]]
-  }
-
-  df_proc$prop_si <- pmax(pmin(df_proc$prop_si, 1), 0)
-  df_proc$prop_no <- 1 - df_proc$prop_si
-
-  df_long <- df_proc |>
-    tidyr::pivot_longer(
-      cols      = c("prop_si", "prop_no"),
-      names_to  = ".cat_interna",
-      values_to = "prop"
+      categoria = dplyr::all_of(var_categoria),
+      pct       = dplyr::all_of(var_pct)
     ) |>
     dplyr::mutate(
-      categoria = dplyr::case_when(
-        .cat_interna == "prop_si" ~ etiqueta_si,
-        .cat_interna == "prop_no" ~ etiqueta_no,
-        TRUE                     ~ NA_character_
-      )
-    )
+      categoria = as.character(.data$categoria),
+      pct       = suppressWarnings(as.numeric(.data$pct))
+    ) |>
+    dplyr::filter(!is.na(.data$categoria), .data$categoria != "") |>
+    dplyr::mutate(pct = dplyr::if_else(is.finite(.data$pct), .data$pct, 0))
 
-  df_long <- df_long[!is.na(df_long$categoria), , drop = FALSE]
+  if (!nrow(df)) stop("No hay filas válidas para graficar.", call. = FALSE)
 
-  # Facetas (indicadores)
-  df_long$indicador_label <- df_long[[var_indicador]]
+  # Normaliza 0–100 a 0–1 si aplica
+  if (max(df$pct, na.rm = TRUE) > 1 + 1e-8) df$pct <- df$pct / 100
+  df$pct[df$pct < 0] <- 0
 
-  if (incluir_n_en_titulo) {
-    df_long <- df_long |>
-      dplyr::group_by(.data[[var_indicador]]) |>
-      dplyr::mutate(
-        indicador_label = paste0(
-          .data[[var_indicador]],
-          "\n",
-          prefijo_n_titulo,
-          .data[[var_n]]
+  total <- sum(df$pct, na.rm = TRUE)
+  if (!is.finite(total) || total <= 0) stop("La suma de `var_pct` no es positiva.", call. = FALSE)
+  df$pct <- df$pct / sum(df$pct, na.rm = TRUE)
+
+  # Top-k
+  if (!is.null(top_k) && is.finite(top_k) && top_k > 0) {
+    top_k <- as.integer(top_k)
+
+    df <- df |>
+      dplyr::arrange(dplyr::desc(.data$pct)) |>
+      dplyr::mutate(.rank = dplyr::row_number())
+
+    df_top <- df |> dplyr::filter(.data$.rank <= top_k) |> dplyr::select(-.rank)
+    df_oth <- df |> dplyr::filter(.data$.rank >  top_k)
+
+    if (nrow(df_oth) > 0) {
+      df_top <- dplyr::bind_rows(
+        df_top,
+        dplyr::tibble(
+          categoria = etiqueta_otros,
+          pct       = sum(df_oth$pct, na.rm = TRUE)
         )
-      ) |>
-      dplyr::ungroup()
+      )
+    }
+    df <- df_top
   }
 
-  df_long$indicador_label <- factor(
-    df_long$indicador_label,
-    levels = unique(df_long$indicador_label)
-  )
+  # Orden
+  if (ordenar_categorias == "desc") df <- df |> dplyr::arrange(dplyr::desc(.data$pct))
+  if (ordenar_categorias == "asc")  df <- df |> dplyr::arrange(.data$pct)
 
-  # ---------------------------------------------------------------------------
-  # 2. Orden de categorías
-  # ---------------------------------------------------------------------------
-  niveles_cat <- c(etiqueta_si, etiqueta_no)
-  if (invertir_respuestas) {
-    niveles_cat <- rev(niveles_cat)
-  }
-  df_long$categoria <- factor(df_long$categoria, levels = niveles_cat)
+  df$categoria <- factor(df$categoria, levels = df$categoria)
 
-  # ---------------------------------------------------------------------------
-  # 3. Datos para pie y etiquetas
-  # ---------------------------------------------------------------------------
-  df_plot <- df_long |>
-    dplyr::group_by(indicador_label) |>
+  df <- df |>
     dplyr::mutate(
-      prop = ifelse(is.na(prop), 0, prop)
-    ) |>
-    dplyr::ungroup()
-
-  df_plot$lab <- scales::percent(df_plot$prop, accuracy = 10^(-decimales))
-  df_plot$lab[df_plot$prop < umbral_etiqueta] <- ""
-
-  usar_color_por_cat <- !is.null(color_texto_cat_si) &&
-    !is.null(color_texto_cat_no)
-
-  if (usar_color_por_cat) {
-    df_plot$color_texto <- dplyr::case_when(
-      df_plot$categoria == etiqueta_si ~ color_texto_cat_si,
-      df_plot$categoria == etiqueta_no ~ color_texto_cat_no,
-      TRUE                             ~ color_texto_segmentos
+      ymax    = cumsum(.data$pct),
+      ymin    = dplyr::lag(.data$ymax, default = 0),
+      pct_txt = paste0(round(.data$pct * 100, decimales_pct), "%"),
+      mostrar = .data$pct >= umbral_etiqueta_pct,
+      y_mid   = (.data$ymin + .data$ymax) / 2
     )
-  }
 
   # ---------------------------------------------------------------------------
-  # 4. Pie en facetas
+  # 1) Radios (FULL panel)
   # ---------------------------------------------------------------------------
-  p <- ggplot2::ggplot(
-    df_plot,
-    ggplot2::aes(
-      x    = 1,
-      y    = prop,
-      fill = categoria
-    )
-  ) +
-    ggplot2::geom_col(width = 1, color = "white") +
-    ggplot2::coord_polar(theta = "y")
+  r_out <- 1.0
 
-  if (is.null(ncol_facetas)) {
-    n_ind <- length(unique(df_plot$indicador_label))
-    ncol_facetas <- min(n_ind, 3L)
+  pie_radio_etiqueta <- suppressWarnings(as.numeric(pie_radio_etiqueta))
+  if (!is.finite(pie_radio_etiqueta)) pie_radio_etiqueta <- 0.55
+  pie_radio_etiqueta <- max(0.10, min(0.95, pie_radio_etiqueta))
+
+  nudge_radial_etiqueta <- suppressWarnings(as.numeric(nudge_radial_etiqueta))
+  if (!is.finite(nudge_radial_etiqueta)) nudge_radial_etiqueta <- 0
+
+  if (tipo_pie == "pie") {
+    r_in  <- 0.0
+    # ✅ NO reservar radio extra: panel usa 100%
+    r_lab <- r_out
+
+    # texto dentro del pie
+    r_text <- r_in + (r_out - r_in) * pie_radio_etiqueta
+
+  } else {
+    donut_hole <- max(0.05, min(0.90, donut_hole))
+    r_in  <- donut_hole * r_out
+
+    # ✅ CLAVE: etiquetas dentro => NO reservar radio extra
+    r_lab <- r_out
+
+    # ✅ CLAVE: etiquetas dentro del aro (entre r_in y r_out)
+    r_text <- r_in + (r_out - r_in) * pie_radio_etiqueta
+
+    # compatibilidad (no se usa en modo “dentro”, pero se conserva el arg)
+    donut_label_nudge_out <- max(0, donut_label_nudge_out)
   }
 
-  p <- p +
-    ggplot2::facet_wrap(
-      ~ indicador_label,
-      ncol = ncol_facetas
+  # pequeño “clamp” para que el texto nunca se salga del aro visualmente
+  r_text <- max(r_in + 0.01, min(r_out - 0.03, r_text + nudge_radial_etiqueta))
+
+  # ---------------------------------------------------------------------------
+  # 2) Panel base (sin márgenes; FULL)
+  # ---------------------------------------------------------------------------
+  p_panel <- ggplot2::ggplot(df) +
+    ggplot2::geom_rect(
+      ggplot2::aes(
+        xmin = r_in,
+        xmax = r_out,
+        ymin = ymin,
+        ymax = ymax,
+        fill = categoria
+      ),
+      color = NA
+    ) +
+    ggplot2::coord_polar(theta = "y", clip = "off") +
+    ggplot2::scale_x_continuous(
+      limits = c(0, r_lab),
+      expand = ggplot2::expansion(mult = c(0, 0))
+    ) +
+    ggplot2::theme_void() +
+    ggplot2::theme(
+      plot.background  = ggplot2::element_rect(fill = color_fondo, color = NA),
+      panel.background = ggplot2::element_rect(fill = color_fondo, color = NA),
+
+      # ✅ FULL: cero aire alrededor
+      plot.margin      = ggplot2::margin(0, 0, 0, 0)
     )
 
-  # Texto centrado en cada sector (OJO: group = categoria)
-  if (mostrar_valores) {
-    if (usar_color_por_cat) {
-      p <- p +
+  if (!is.null(colores_categorias)) {
+    p_panel <- p_panel + ggplot2::scale_fill_manual(values = colores_categorias, drop = FALSE)
+  }
+
+  # Etiquetas %
+  if (isTRUE(mostrar_etiquetas_pct)) {
+    df_lab <- df |> dplyr::filter(.data$mostrar)
+
+    if (nrow(df_lab) > 0) {
+      ff <- if (isTRUE(etiquetas_negrita) || ("etiquetas" %in% textos_negrita)) "bold" else "plain"
+
+      p_panel <- p_panel +
         ggplot2::geom_text(
-          data = df_plot,
-          ggplot2::aes(
-            x     = radio_texto,
-            y     = prop,
-            label = lab,
-            group = categoria,
-            color = color_texto
-          ),
-          position    = ggplot2::position_stack(vjust = 0.5),
-          inherit.aes = FALSE,
-          size        = size_texto_segmentos,
-          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-          show.legend = FALSE
-        ) +
-        ggplot2::scale_color_identity()
-    } else {
-      p <- p +
-        ggplot2::geom_text(
-          data    = df_plot,
-          ggplot2::aes(
-            x     = radio_texto,
-            y     = prop,
-            label = lab,
-            group = categoria
-          ),
-          position    = ggplot2::position_stack(vjust = 0.5),
-          inherit.aes = FALSE,
-          color       = color_texto_segmentos,
-          size        = size_texto_segmentos,
-          fontface    = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+          data = df_lab,
+          ggplot2::aes(x = r_text, y = y_mid, label = pct_txt),
+          color       = color_etiquetas_pct,
+          size        = size_etiquetas_pct,
+          fontface    = ff,
+          hjust       = 0.5,
+          vjust       = 0.5,
           show.legend = FALSE
         )
     }
   }
 
   # ---------------------------------------------------------------------------
-  # 5. Colores y tema
+  # 3) CANVAS
   # ---------------------------------------------------------------------------
-  if (is.null(colores_respuesta)) {
-    colores_respuesta <- c(
-      setNames(color_cat_si, etiqueta_si),
-      setNames(color_cat_no, etiqueta_no)
-    )
-  }
+  p_final <- p_panel
 
-  p <- p +
-    ggplot2::scale_fill_manual(values = colores_respuesta)
+  if (isTRUE(usar_canvas)) {
 
-  hay_titulo    <- !is.null(titulo)    && nzchar(titulo)
-  hay_subtitulo <- !is.null(subtitulo) && nzchar(subtitulo)
-  hay_nota_pie  <- !is.null(nota_pie)  && nzchar(nota_pie)
+    .wrap_debug <- function(g) {
+      if (!isTRUE(debug_ph_bordes)) return(g)
+      cowplot::ggdraw(g) +
+        cowplot::draw_grob(
+          grid::rectGrob(
+            gp = grid::gpar(col = debug_color, fill = NA, lwd = debug_lw)
+          ),
+          x = 0, y = 0, width = 1, height = 1
+        )
+    }
 
-  margin_top    <- if (hay_titulo || hay_subtitulo) 30 else 10
-  margin_bottom <- if (hay_nota_pie) 20 else 10
-
-  p <- p +
-    ggplot2::theme_minimal(base_size = 9) +
-    ggplot2::theme(
-      panel.background   = ggplot2::element_rect(
-        fill   = color_fondo,
-        colour = NA
-      ),
-      plot.background    = ggplot2::element_rect(
-        fill   = color_fondo,
-        colour = NA
-      ),
-      panel.grid         = ggplot2::element_blank(),
-      axis.title         = ggplot2::element_blank(),
-      axis.text          = ggplot2::element_blank(),
-      axis.ticks         = ggplot2::element_blank(),
-      strip.text         = ggplot2::element_text(
-        color = color_titulos_pie,
-        size  = size_titulos_pie,
-        face  = if ("titulos_pie" %in% textos_negrita) "bold" else "plain"
-      ),
-      legend.position    = if (mostrar_leyenda) posicion_leyenda else "none",
-      legend.title       = ggplot2::element_blank(),
-      legend.text        = ggplot2::element_text(
-        color = color_leyenda,
-        size  = size_leyenda,
-        face  = if ("leyenda" %in% textos_negrita) "bold" else "plain"
-      ),
-      plot.title.position = "plot",
-      plot.title          = ggplot2::element_text(
-        hjust  = 0.5,
-        color  = color_titulo,
-        size   = size_titulo,
-        face   = if ("titulo" %in% textos_negrita) "bold" else "plain",
-        margin = ggplot2::margin(b = 12)
-      ),
-      plot.subtitle       = ggplot2::element_text(
-        hjust  = 0.5,
-        color  = color_subtitulo,
-        size   = size_subtitulo,
-        margin = ggplot2::margin(b = 8)
-      ),
-      plot.caption        = ggplot2::element_text(
-        hjust  = 1,
-        color  = color_nota_pie,
-        size   = size_nota_pie,
-        margin = ggplot2::margin(t = 10)
-      ),
-      plot.margin         = ggplot2::margin(
-        t = margin_top, r = 15, b = margin_bottom, l = 15
+    .x_hjust <- function(pos) {
+      list(
+        x = switch(pos, "izquierda" = 0.02, "centro" = 0.5, "derecha" = 0.98, 0.5),
+        h = switch(pos, "izquierda" = 0,    "centro" = 0.5, "derecha" = 1,    0.5)
       )
-    )
+    }
 
-  p <- p + ggplot2::labs(
-    title    = titulo,
-    subtitle = subtitulo,
-    caption  = nota_pie
-  )
+    th1 <- .x_hjust(pos_titulo)
+    th2 <- .x_hjust(pos_subtitulo)
+    ch  <- .x_hjust(pos_nota_pie)
 
-  if (invertir_leyenda && mostrar_leyenda) {
-    p <- p + ggplot2::guides(
-      fill = ggplot2::guide_legend(reverse = TRUE)
-    )
+    y_tit <- max(0, min(1, y_titulo))
+    y_sub <- max(0, min(1, y_subtitulo))
+
+    title_block <- cowplot::ggdraw() +
+      cowplot::theme_nothing() +
+      cowplot::draw_label(
+        label    = titulo %||% "",
+        x        = th1$x, y = y_tit,
+        hjust    = th1$h, vjust = 0.5,
+        fontface = if ("titulo" %in% textos_negrita) "bold" else "plain",
+        size     = size_titulo,
+        colour   = color_titulo
+      ) +
+      cowplot::draw_label(
+        label    = subtitulo %||% "",
+        x        = th2$x, y = y_sub,
+        hjust    = th2$h, vjust = 0.5,
+        fontface = if ("subtitulo" %in% textos_negrita) "bold" else "plain",
+        size     = size_subtitulo,
+        colour   = color_subtitulo
+      )
+
+    caption_block <- cowplot::ggdraw() +
+      cowplot::theme_nothing() +
+      cowplot::draw_label(
+        label    = nota_pie %||% "",
+        x        = ch$x, y = 0.5,
+        hjust    = ch$h, vjust = 0.5,
+        fontface = if ("caption" %in% textos_negrita) "bold" else "plain",
+        size     = size_nota_pie,
+        colour   = color_nota_pie
+      )
+
+    # ------------------------------------------------------------
+    # LEYENDA — espaciado vertical real SIN deformar key
+    # ------------------------------------------------------------
+    leg <- NULL
+    if (isTRUE(mostrar_leyenda)) {
+
+      tamano_key_cm <- suppressWarnings(as.numeric(tamano_key_cm))
+      if (!is.finite(tamano_key_cm) || tamano_key_cm <= 0) tamano_key_cm <- 0.40
+
+      espaciado_vertical_cm <- suppressWarnings(as.numeric(espaciado_vertical_cm))
+      if (!is.finite(espaciado_vertical_cm) || espaciado_vertical_cm < 0) espaciado_vertical_cm <- 0.16
+
+      p_for_leg <- p_panel +
+        ggplot2::theme(
+          legend.title = ggplot2::element_blank(),
+          legend.text  = ggplot2::element_text(
+            color = color_leyenda,
+            size  = size_leyenda,
+            face  = if ("leyenda" %in% textos_negrita) "bold" else "plain"
+          ),
+
+          legend.key.width  = grid::unit(tamano_key_cm, "cm"),
+          legend.key.height = grid::unit(tamano_key_cm, "cm"),
+          legend.key.spacing.y = grid::unit(espaciado_vertical_cm, "cm"),
+
+          plot.margin = ggplot2::margin(0, 0, 0, 0)
+        )
+
+      if (leyenda_posicion == "abajo") {
+        p_for_leg <- p_for_leg +
+          ggplot2::theme(legend.position = "bottom") +
+          ggplot2::guides(
+            fill = ggplot2::guide_legend(
+              ncol      = ncol_leyenda_bajo,
+              byrow     = TRUE,
+              reverse   = invertir_leyenda,
+              keywidth  = grid::unit(tamano_key_cm, "cm"),
+              keyheight = grid::unit(tamano_key_cm, "cm")
+            )
+          )
+      } else {
+        p_for_leg <- p_for_leg +
+          ggplot2::theme(legend.position = "right") +
+          ggplot2::guides(
+            fill = ggplot2::guide_legend(
+              reverse   = invertir_leyenda,
+              keywidth  = grid::unit(tamano_key_cm, "cm"),
+              keyheight = grid::unit(tamano_key_cm, "cm")
+            )
+          )
+      }
+
+      leg <- cowplot::get_legend(p_for_leg)
+    }
+
+    panel_no_leg <- p_panel + ggplot2::theme(legend.position = "none")
+    legend_block <- if (!is.null(leg)) cowplot::ggdraw(leg) else (cowplot::ggdraw() + cowplot::theme_nothing())
+
+    if (leyenda_posicion == "derecha") {
+
+      row_mid <- cowplot::plot_grid(
+        .wrap_debug(panel_no_leg),
+        .wrap_debug(legend_block),
+        nrow = 1,
+        rel_widths = c(1 - canvas_w_legend_right, canvas_w_legend_right)
+      )
+
+      p_final <- cowplot::plot_grid(
+        .wrap_debug(title_block),
+        .wrap_debug(row_mid),
+        .wrap_debug(caption_block),
+        ncol = 1,
+        rel_heights = c(
+          canvas_h_title,
+          max(0.01, 1 - (canvas_h_title + canvas_h_caption) - canvas_pad_top),
+          canvas_h_caption
+        )
+      )
+
+    } else {
+
+      h_leg <- if (isTRUE(mostrar_leyenda) && !is.null(leg)) canvas_h_legend_bottom else 0.01
+      h_mid <- max(0.01, 1 - (canvas_h_title + h_leg + canvas_h_caption) - canvas_pad_top)
+
+      p_final <- cowplot::plot_grid(
+        .wrap_debug(title_block),
+        .wrap_debug(panel_no_leg),
+        .wrap_debug(legend_block),
+        .wrap_debug(caption_block),
+        ncol = 1,
+        rel_heights = c(canvas_h_title, h_mid, h_leg, canvas_h_caption)
+      )
+    }
   }
 
   # ---------------------------------------------------------------------------
-  # 6. Exportación
+  # 4) Exportación
   # ---------------------------------------------------------------------------
-  if (exportar == "rplot") {
-    return(p)
-  }
+  if (exportar == "rplot") return(p_final)
 
   if (is.null(path_salida) || !nzchar(path_salida)) {
-    stop("Debe especificar `path_salida` cuando `exportar` no es 'rplot'.",
-         call. = FALSE)
-  }
-
-  if (exportar == "word") {
-    if (!requireNamespace("officer", quietly = TRUE)) {
-      stop(
-        "Para exportar a Word se requiere el paquete 'officer'.",
-        call. = FALSE
-      )
-    }
-
-    # Ancho pensado para página Word estándar (A4 / Letter con márgenes)
-    width_word  <- if (!missing(ancho) && !is.null(ancho)) ancho else 6.5
-    height_word <- if (!missing(alto)  && !is.null(alto))  alto  else 4.5
-
-    doc <- officer::read_docx()
-    doc <- officer::body_add_gg(
-      doc,
-      value  = p,
-      width  = width_word,
-      height = height_word,
-      style  = "centered"  # usa estilo de párrafo centrado de Word
-    )
-    print(doc, target = path_salida)
-
-    return(invisible(p))
+    stop("Debe especificar `path_salida` cuando `exportar` no es 'rplot'.", call. = FALSE)
   }
 
   if (exportar == "png") {
     ggplot2::ggsave(
       filename = path_salida,
-      plot     = p,
+      plot     = p_final,
       width    = ancho,
       height   = alto,
-      dpi      = dpi
+      dpi      = dpi,
+      bg       = if (is.na(color_fondo)) "transparent" else color_fondo
     )
-    return(invisible(p))
+    return(invisible(p_final))
+  }
+
+  if (exportar == "word") {
+    if (!requireNamespace("officer", quietly = TRUE)) stop("Para Word se requiere 'officer'.", call. = FALSE)
+    if (!requireNamespace("rvg", quietly = TRUE))     stop("Para Word se requiere 'rvg'.", call. = FALSE)
+    doc <- officer::read_docx()
+    doc <- officer::body_add_par(doc, value = "", style = "Normal")
+    doc <- officer::body_add_dml(doc, value = rvg::dml(ggobj = p_final), width = ancho, height = alto)
+    print(doc, target = path_salida)
+    return(invisible(p_final))
   }
 
   if (exportar == "ppt") {
-    if (!requireNamespace("officer", quietly = TRUE) ||
-        !requireNamespace("rvg", quietly = TRUE)) {
-      stop(
-        "Para exportar a PPT se requieren los paquetes 'officer' y 'rvg'.",
-        call. = FALSE
-      )
+    if (!requireNamespace("officer", quietly = TRUE) || !requireNamespace("rvg", quietly = TRUE)) {
+      stop("Para PPT se requieren 'officer' y 'rvg'.", call. = FALSE)
     }
-
     doc <- officer::read_pptx()
     doc <- officer::add_slide(doc, layout = "Blank", master = "Office Theme")
     doc <- officer::ph_with(
       doc,
-      rvg::dml(ggobj = p),
+      value    = rvg::dml(ggobj = p_final, bg = "transparent"),
       location = officer::ph_location_fullsize()
     )
     print(doc, target = path_salida)
-
-    return(invisible(p))
+    return(invisible(p_final))
   }
 
-  p
+  p_final
 }

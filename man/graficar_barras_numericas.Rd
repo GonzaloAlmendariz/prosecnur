@@ -2,7 +2,7 @@
 % Please edit documentation in R/graficar_barras_medias.R
 \name{graficar_barras_numericas}
 \alias{graficar_barras_numericas}
-\title{Graficar barras agrupadas de valores numéricos por categoría}
+\title{Graficar barras con valores numéricos por categoría}
 \usage{
 graficar_barras_numericas(
   data,
@@ -10,7 +10,7 @@ graficar_barras_numericas(
   var_n = NULL,
   vars_valor,
   etiquetas_series,
-  orientacion = c("horizontal", "vertical"),
+  orientacion = c("vertical", "horizontal"),
   formato_valor = c("numero", "moneda"),
   decimales = 1,
   simbolo_moneda = "S/",
@@ -20,9 +20,10 @@ graficar_barras_numericas(
   mostrar_valores = TRUE,
   umbral_etiqueta = 0.03,
   umbral_interno = 0.15,
-  mostrar_barra_extra = FALSE,
-  prefijo_barra_extra = "N=",
-  titulo_barra_extra = NULL,
+  mostrar_n_sobre_barras = FALSE,
+  prefijo_n_sobre_barras = "N = ",
+  size_n_sobre_barras = 2.8,
+  color_n_sobre_barras = "#4D4D4D",
   titulo = NULL,
   subtitulo = NULL,
   nota_pie = NULL,
@@ -38,8 +39,6 @@ graficar_barras_numericas(
   size_leyenda = 8,
   color_texto_barras = "#000000",
   size_texto_barras = 3,
-  color_barra_extra = "#000000",
-  size_barra_extra = 3,
   color_ejes = "#000000",
   size_ejes = 9,
   color_fondo = NA,
@@ -49,6 +48,15 @@ graficar_barras_numericas(
   invertir_leyenda = FALSE,
   invertir_barras = FALSE,
   textos_negrita = NULL,
+  usar_canvas = TRUE,
+  canvas_h_title = 0.13,
+  canvas_h_legend = 0.12,
+  canvas_h_caption = 0.06,
+  canvas_pad_top = 0.01,
+  mostrar_eje_y = TRUE,
+  debug_ph_bordes = FALSE,
+  debug_color_borde = "#8A2BE2",
+  debug_lwd = 2,
   exportar = c("rplot", "png", "ppt", "word"),
   path_salida = NULL,
   ancho = 10,
@@ -58,167 +66,158 @@ graficar_barras_numericas(
 )
 }
 \arguments{
-\item{data}{Data frame en formato ancho que contiene la categoría, la base N
-(opcional) y las columnas de valores numéricos.}
+\item{data}{\code{data.frame} o \code{tibble} con las columnas indicadas en \code{var_categoria}
+y \code{vars_valor}. Si se desea mostrar la base sobre las barras, debe incluir la
+columna indicada en \code{var_n}.}
 
-\item{var_categoria}{Nombre (string) de la columna que define cada categoría
-en el eje (por ejemplo, \code{"servicio"} o \code{"condicion"}).}
+\item{var_categoria}{Nombre (string) de la columna que define las categorías.}
 
-\item{var_n}{Nombre (string) de la columna con el N total por categoría.
-Se usa para mostrar una etiqueta adicional al extremo derecho de las barras
-(por ejemplo \code{"N=50"}). Si es \code{NULL}, no se muestra la barra extra.}
+\item{var_n}{Nombre (string) de una columna con la base por categoría (por ejemplo, \code{N}).
+Es opcional y solo se utiliza si \code{mostrar_n_sobre_barras = TRUE}.}
 
-\item{vars_valor}{Vector de nombres de columnas con los valores numéricos
-que se desean comparar como series agrupadas (por ejemplo,
-\code{c("promedio_total", "promedio_consulta")}).}
+\item{vars_valor}{Vector de strings con los nombres de las columnas numéricas a graficar
+(una por serie).}
 
-\item{etiquetas_series}{Vector de caracteres con nombre (named) que asigna
-etiquetas legibles a las columnas de \code{vars_valor}. Los nombres deben
-coincidir exactamente con \code{vars_valor}; los valores se usan en la
-leyenda.}
+\item{etiquetas_series}{Vector \strong{nombrado} para renombrar series en la leyenda.
+Los \code{names(etiquetas_series)} deben coincidir con \code{vars_valor} y los valores son
+las etiquetas que se mostrarán.}
 
-\item{orientacion}{Orientación de las barras: \code{"horizontal"} (por
-defecto) o \code{"vertical"}. En horizontal las categorías se muestran en
-el eje Y; en vertical, en el eje X.}
+\item{orientacion}{Orientación del gráfico: \code{"vertical"} o \code{"horizontal"}.}
 
-\item{formato_valor}{Formato de las etiquetas de valor:
-\code{"numero"} o \code{"moneda"} (por ejemplo, S/).}
+\item{formato_valor}{Formato de las etiquetas de valor: \code{"numero"} o \code{"moneda"}.}
 
-\item{decimales}{Número de decimales a mostrar en las etiquetas.}
+\item{decimales}{Número de decimales a mostrar.}
 
-\item{simbolo_moneda}{Símbolo de moneda a anteponer cuando
-\code{formato_valor = "moneda"}.}
+\item{simbolo_moneda}{Símbolo de moneda cuando \code{formato_valor = "moneda"}.}
 
-\item{separador_miles}{Separador de miles para el formato numérico/moneda.}
+\item{separador_miles}{Separador de miles para el formateo numérico.}
 
-\item{separador_decimales}{Separador de decimales para el formato
-numérico/moneda.}
+\item{separador_decimales}{Separador decimal para el formateo numérico.}
 
-\item{colores_series}{Vector de colores HEX con nombre (opcional) para las
-series, usando como nombres las etiquetas de \code{etiquetas_series}. Si
-se omite, \pkg{ggplot2} asignará colores por defecto.}
+\item{colores_series}{Vector nombrado de colores por serie (opcional). Los nombres deben
+corresponder a las etiquetas finales (las de \code{etiquetas_series}).}
 
-\item{mostrar_valores}{Lógico; si \code{TRUE}, muestra las etiquetas de
-valor para cada barra.}
+\item{mostrar_valores}{Si \code{TRUE}, agrega etiquetas con el valor de cada barra.}
 
-\item{umbral_etiqueta}{Mínimo valor (en escala original) para mostrar
-etiquetas. Debajo de este umbral, el texto se oculta.}
+\item{umbral_etiqueta}{Umbral mínimo para etiquetar (en la misma escala de \code{vars_valor}).
+Valores menores se omiten.}
 
-\item{umbral_interno}{Umbral (en escala original) para decidir si la
-etiqueta se muestra dentro de la barra (centrada) o justo al final hacia
-la derecha. Valores mayores o iguales a \code{umbral_interno} se dibujan
-dentro de la barra; valores entre \code{umbral_etiqueta} y
-\code{umbral_interno} se dibujan fuera.}
+\item{umbral_interno}{Umbral para decidir la ubicación de la etiqueta: valores por encima
+se colocan dentro de la barra; por debajo se colocan afuera.}
 
-\item{mostrar_barra_extra}{Lógico; si \code{TRUE} y \code{var_n} no es
-\code{NULL}, agrega una "barra extra" de texto al extremo derecho de cada
-categoría (típicamente el N, por ejemplo \code{"N=50"}).}
+\item{mostrar_n_sobre_barras}{Si \code{TRUE}, dibuja la base (\code{var_n}) encima de cada barra.
+Requiere \code{var_n}.}
 
-\item{prefijo_barra_extra}{Texto añadido antes del valor mostrado en la
-barra extra (por defecto \code{"N="}).}
+\item{prefijo_n_sobre_barras}{Prefijo para el texto de la base (por ejemplo \code{"N = "}).}
 
-\item{titulo_barra_extra}{Texto que se coloca como encabezado encima de la
-columna de barra extra (por ejemplo, \code{"Total"}). Si es \code{NULL}, no se
-agrega encabezado.}
+\item{size_n_sobre_barras}{Tamaño del texto de la base.}
 
-\item{titulo}{Título del gráfico.}
+\item{color_n_sobre_barras}{Color del texto de la base.}
 
-\item{subtitulo}{Subtítulo opcional del gráfico.}
+\item{titulo}{Título del gráfico (opcional).}
 
-\item{nota_pie}{Nota o fuente para colocar en el pie de página del gráfico.}
+\item{subtitulo}{Subtítulo del gráfico (opcional).}
 
-\item{pos_titulo}{Alineación horizontal del título: \code{"centro"},
-\code{"izquierda"} o \code{"derecha"}.}
+\item{nota_pie}{Texto para el pie de página (opcional).}
 
-\item{pos_nota_pie}{Alineación horizontal de la nota al pie (caption):
-\code{"derecha"}, \code{"izquierda"} o \code{"centro"}.}
+\item{pos_titulo}{Alineación del título y subtítulo: \code{"centro"}, \code{"izquierda"} o \code{"derecha"}.}
 
-\item{color_titulo}{Color del título.}
+\item{pos_nota_pie}{Alineación de la nota al pie: \code{"derecha"}, \code{"izquierda"} o \code{"centro"}.}
 
-\item{size_titulo}{Tamaño del título.}
+\item{color_titulo, color_subtitulo, color_nota_pie, color_leyenda}{Colores de textos.}
 
-\item{color_subtitulo}{Color del subtítulo.}
+\item{size_titulo, size_subtitulo, size_nota_pie, size_leyenda}{Tamaños de textos.}
 
-\item{size_subtitulo}{Tamaño del subtítulo.}
+\item{color_texto_barras, size_texto_barras}{Color y tamaño de las etiquetas de valor.}
 
-\item{color_nota_pie}{Color del texto del pie de página.}
+\item{color_ejes, size_ejes}{Color y tamaño de las etiquetas de ejes.}
 
-\item{size_nota_pie}{Tamaño del texto del pie de página.}
+\item{color_fondo}{Color de fondo del gráfico. Por defecto transparente (\code{NA}).}
 
-\item{color_leyenda}{Color del texto de la leyenda.}
+\item{extra_derecha_rel}{Espacio adicional relativo para acomodar etiquetas fuera de las barras.}
 
-\item{size_leyenda}{Tamaño del texto de la leyenda.}
+\item{ancho_max_eje_cat}{Si se define, aplica “wrap” a las etiquetas de categorías usando
+ese ancho (requiere \code{stringr}).}
 
-\item{color_texto_barras}{Color del texto de las etiquetas de valor.}
+\item{mostrar_leyenda}{Si \code{FALSE}, oculta la leyenda.}
 
-\item{size_texto_barras}{Tamaño del texto de las etiquetas de valor.}
+\item{invertir_leyenda}{Si \code{TRUE}, invierte el orden de la leyenda.}
 
-\item{color_barra_extra}{Color del texto de la barra extra (N).}
+\item{invertir_barras}{Si \code{TRUE}, invierte el orden de las categorías.}
 
-\item{size_barra_extra}{Tamaño del texto de la barra extra.}
+\item{textos_negrita}{Vector de palabras clave para aplicar negrita a elementos del gráfico.
+Se reconoce, por ejemplo: \code{"titulo"}, \code{"valores"}, \code{"leyenda"}.}
 
-\item{color_ejes}{Color del texto de las categorías en el eje de categorías.}
+\item{usar_canvas}{Si \code{TRUE}, arma el resultado en cuatro bloques (encabezado, panel,
+leyenda y pie) usando \code{cowplot}.}
 
-\item{size_ejes}{Tamaño del texto de las categorías en el eje de categorías.}
+\item{canvas_h_title}{Altura relativa del bloque de título/subtítulo (0–1).}
 
-\item{color_fondo}{Color de fondo del panel y del plot (por defecto
-\code{NA}, transparente).}
+\item{canvas_h_legend}{Altura relativa del bloque de leyenda (0–1).}
 
-\item{extra_derecha_rel}{Porcentaje adicional de espacio a la derecha,
-relativo a la barra más larga, para ubicar la barra extra (N).}
+\item{canvas_h_caption}{Altura relativa del bloque de nota al pie (0–1).}
 
-\item{ancho_max_eje_cat}{Número aproximado de caracteres por línea para las
-etiquetas de las categorías. Si no es \code{NULL}, se insertan saltos de
-línea automáticos entre palabras usando \pkg{stringr}.}
+\item{canvas_pad_top}{Separación superior adicional (0–1) antes del primer bloque.}
 
-\item{mostrar_leyenda}{Lógico; si \code{FALSE}, oculta la leyenda (útil
-si solo hay una serie).}
+\item{mostrar_eje_y}{Si \code{FALSE} y \code{orientacion = "vertical"}, oculta el eje Y (texto y marcas).}
 
-\item{invertir_leyenda}{Lógico; si \code{TRUE}, invierte el orden de los
-ítems de la leyenda.}
+\item{debug_ph_bordes}{Si \code{TRUE}, dibuja bordes de referencia en los bloques del canvas.}
 
-\item{invertir_barras}{Lógico; si \code{TRUE}, invierte el orden en que las
-categorías aparecen (arriba/abajo en horizontal o izquierda/derecha en
-vertical).}
+\item{debug_color_borde}{Color de esos bordes.}
 
-\item{textos_negrita}{Vector de caracteres que indica qué elementos deben
-mostrarse en negrita. Puede incluir cualquiera de:
-\code{"titulo"}, \code{"valores"}, \code{"leyenda"}, \code{"barra_extra"}.}
+\item{debug_lwd}{Grosor de esos bordes.}
 
-\item{exportar}{Método de salida: \code{"rplot"} (devuelve un objeto
-\code{ggplot}), \code{"png"} (exporta un archivo PNG),
-\code{"ppt"} (exporta una diapositiva PPTX) o \code{"word"} (exporta un
-documento Word con el gráfico incrustado).}
+\item{exportar}{Tipo de salida: \code{"rplot"} devuelve el objeto gráfico; \code{"png"} guarda un PNG;
+\code{"ppt"} agrega una diapositiva a un PPTX; \code{"word"} agrega el gráfico a un DOCX.}
 
-\item{path_salida}{Ruta del archivo a crear cuando \code{exportar} no es
-\code{"rplot"}.}
+\item{path_salida}{Ruta del archivo de salida cuando \code{exportar} no es \code{"rplot"}.}
 
-\item{ancho}{Ancho del gráfico (cuando se exporta a archivo).}
+\item{ancho, alto}{Tamaño del gráfico (en pulgadas) al exportar.}
 
-\item{alto}{Alto del gráfico (cuando se exporta a archivo).}
+\item{alto_por_categoria}{Altura sugerida por categoría (en pulgadas) para estimar el alto.}
 
-\item{alto_por_categoria}{Alto (en pulgadas) a asignar por categoría en el
-área de barras cuando no se especifica \code{alto}. Sobre ese alto se suma
-automáticamente un bloque fijo para la leyenda (si \code{mostrar_leyenda})
-y otro más pequeño para el caption (si existe), y luego se acota entre un
-mínimo y un máximo razonables para mantener la consistencia visual.}
-
-\item{dpi}{Resolución en puntos por pulgada (solo para PNG).}
+\item{dpi}{Resolución (DPI) al exportar PNG.}
 }
 \value{
-Un objeto \code{ggplot} si \code{exportar = "rplot"}. De forma
-invisible, el gráfico exportado si se utiliza \code{"png"}, \code{"ppt"}
-o \code{"word"}.
+Si \code{exportar = "rplot"}, devuelve un objeto gráfico (\code{ggplot} o un objeto armado con
+\code{cowplot} cuando \code{usar_canvas = TRUE}). En otros casos, exporta a archivo y devuelve el gráfico
+de forma invisible.
 }
 \description{
-Genera un gráfico de barras agrupadas donde cada categoría (por ejemplo,
-servicios, enfermedades, regiones) se muestra en el eje de categorías y,
-para cada una, se comparan una o más medidas numéricas (por ejemplo,
-"Tarifa promedio", "Tarifa mínima"), diferenciadas por color y con
-leyenda inferior.
+Construye un gráfico de \strong{barras} para comparar una o más series de valores
+numéricos dentro de cada categoría (por ejemplo, promedios por distrito,
+montos por servicio o indicadores por grupo).
 }
 \details{
-La función está pensada para usarse directamente con tablas de indicadores
-ya calculadas (formato ancho), sin necesidad de reestructurar los datos
-manualmente.
+La función recibe una tabla en formato ancho: una columna con la categoría y
+una o varias columnas con los valores a graficar. Internamente, los datos se
+pasan a formato largo para dibujar barras agrupadas (una barra por serie dentro
+de cada categoría). De forma opcional, se puede incluir una columna con la base
+(\code{N}) para mostrarla encima de las barras.
+
+Para mejorar el control del diseño, se puede activar \code{usar_canvas = TRUE}, que
+separa el resultado en cuatro bloques: encabezado (título/subtítulo), panel del
+gráfico, leyenda y nota al pie. También existe un modo de depuración con bordes
+(\code{debug_ph_bordes}) para revisar visualmente la distribución de estos bloques.
+}
+\examples{
+library(tibble)
+df <- tibble(
+  categoria = c("A", "B", "C"),
+  N = c(120, 95, 80),
+  v1 = c(10.5, 12.3, 9.8),
+  v2 = c(8.2,  11.1, 10.0)
+)
+
+graficar_barras_numericas(
+  data = df,
+  var_categoria = "categoria",
+  var_n = "N",
+  vars_valor = c("v1", "v2"),
+  etiquetas_series = c(v1 = "Serie 1", v2 = "Serie 2"),
+  titulo = "Ejemplo",
+  subtitulo = "Barras numéricas",
+  mostrar_n_sobre_barras = TRUE
+)
+
 }
