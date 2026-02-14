@@ -276,11 +276,21 @@ split_sm_tokens <- function(x) {
 .resumen_numerico_w <- function(x, w, probs = c(.25, .5, .75), digits = 1) {
   x <- suppressWarnings(as.numeric(x))
   w <- suppressWarnings(as.numeric(w))
+  labs <- c(
+    "Casos válidos",
+    "Promedio",
+    "Desviación estándar",
+    "Mínimo",
+    "Percentil 25",
+    "Mediana (Percentil 50)",
+    "Percentil 75",
+    "Máximo"
+  )
 
   idx <- is.finite(x) & !is.na(x) & is.finite(w) & !is.na(w) & w > 0
   if (!any(idx)) {
     return(tibble::tibble(
-      estadistico = c("N válido", "Media", "Desv. estándar", "Mínimo", "P25", "Mediana", "P75", "Máximo"),
+      estadistico = labs,
       valor = c(0, rep(NA_real_, 7))
     ))
   }
@@ -288,15 +298,12 @@ split_sm_tokens <- function(x) {
   x <- x[idx]; w <- w[idx]
   n_val <- length(x)
 
-  # Media ponderada
   mu <- stats::weighted.mean(x, w, na.rm = TRUE)
 
-  # Varianza ponderada (tipo “frecuencia”; estable y suficiente para reporte)
   wsum <- sum(w)
   var_w <- if (wsum > 0) sum(w * (x - mu)^2) / wsum else NA_real_
   sd_w  <- sqrt(var_w)
 
-  # Cuantiles ponderados (simple, robusto; sin depender de paquetes extra)
   ord <- order(x)
   x2 <- x[ord]; w2 <- w[ord]
   cw <- cumsum(w2) / sum(w2)
@@ -308,8 +315,8 @@ split_sm_tokens <- function(x) {
 
   q25 <- wq(probs[1]); q50 <- wq(probs[2]); q75 <- wq(probs[3])
 
-  out <- tibble::tibble(
-    estadistico = c("N válido", "Media", "Desv. estándar", "Mínimo", "P25", "Mediana", "P75", "Máximo"),
+  tibble::tibble(
+    estadistico = labs,
     valor = c(
       n_val,
       round(mu, digits),
@@ -321,8 +328,6 @@ split_sm_tokens <- function(x) {
       round(max(x2), digits)
     )
   )
-
-  out
 }
 
 #' @noRd
