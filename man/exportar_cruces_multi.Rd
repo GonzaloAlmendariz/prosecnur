@@ -20,44 +20,17 @@ exportar_cruces_multi(
   opciones_excluir = NULL,
   show_sig = TRUE,
   alpha = 0.05,
-  codigos_solo_si_presentes = NULL
+  codigos_solo_si_presentes = NULL,
+  numericas = NULL,
+  digits = 1
 )
 }
 \arguments{
-\item{data}{Base de datos ya adaptada para reporte.}
+\item{numericas}{Vector opcional de variables a tratar como numéricas
+(tabla de resúmenes por estrato + total).}
 
-\item{dic_vars}{Tibble con variables y labels (name, label).}
-
-\item{SECCIONES}{Lista nombrada con vectores de nombres de variables a
-cruzar por filas.}
-
-\item{CRUZAR_CON}{Vector de nombres de variables por columnas (estratos).}
-
-\item{labels_override}{Lista nombrada opcional para sobrescribir labels.}
-
-\item{path_xlsx}{Ruta al archivo .xlsx de salida.}
-
-\item{hoja}{Nombre de la hoja en el libro.}
-
-\item{fuente}{Texto de fuente para el pie de cada tabla.}
-
-\item{survey}{Hoja survey del instrumento.}
-
-\item{sm_vars_force}{Vector de variables a tratar como select_multiple.}
-
-\item{weight_col}{Nombre de la variable de pesos.}
-
-\item{orders_list}{Lista de órdenes/códigos/labels por variable o list_name.}
-
-\item{opciones_excluir}{Vector de labels de opciones a excluir (no respuesta).}
-
-\item{show_sig}{Lógico; si TRUE, se generan tablas de letras de significancia.}
-
-\item{alpha}{Nivel de significancia para las pruebas z (Bonferroni).}
-
-\item{codigos_solo_si_presentes}{Vector opcional de códigos (ej. 96:99) que
-solo se mostrarán en las tablas si tienen al menos un caso en la variable.
-Si es NULL, el comportamiento es idéntico al actual.}
+\item{digits}{Número de decimales para resúmenes numéricos.
+... (resto igual)}
 }
 \description{
 Exportar tablas de cruces múltiples a Excel

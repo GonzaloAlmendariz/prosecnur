@@ -1,4 +1,11 @@
 # =============================================================================
+# CRUCES (CATEGÓRICOS + NUMÉRICOS) — MISMO REPORTE, NUEVA INTEGRACIÓN
+# - Mantiene tus encabezados (3 niveles) tal cual para categóricos
+# - Agrega soporte de cruces NUMÉRICOS vía argumento `numericas`
+#   (tabla tipo SPSS: N, media, sd, min, p25, mediana, p75, max) por estrato + total
+# =============================================================================
+
+# =============================================================================
 # Estilos para cruces
 # =============================================================================
 
@@ -55,6 +62,14 @@ mk_styles_cruces <- function() {
     body_int = openxlsx::createStyle(
       fontSize = 10,
       numFmt   = "#,##0",
+      halign   = "right",
+      valign   = "center",
+      fontName = "Arial"
+    ),
+
+    body_num = openxlsx::createStyle(
+      fontSize = 10,
+      numFmt   = "#,##0.0",
       halign   = "right",
       valign   = "center",
       fontName = "Arial"
@@ -172,6 +187,18 @@ label_variable <- function(var, dic_vars = NULL, labels_override = NULL, data = 
     if (length(lab) && !all(is.na(lab))) return(as.character(lab[1]))
   }
   as.character(var)
+}
+
+.strip_prefijo_bloque <- function(estr_labels, s_lbl) {
+  if (!length(estr_labels)) return(estr_labels)
+  pref <- paste0(trimws(as.character(s_lbl)), ":")
+  labs <- trimws(as.character(estr_labels))
+
+  # solo limpiar si TODOS vienen con el mismo prefijo
+  if (all(startsWith(labs, pref))) {
+    labs <- sub(paste0("^", stringr::fixed(pref), "\\s*"), "", labs)
+  }
+  labs
 }
 
 # =============================================================================
@@ -343,6 +370,258 @@ denominador_validos <- function(data,
 }
 
 # =============================================================================
+# NUEVO: Cruces numéricos (resúmenes ponderados por estrato)
+# =============================================================================
+
+.resumen_numerico_w_mask <- function(x, w, mask,
+                                     probs = c(.25, .5, .75),
+                                     digits = 1) {
+  x <- suppressWarnings(as.numeric(x))
+  w <- suppressWarnings(as.numeric(w))
+  mask <- as.logical(mask)
+
+  idx <- mask & is.finite(x) & !is.na(x) & is.finite(w) & !is.na(w) & w > 0
+  if (!any(idx)) {
+    return(c(
+      N = 0,
+      Media = NA_real_, SD = NA_real_,
+      Min = NA_real_, P25 = NA_real_, Mediana = NA_real_, P75 = NA_real_, Max = NA_real_
+    ))
+  }
+
+  x <- x[idx]; w <- w[idx]
+  n_val <- length(x)
+
+  mu <- stats::weighted.mean(x, w, na.rm = TRUE)
+
+  wsum <- sum(w)
+  var_w <- if (wsum > 0) sum(w * (x - mu)^2) / wsum else NA_real_
+  sd_w  <- sqrt(var_w)
+
+  ord <- order(x)
+  x2 <- x[ord]; w2 <- w[ord]
+  cw <- cumsum(w2) / sum(w2)
+
+  wq <- function(p) {
+    j <- which(cw >= p)[1]
+    if (is.na(j)) NA_real_ else x2[j]
+  }
+
+  c(
+    N       = n_val,
+    Media   = round(mu, digits),
+    SD      = round(sd_w, digits),
+    Min     = round(min(x2), digits),
+    P25     = round(wq(probs[1]), digits),
+    Mediana = round(wq(probs[2]), digits),
+    P75     = round(wq(probs[3]), digits),
+    Max     = round(max(x2), digits)
+  )
+}
+
+write_one_numeric_cross <- function(wb, sheet, data, var, dic_vars,
+                                    CRUZAR_CON,
+                                    labels_override = NULL,
+                                    start_row = 1, start_col = 1,
+                                    fuente = "Pulso PUCP",
+                                    survey = NULL,
+                                    orders_list = NULL,
+                                    weight_col = "peso",
+                                    digits = 1) {
+
+  st   <- mk_styles_cruces()
+  fila <- start_row
+
+  qlab <- label_variable(var, dic_vars, labels_override, data)
+
+  # ---------------------------
+  # Título (merge luego cuando se conozca ncols)
+  # ---------------------------
+  openxlsx::writeData(wb, sheet, qlab, startRow = fila, startCol = start_col, colNames = FALSE)
+  openxlsx::addStyle(wb, sheet, st$q_title, rows = fila, cols = start_col, gridExpand = TRUE)
+  fila <- fila + 1
+
+  w <- get_pesos(data, weight_col)
+
+  estad <- c(
+    "Casos válidos",
+    "Promedio",
+    "Desviación estándar",
+    "Mínimo",
+    "Percentil 25",
+    "Mediana (Percentil 50)",
+    "Percentil 75",
+    "Máximo"
+  )
+
+  # =========================================================
+  # 1) Construir columnas (internas) + headers (2 niveles)
+  # =========================================================
+  blocks   <- list()
+  h1 <- c("")   # fila header 1 (estrato)
+  h2 <- c("")   # fila header 2 (categorías)
+
+  # Columna Total
+  blocks[["Total"]] <- .resumen_numerico_w_mask(
+    x = data[[var]], w = w, mask = rep(TRUE, nrow(data)),
+    digits = digits
+  )
+  h1 <- c(h1, "")
+  h2 <- c(h2, "Total")
+
+  # Cruces
+  for (s in CRUZAR_CON) {
+    if (!(s %in% names(data)) || identical(s, var)) next
+
+    cats_s <- get_categorias(
+      var              = s,
+      data             = data,
+      survey           = survey,
+      orders_list      = orders_list,
+      opciones_excluir = NULL
+    )
+    estr_codes  <- cats_s$codes
+    estr_labels <- cats_s$labels
+    if (!length(estr_codes)) next
+
+    s_lbl <- label_variable(s, dic_vars, labels_override, data)
+
+    # Parche: si labels vienen como "Región: Callao", dejar "Callao"
+    estr_labels <- .strip_prefijo_bloque(estr_labels, s_lbl)
+
+    v_estr <- as.character(data[[s]])
+    usa_codes  <- any(v_estr %in% estr_codes)
+    usa_labels <- any(v_estr %in% estr_labels)
+    keys_vec   <- if (usa_codes || !usa_labels) estr_codes else estr_labels
+
+    # Por cada categoría del estrato, una columna numérica
+    for (j in seq_along(keys_vec)) {
+      key_j  <- keys_vec[j]
+      mask_j <- !is.na(v_estr) & v_estr == key_j
+
+      col_id <- paste0(s, "__", j)  # nombre interno (único)
+      blocks[[col_id]] <- .resumen_numerico_w_mask(
+        x = data[[var]], w = w, mask = mask_j, digits = digits
+      )
+
+      h1 <- c(h1, s_lbl)
+      h2 <- c(h2, as.character(estr_labels[j]))
+    }
+  }
+
+  # =========================================================
+  # 2) Armar tabla final (Estadístico + columnas)
+  # =========================================================
+  make_col <- function(vec) {
+    c(vec["N"], vec["Media"], vec["SD"], vec["Min"], vec["P25"], vec["Mediana"], vec["P75"], vec["Max"])
+  }
+
+  out <- tibble::tibble(Estadístico = estad)
+
+  # Orden columnas: Total primero, luego bloques en el orden construido
+  col_keys <- c("Total", setdiff(names(blocks), "Total"))
+  for (k in col_keys) {
+    out[[k]] <- as.numeric(make_col(blocks[[k]]))
+  }
+
+  ncols_tbl <- ncol(out)
+
+  # ---------------------------
+  # Merge del título y línea superior
+  # ---------------------------
+  openxlsx::mergeCells(wb, sheet,
+                       rows = start_row,
+                       cols = start_col:(start_col + ncols_tbl - 1))
+  openxlsx::addStyle(wb, sheet, st$table_end,
+                     rows = start_row,
+                     cols = start_col:(start_col + ncols_tbl - 1),
+                     gridExpand = TRUE, stack = TRUE)
+
+  # =========================================================
+  # 3) Escribir headers (2 niveles) con merges por estrato
+  # =========================================================
+  openxlsx::writeData(wb, sheet, t(h1), startRow = fila,     startCol = start_col, colNames = FALSE)
+  openxlsx::writeData(wb, sheet, t(h2), startRow = fila + 1, startCol = start_col, colNames = FALSE)
+
+  # Estilos de encabezado
+  openxlsx::addStyle(wb, sheet, st$header_A,
+                     rows = fila:(fila + 1), cols = start_col, gridExpand = TRUE)
+  if (ncols_tbl >= 2) {
+    openxlsx::addStyle(wb, sheet, st$header,
+                       rows = fila:(fila + 1),
+                       cols = (start_col + 1):(start_col + ncols_tbl - 1),
+                       gridExpand = TRUE, stack = TRUE)
+  }
+
+  # Merge runs en header1 (estratos)
+  merge_runs <- function(v) {
+    res <- list(); s <- 1
+    for (i in seq_along(v)) {
+      if (i == length(v) || v[i] != v[i + 1]) {
+        res[[length(res) + 1]] <- c(s, i); s <- i + 1
+      }
+    }
+    res
+  }
+
+  runs1 <- merge_runs(h1)
+  for (r in runs1) {
+    if ((r[2] - r[1] + 1) > 1) {
+      openxlsx::mergeCells(wb, sheet,
+                           rows = fila,
+                           cols = (start_col + r[1] - 1):(start_col + r[2] - 1))
+    }
+  }
+
+  fila <- fila + 2
+
+  # =========================================================
+  # 4) Escribir cuerpo + estilos (N entero, resto numérico)
+  # =========================================================
+  openxlsx::writeData(wb, sheet, out, startRow = fila, startCol = start_col, colNames = FALSE)
+
+  r_ini <- fila
+  r_fin <- fila + nrow(out) - 1
+
+  # Primera columna (texto)
+  openxlsx::addStyle(wb, sheet, st$body_txt,
+                     rows = r_ini:r_fin, cols = start_col, gridExpand = TRUE)
+
+  # Columnas numéricas
+  if (ncols_tbl >= 2) {
+    num_cols <- (start_col + 1):(start_col + ncols_tbl - 1)
+
+    # Fila N válido (primera fila del cuerpo)
+    openxlsx::addStyle(wb, sheet, st$body_int,
+                       rows = r_ini, cols = num_cols, gridExpand = TRUE)
+
+    # Resto de filas (media, sd, cuantiles...)
+    if (nrow(out) > 1) {
+      openxlsx::addStyle(wb, sheet, st$body_num,
+                         rows = (r_ini + 1):r_fin, cols = num_cols, gridExpand = TRUE)
+    }
+  }
+
+  # Línea final de tabla
+  openxlsx::addStyle(wb, sheet, st$table_end,
+                     rows = r_fin, cols = start_col:(start_col + ncols_tbl - 1),
+                     gridExpand = TRUE, stack = TRUE)
+
+  fila <- r_fin + 1
+
+  # Pie
+  pie_txt <- sprintf("Fuente: %s", fuente)
+  openxlsx::writeData(wb, sheet, pie_txt, startRow = fila, startCol = start_col)
+  openxlsx::addStyle(wb, sheet, st$note, rows = fila, cols = start_col, gridExpand = TRUE)
+  openxlsx::mergeCells(wb, sheet, rows = fila, cols = start_col:(start_col + ncols_tbl - 1))
+  openxlsx::addStyle(wb, sheet, st$footer_top,
+                     rows = fila, cols = start_col:(start_col + ncols_tbl - 1),
+                     gridExpand = TRUE, stack = TRUE)
+
+  fila + 2
+}
+
+# =============================================================================
 # Significancia (z + Bonferroni)
 # =============================================================================
 
@@ -443,30 +722,15 @@ nN_para_sig_simple <- function(data,
 }
 
 # =============================================================================
-# Exportador principal: exportar_cruces_multi
+# Exportador principal: exportar_cruces_multi (con `numericas`)
 # =============================================================================
 
 #' Exportar tablas de cruces múltiples a Excel
 #'
-#' @param data Base de datos ya adaptada para reporte.
-#' @param dic_vars Tibble con variables y labels (name, label).
-#' @param SECCIONES Lista nombrada con vectores de nombres de variables a
-#'   cruzar por filas.
-#' @param CRUZAR_CON Vector de nombres de variables por columnas (estratos).
-#' @param labels_override Lista nombrada opcional para sobrescribir labels.
-#' @param path_xlsx Ruta al archivo .xlsx de salida.
-#' @param hoja Nombre de la hoja en el libro.
-#' @param fuente Texto de fuente para el pie de cada tabla.
-#' @param survey Hoja survey del instrumento.
-#' @param sm_vars_force Vector de variables a tratar como select_multiple.
-#' @param weight_col Nombre de la variable de pesos.
-#' @param orders_list Lista de órdenes/códigos/labels por variable o list_name.
-#' @param opciones_excluir Vector de labels de opciones a excluir (no respuesta).
-#' @param show_sig Lógico; si TRUE, se generan tablas de letras de significancia.
-#' @param alpha Nivel de significancia para las pruebas z (Bonferroni).
-#' @param codigos_solo_si_presentes Vector opcional de códigos (ej. 96:99) que
-#'   solo se mostrarán en las tablas si tienen al menos un caso en la variable.
-#'   Si es NULL, el comportamiento es idéntico al actual.
+#' @param numericas Vector opcional de variables a tratar como numéricas
+#'   (tabla de resúmenes por estrato + total).
+#' @param digits Número de decimales para resúmenes numéricos.
+#' ... (resto igual)
 #'
 exportar_cruces_multi <- function(data,
                                   dic_vars,
@@ -483,7 +747,11 @@ exportar_cruces_multi <- function(data,
                                   opciones_excluir = NULL,
                                   show_sig         = TRUE,
                                   alpha            = 0.05,
-                                  codigos_solo_si_presentes = NULL) {
+                                  codigos_solo_si_presentes = NULL,
+                                  numericas        = NULL,
+                                  digits           = 1) {
+
+  numericas <- if (is.null(numericas)) character(0) else as.character(numericas)
 
   # Mantener en SECCIONES variables que existan como columna o tengan dummies
   SECCIONES <- lapply(SECCIONES, function(v) {
@@ -505,7 +773,7 @@ exportar_cruces_multi <- function(data,
   openxlsx::mergeCells(wb, hoja, rows = fila, cols = 1:6)
   fila <- fila + 2
 
-  # helper para merges de encabezado
+  # helper para merges de encabezado (categóricos)
   escribir_encabezado <- function(h1, h2, h3, row0, col0 = 1) {
     ncols <- length(h3)
     if (ncols == 0) return(invisible(NULL))
@@ -514,7 +782,6 @@ exportar_cruces_multi <- function(data,
     openxlsx::writeData(wb, hoja, t(h2), startRow = row0 + 1, startCol = col0, colNames = FALSE)
     openxlsx::writeData(wb, hoja, t(h3), startRow = row0 + 2, startCol = col0, colNames = FALSE)
 
-    # columna A con header_A, resto con header
     if (ncols >= 1) {
       openxlsx::addStyle(wb, hoja, st$header_A,
                          rows = row0:(row0 + 2), cols = col0, gridExpand = TRUE)
@@ -559,7 +826,6 @@ exportar_cruces_multi <- function(data,
     vars_sec <- SECCIONES[[sec]]
     if (!length(vars_sec)) next
 
-    # título sección
     openxlsx::writeData(wb, hoja, toupper(sec), startRow = fila, startCol = 1)
     openxlsx::addStyle(wb, hoja, st$sec_title, rows = fila, cols = 1, gridExpand = TRUE)
     openxlsx::mergeCells(wb, hoja, rows = fila, cols = 1:3)
@@ -568,6 +834,33 @@ exportar_cruces_multi <- function(data,
     # ---------- loop por variable de la sección ----------
     for (var in vars_sec) {
 
+      # ==========================
+      # NUEVO: si es numérica → tabla de resúmenes por estrato
+      # ==========================
+      if (var %in% numericas) {
+        fila <- write_one_numeric_cross(
+          wb            = wb,
+          sheet         = hoja,
+          data          = data,
+          var           = var,
+          dic_vars      = dic_vars,
+          CRUZAR_CON    = CRUZAR_CON,
+          labels_override = labels_override,
+          start_row     = fila,
+          start_col     = 1,
+          fuente        = fuente,
+          survey        = survey,
+          orders_list   = orders_list,
+          weight_col    = weight_col,
+          digits        = digits
+        )
+        fila <- fila + 1
+        next
+      }
+
+      # ==========================
+      # CATEGÓRICOS (tu flujo original)
+      # ==========================
       tp <- tipo_pregunta(var, survey = survey, sm_vars_force = sm_vars_force, data = data)
       cats_var <- get_categorias(
         var              = var,
@@ -580,9 +873,28 @@ exportar_cruces_multi <- function(data,
       opciones  <- cats_var$labels
       codes_row <- cats_var$codes
 
+      # ------------------------------------------------------------
+      # Parche robusto: eliminar "Total" como categoría (labels o codes)
+      # (case-insensitive + trim) + quitar vacíos
+      # ------------------------------------------------------------
+      op_chr <- trimws(tolower(as.character(opciones)))
+      cd_chr <- trimws(tolower(as.character(codes_row)))
+
+      drop_total <- (op_chr == "total") | (cd_chr == "total") | is.na(op_chr) | (op_chr == "")
+
+      if (any(drop_total)) {
+        opciones  <- opciones[!drop_total]
+        codes_row <- codes_row[!drop_total]
+      }
+
+      # (opcional recomendado) evitar duplicados de labels tras mapeos
+      keep <- !duplicated(trimws(tolower(as.character(opciones))))
+      opciones  <- opciones[keep]
+      codes_row <- codes_row[keep]
+
       qlab <- label_variable(var, dic_vars, labels_override, data)
 
-      # --- NUEVO: filtrar códigos condicionales sin casos en toda la base ---
+      # --- filtrar códigos condicionales sin casos ---
       if (!is.null(codigos_solo_si_presentes) && length(codes_row)) {
         cod_cond <- as.character(codigos_solo_si_presentes)
 
@@ -602,7 +914,6 @@ exportar_cruces_multi <- function(data,
           opciones  <- opciones[!to_drop]
         }
       }
-      # ----------------------------------------------------------------------
 
       if (!length(opciones)) {
         openxlsx::writeData(wb, hoja, qlab, startRow = fila, startCol = 1)
@@ -615,7 +926,6 @@ exportar_cruces_multi <- function(data,
         next
       }
 
-      # cuerpo base
       cuerpo <- tibble::tibble(Opciones = opciones)
       denom_map        <- list()
       estratos_totales <- list()
@@ -662,9 +972,15 @@ exportar_cruces_multi <- function(data,
         )
         estr_codes  <- cats_s$codes
         estr_labels <- cats_s$labels
-
         if (!length(estr_codes)) next
 
+        # Etiqueta del estrato (ej. "Región")
+        s_lbl <- label_variable(s, dic_vars, labels_override, data)
+
+        # Parche: si viene como "Región: Callao", dejar solo "Callao"
+        estr_labels <- .strip_prefijo_bloque(estr_labels, s_lbl)
+
+        # Guardar ya limpio
         estratos_totales[[s]] <- list(codes = estr_codes, labels = estr_labels)
 
         # Valores reales en la data para el estrato
@@ -674,10 +990,6 @@ exportar_cruces_multi <- function(data,
         usa_codes  <- any(v_estr %in% estr_codes)
         usa_labels <- any(v_estr %in% estr_labels)
 
-        # Clave con la que vamos a comparar en la data:
-        #   - si la data contiene los códigos, usamos códigos
-        #   - si no, pero contiene labels, usamos labels
-        #   - si ambos, priorizamos códigos (caso haven/labelled)
         keys_vec <- if (usa_codes || !usa_labels) estr_codes else estr_labels
 
         bloques <- lapply(seq_along(keys_vec), function(j) {
@@ -713,9 +1025,10 @@ exportar_cruces_multi <- function(data,
           list(df = dfb, N = N)
         })
 
-        cols_df   <- dplyr::bind_cols(lapply(bloques, `[[`, "df"))
+        cols_df    <- dplyr::bind_cols(lapply(bloques, `[[`, "df"))
         idx_n_cols <- grep("__n$", names(cols_df))
         Ns         <- vapply(bloques, `[[`, numeric(1), "N")
+
         if (length(idx_n_cols) == length(Ns) && length(Ns) > 0) {
           for (k in seq_along(idx_n_cols)) {
             denom_map[[names(cols_df)[idx_n_cols[k]]]] <- Ns[k]
@@ -762,14 +1075,12 @@ exportar_cruces_multi <- function(data,
       hdr2_full <- rep("", ncols_total)
       hdr3_full <- rep("", ncols_total)
 
-      # Columna A vacía en las tres filas
       hdr1_full[1] <- ""
       hdr2_full[1] <- ""
       hdr3_full[1] <- ""
 
       col_ptr <- 2L
 
-      # Bloque Total: fila 2 "Total", fila 3 "n", "%"
       if (any(names(cuerpo) == "Total__n")) {
         hdr1_full[col_ptr:(col_ptr + 1)] <- ""
         hdr2_full[col_ptr:(col_ptr + 1)] <- "Total"
@@ -777,7 +1088,6 @@ exportar_cruces_multi <- function(data,
         col_ptr <- col_ptr + 2L
       }
 
-      # Bloques por variables de cruce
       if (length(estratos_totales)) {
         for (s in CRUZAR_CON) {
           info_s <- estratos_totales[[s]]
@@ -867,7 +1177,6 @@ exportar_cruces_multi <- function(data,
       openxlsx::addStyle(wb, hoja, st$note, rows = fila, cols = 1, gridExpand = TRUE)
       openxlsx::mergeCells(wb, hoja, rows = fila, cols = 1:ncol_tbl)
 
-      # borde superior para cerrar la tabla justo sobre el pie de página
       openxlsx::addStyle(
         wb, hoja, st$footer_top,
         rows = fila, cols = 1:ncol_tbl,
@@ -881,7 +1190,7 @@ exportar_cruces_multi <- function(data,
 
         letras_map_text <- c()
         bloques_sig     <- list()
-        sig_h1          <- c("")  # col A vacía
+        sig_h1          <- c("")
         sig_h2          <- c("")
 
         for (s in CRUZAR_CON) {
@@ -893,7 +1202,6 @@ exportar_cruces_multi <- function(data,
 
           s_lbl <- label_variable(s, dic_vars, labels_override, data)
 
-          # encabezados
           sig_h1 <- c(sig_h1, rep(s_lbl, length(estr_labels)))
           col_letters <- LETTERS[seq_along(estr_labels)]
           sig_h2 <- c(sig_h2, paste0(estr_labels, " (", col_letters, ")"))
@@ -906,7 +1214,6 @@ exportar_cruces_multi <- function(data,
             )
           )
 
-          # matriz n/N para esta variable de cruce
           nn <- nN_para_sig_simple(
             data            = data,
             var             = var,
@@ -931,12 +1238,10 @@ exportar_cruces_multi <- function(data,
 
         if (length(bloques_sig)) {
 
-          # ---- título de la tabla de letras ----
           t_sig <- "Comparaciones de proporciones de columna"
           openxlsx::writeData(wb, hoja, t_sig, startRow = fila, startCol = 1)
           openxlsx::addStyle(wb, hoja, st$q_title, rows = fila, cols = 1, gridExpand = TRUE)
 
-          # número real de columnas en la tabla de letras
           ncols_sig <- length(sig_h1)
           if (ncols_sig < 2) ncols_sig <- 2
 
@@ -946,7 +1251,6 @@ exportar_cruces_multi <- function(data,
                              gridExpand = TRUE, stack = TRUE)
           fila <- fila + 1
 
-          # ---- encabezados (2 filas) ----
           openxlsx::writeData(wb, hoja, t(sig_h1),
                               startRow = fila, startCol = 1, colNames = FALSE)
           openxlsx::writeData(wb, hoja, t(sig_h2),
@@ -956,7 +1260,6 @@ exportar_cruces_multi <- function(data,
                              cols  = 1:ncols_sig,
                              gridExpand = TRUE)
 
-          # merges por bloques de variable (fila 1)
           merge_runs <- function(v) {
             if (!length(v)) return(list())
             res <- list(); s <- 1
@@ -976,14 +1279,12 @@ exportar_cruces_multi <- function(data,
 
           fila_datos <- fila + 2
 
-          # ---- filas de opciones ----
           openxlsx::writeData(wb, hoja, opciones,
                               startRow = fila_datos, startCol = 1, colNames = FALSE)
           openxlsx::addStyle(wb, hoja, st$cell,
                              rows = fila_datos:(fila_datos + length(opciones) - 1),
                              cols  = 1, gridExpand = TRUE)
 
-          # ---- letras por columna ----
           col_cursor <- 2
           for (s in CRUZAR_CON) {
             bl <- bloques_sig[[s]]
@@ -994,7 +1295,7 @@ exportar_cruces_multi <- function(data,
               col_sig <- logical(length(opciones))
 
               rr <- match(opciones, bl$opciones)
-              cc <- j  # columna j en n_mat/letras
+              cc <- j
 
               ok <- which(!is.na(rr))
               if (length(ok)) {
@@ -1026,7 +1327,6 @@ exportar_cruces_multi <- function(data,
             }
           }
 
-          # ---- pie de la tabla de letras ----
           pie_sig <- paste0(
             "Las letras indican columnas cuya proporción es significativamente mayor ",
             "que la proporción de la columna marcada por esa letra, según pruebas z ",
@@ -1045,7 +1345,6 @@ exportar_cruces_multi <- function(data,
                              rows = fila_note, cols = 1, gridExpand = TRUE)
           openxlsx::mergeCells(wb, hoja, rows = fila_note, cols = 1:(col_cursor - 1))
 
-          # borde superior para cerrar la tabla de letras justo sobre el pie
           openxlsx::addStyle(
             wb, hoja, st$footer_top,
             rows = fila_note, cols = 1:(col_cursor - 1),
@@ -1078,42 +1377,68 @@ exportar_cruces_multi <- function(data,
 # reporte_cruces()
 # =============================================================================
 
-#' Generar reporte de cruces en Excel
+#' Generar reporte de cruces (categóricos y numéricos) en Excel
 #'
-#' Envuelve a \code{exportar_cruces_multi()} usando como insumo el objeto de
-#' instrumento devuelto por \code{reporte_instrumento()}, de manera coherente
-#' con \code{reporte_instrumento()}, \code{reporte_data()},
-#' \code{reporte_frecuencias()} y \code{reporte_codebook()}.
+#' Función de alto nivel que envuelve a \code{exportar_cruces_multi()} para
+#' generar un archivo de Excel con tablas de cruces múltiples. Permite
+#' combinar en un mismo reporte:
 #'
-#' @param data Data frame ya adaptado por \code{reporte_data()} (por lo general
-#'   la salida de esa función), que contiene las variables a cruzar y, de ser
-#'   el caso, la variable de pesos.
+#' \itemize{
+#'   \item Cruces de variables categóricas (select_one y select_multiple),
+#'   con totales, porcentajes y, opcionalmente, tablas de significancia
+#'   (pruebas z con corrección de Bonferroni).
+#'   \item Cruces de variables numéricas (definidas en \code{numericas}),
+#'   mostrando estadísticos descriptivos por total y por estrato:
+#'   N válido, media, desviación estándar, mínimo, P25, mediana, P75 y máximo.
+#' }
+#'
+#' Esta función está diseñada para trabajar de forma integrada con
+#' \code{reporte_instrumento()} y \code{reporte_data()}, utilizando la
+#' información de \code{$survey} y \code{$orders_list} del instrumento para
+#' recuperar labels, órdenes de categorías y tipos de pregunta.
+#'
+#' @param data Data frame ya adaptado por \code{reporte_data()}, que contiene
+#'   las variables a cruzar y, de ser el caso, la variable de pesos.
 #' @param instrumento Objeto devuelto por \code{reporte_instrumento()}, que
-#'   debe contener al menos \code{$survey} y, cuando sea posible,
-#'   \code{$orders_list}.
-#' @param SECCIONES Lista nombrada que agrupa las variables a cruzar. Cada
-#'   elemento es un vector de nombres de variables que se mostrarán en filas
-#'   bajo el título de la sección.
-#' @param cruces Vector de nombres de variables con las que se cruzarán todas
-#'   las variables de \code{SECCIONES}. Una variable no se cruza consigo misma.
-#' @param path_xlsx Ruta del archivo .xlsx de salida.
-#' @param hoja Nombre de la hoja del libro de Excel.
-#' @param fuente Texto para el pie de las tablas.
+#'   debe contener al menos el elemento \code{$survey} y, cuando esté
+#'   disponible, \code{$orders_list}.
+#' @param SECCIONES Lista nombrada que agrupa las variables a cruzar.
+#'   Cada elemento es un vector de nombres de variables que se mostrarán
+#'   como filas bajo el título de la sección correspondiente.
+#' @param cruces Vector de nombres de variables que se usarán como variables
+#'   de cruce (columnas/estratos). Una variable no se cruza consigo misma.
+#' @param path_xlsx Ruta del archivo \code{.xlsx} de salida.
+#' @param hoja Nombre de la hoja dentro del libro de Excel.
+#' @param fuente Texto que se mostrará como fuente al pie de cada tabla.
 #' @param labels_override Lista nombrada opcional para sobrescribir etiquetas
-#'   de preguntas.
-#' @param sm_vars_force Vector opcional de nombres de variables a tratar como
-#'   \emph{select multiple}.
-#' @param weight_col Nombre de la variable de pesos.
+#'   de preguntas específicas. Los nombres deben coincidir con los nombres
+#'   de las variables.
+#' @param sm_vars_force Vector opcional de nombres de variables que deben
+#'   tratarse explícitamente como \emph{select_multiple}, incluso si el tipo
+#'   no puede detectarse automáticamente desde el instrumento.
+#' @param weight_col Nombre de la variable de pesos. Si no existe o es NULL,
+#'   se asume peso 1 para todos los casos.
 #' @param opciones_excluir Vector de labels de opciones a excluir de las
-#'   tablas (por ejemplo, categorías de no respuesta).
-#' @param show_sig Lógico; si TRUE, muestra tablas de letras de significancia.
-#' @param alpha Nivel de significancia (para pruebas z con corrección de
-#'   Bonferroni).
-#' @param codigos_solo_si_presentes Vector opcional de códigos (ej. 96,97,98,99)
-#'   que solo se mostrarán en las tablas si tienen al menos un caso en la
-#'   variable. Si es NULL, el comportamiento es el mismo de siempre.
+#'   tablas categóricas (por ejemplo, categorías de no respuesta).
+#' @param show_sig Lógico; si \code{TRUE}, genera tablas adicionales con
+#'   letras de significancia (comparaciones de proporciones por columna).
+#' @param alpha Nivel de significancia para las pruebas z con corrección
+#'   de Bonferroni.
+#' @param codigos_solo_si_presentes Vector opcional de códigos (por ejemplo,
+#'   \code{c(96, 97, 98, 99)}) que solo se mostrarán en las tablas si
+#'   presentan al menos un caso en la variable correspondiente.
+#' @param numericas Vector opcional de nombres de variables a tratar como
+#'   numéricas. Estas variables se exportarán como tablas de estadísticos
+#'   descriptivos por total y por estrato, en lugar de tablas de frecuencias.
+#' @param digits Número de decimales a utilizar en los estadísticos
+#'   descriptivos de variables numéricas.
 #'
 #' @return Invisiblemente, la ruta normalizada al archivo de salida.
+#'
+#' @seealso \code{\link{reporte_instrumento}},
+#'   \code{\link{reporte_data}},
+#'   \code{\link{exportar_cruces_multi}}
+#'
 #' @export
 reporte_cruces <- function(
     data,
@@ -1129,7 +1454,9 @@ reporte_cruces <- function(
     opciones_excluir = NULL,
     show_sig         = TRUE,
     alpha            = 0.05,
-    codigos_solo_si_presentes = NULL
+    codigos_solo_si_presentes = NULL,
+    numericas        = NULL,
+    digits           = 1
 ) {
 
   survey <- NULL
@@ -1149,21 +1476,23 @@ reporte_cruces <- function(
   }
 
   exportar_cruces_multi(
-    data                     = data,
-    dic_vars                 = dic_vars,
-    SECCIONES                = SECCIONES,
-    CRUZAR_CON               = cruces,
-    labels_override          = labels_override,
-    path_xlsx                = path_xlsx,
-    hoja                     = hoja,
-    fuente                   = fuente,
-    survey                   = survey,
-    sm_vars_force            = sm_vars_force,
-    weight_col               = weight_col,
-    orders_list              = orders_list,
-    opciones_excluir         = opciones_excluir,
-    show_sig                 = show_sig,
-    alpha                    = alpha,
-    codigos_solo_si_presentes = codigos_solo_si_presentes
+    data                      = data,
+    dic_vars                  = dic_vars,
+    SECCIONES                 = SECCIONES,
+    CRUZAR_CON                = cruces,
+    labels_override           = labels_override,
+    path_xlsx                 = path_xlsx,
+    hoja                      = hoja,
+    fuente                    = fuente,
+    survey                    = survey,
+    sm_vars_force             = sm_vars_force,
+    weight_col                = weight_col,
+    orders_list               = orders_list,
+    opciones_excluir          = opciones_excluir,
+    show_sig                  = show_sig,
+    alpha                     = alpha,
+    codigos_solo_si_presentes = codigos_solo_si_presentes,
+    numericas                 = numericas,
+    digits                    = digits
   )
 }

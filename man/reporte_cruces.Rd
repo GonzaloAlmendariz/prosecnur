@@ -2,7 +2,7 @@
 % Please edit documentation in R/generalidad_cruces.R
 \name{reporte_cruces}
 \alias{reporte_cruces}
-\title{Generar reporte de cruces en Excel}
+\title{Generar reporte de cruces (categóricos y numéricos) en Excel}
 \usage{
 reporte_cruces(
   data,
@@ -18,57 +18,88 @@ reporte_cruces(
   opciones_excluir = NULL,
   show_sig = TRUE,
   alpha = 0.05,
-  codigos_solo_si_presentes = NULL
+  codigos_solo_si_presentes = NULL,
+  numericas = NULL,
+  digits = 1
 )
 }
 \arguments{
-\item{data}{Data frame ya adaptado por \code{reporte_data()} (por lo general
-la salida de esa función), que contiene las variables a cruzar y, de ser
-el caso, la variable de pesos.}
+\item{data}{Data frame ya adaptado por \code{reporte_data()}, que contiene
+las variables a cruzar y, de ser el caso, la variable de pesos.}
 
 \item{instrumento}{Objeto devuelto por \code{reporte_instrumento()}, que
-debe contener al menos \code{$survey} y, cuando sea posible,
-\code{$orders_list}.}
+debe contener al menos el elemento \code{$survey} y, cuando esté
+disponible, \code{$orders_list}.}
 
-\item{SECCIONES}{Lista nombrada que agrupa las variables a cruzar. Cada
-elemento es un vector de nombres de variables que se mostrarán en filas
-bajo el título de la sección.}
+\item{SECCIONES}{Lista nombrada que agrupa las variables a cruzar.
+Cada elemento es un vector de nombres de variables que se mostrarán
+como filas bajo el título de la sección correspondiente.}
 
-\item{cruces}{Vector de nombres de variables con las que se cruzarán todas
-las variables de \code{SECCIONES}. Una variable no se cruza consigo misma.}
+\item{cruces}{Vector de nombres de variables que se usarán como variables
+de cruce (columnas/estratos). Una variable no se cruza consigo misma.}
 
-\item{path_xlsx}{Ruta del archivo .xlsx de salida.}
+\item{path_xlsx}{Ruta del archivo \code{.xlsx} de salida.}
 
-\item{hoja}{Nombre de la hoja del libro de Excel.}
+\item{hoja}{Nombre de la hoja dentro del libro de Excel.}
 
-\item{fuente}{Texto para el pie de las tablas.}
+\item{fuente}{Texto que se mostrará como fuente al pie de cada tabla.}
 
 \item{labels_override}{Lista nombrada opcional para sobrescribir etiquetas
-de preguntas.}
+de preguntas específicas. Los nombres deben coincidir con los nombres
+de las variables.}
 
-\item{sm_vars_force}{Vector opcional de nombres de variables a tratar como
-\emph{select multiple}.}
+\item{sm_vars_force}{Vector opcional de nombres de variables que deben
+tratarse explícitamente como \emph{select_multiple}, incluso si el tipo
+no puede detectarse automáticamente desde el instrumento.}
 
-\item{weight_col}{Nombre de la variable de pesos.}
+\item{weight_col}{Nombre de la variable de pesos. Si no existe o es NULL,
+se asume peso 1 para todos los casos.}
 
 \item{opciones_excluir}{Vector de labels de opciones a excluir de las
-tablas (por ejemplo, categorías de no respuesta).}
+tablas categóricas (por ejemplo, categorías de no respuesta).}
 
-\item{show_sig}{Lógico; si TRUE, muestra tablas de letras de significancia.}
+\item{show_sig}{Lógico; si \code{TRUE}, genera tablas adicionales con
+letras de significancia (comparaciones de proporciones por columna).}
 
-\item{alpha}{Nivel de significancia (para pruebas z con corrección de
-Bonferroni).}
+\item{alpha}{Nivel de significancia para las pruebas z con corrección
+de Bonferroni.}
 
-\item{codigos_solo_si_presentes}{Vector opcional de códigos (ej. 96,97,98,99)
-que solo se mostrarán en las tablas si tienen al menos un caso en la
-variable. Si es NULL, el comportamiento es el mismo de siempre.}
+\item{codigos_solo_si_presentes}{Vector opcional de códigos (por ejemplo,
+\code{c(96, 97, 98, 99)}) que solo se mostrarán en las tablas si
+presentan al menos un caso en la variable correspondiente.}
+
+\item{numericas}{Vector opcional de nombres de variables a tratar como
+numéricas. Estas variables se exportarán como tablas de estadísticos
+descriptivos por total y por estrato, en lugar de tablas de frecuencias.}
+
+\item{digits}{Número de decimales a utilizar en los estadísticos
+descriptivos de variables numéricas.}
 }
 \value{
 Invisiblemente, la ruta normalizada al archivo de salida.
 }
 \description{
-Envuelve a \code{exportar_cruces_multi()} usando como insumo el objeto de
-instrumento devuelto por \code{reporte_instrumento()}, de manera coherente
-con \code{reporte_instrumento()}, \code{reporte_data()},
-\code{reporte_frecuencias()} y \code{reporte_codebook()}.
+Función de alto nivel que envuelve a \code{exportar_cruces_multi()} para
+generar un archivo de Excel con tablas de cruces múltiples. Permite
+combinar en un mismo reporte:
+}
+\details{
+\itemize{
+\item Cruces de variables categóricas (select_one y select_multiple),
+con totales, porcentajes y, opcionalmente, tablas de significancia
+(pruebas z con corrección de Bonferroni).
+\item Cruces de variables numéricas (definidas en \code{numericas}),
+mostrando estadísticos descriptivos por total y por estrato:
+N válido, media, desviación estándar, mínimo, P25, mediana, P75 y máximo.
+}
+
+Esta función está diseñada para trabajar de forma integrada con
+\code{reporte_instrumento()} y \code{reporte_data()}, utilizando la
+información de \code{$survey} y \code{$orders_list} del instrumento para
+recuperar labels, órdenes de categorías y tipos de pregunta.
+}
+\seealso{
+\code{\link{reporte_instrumento}},
+\code{\link{reporte_data}},
+\code{\link{exportar_cruces_multi}}
 }

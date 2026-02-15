@@ -374,7 +374,13 @@ write_one_numeric <- function(wb, sheet, data, var, dic_vars,
   r_fin <- fila + nrow(tabn) - 1
 
   openxlsx::addStyle(wb, sheet, st$body_txt, rows = r_ini:r_fin, cols = start_col, gridExpand = TRUE)
-  openxlsx::addStyle(wb, sheet, st$body_int, rows = r_ini:r_fin, cols = start_col + 1, gridExpand = TRUE)
+  # Casos válidos -> entero
+  openxlsx::addStyle(wb, sheet, st$body_int,
+                     rows = r_ini, cols = start_col + 1, gridExpand = TRUE)
+
+  # Resto -> decimal
+  openxlsx::addStyle(wb, sheet, st$body_num,
+                     rows = (r_ini + 1):r_fin, cols = start_col + 1, gridExpand = TRUE)
 
   fila <- r_fin + 1
 
@@ -670,86 +676,92 @@ freq_table_spss <- function(data, var, survey = NULL, sm_vars_force = NULL,
 mk_styles_spss <- function() {
   list(
     sec_title = openxlsx::createStyle(
-      fontSize     = 18,
-      textDecoration = NULL,
-      halign       = "center",
-      valign       = "center",
-      wrapText     = TRUE,
-      fgFill       = "#FFFFFF",
-      fontColour   = "#000000",
-      fontName     = "Arial"
+      fontSize = 18,
+      halign = "center",
+      valign = "center",
+      wrapText = TRUE,
+      fgFill = "#FFFFFF",
+      fontColour = "#000000",
+      fontName = "Arial"
     ),
     q_title = openxlsx::createStyle(
-      fontSize     = 11,
+      fontSize = 11,
       textDecoration = "italic",
-      halign       = "left",
-      valign       = "center",
-      wrapText     = TRUE,
-      fgFill       = "#FFFFFF",
-      fontColour   = "#000000",
-      fontName     = "Arial"
+      halign = "left",
+      valign = "center",
+      wrapText = TRUE,
+      fgFill = "#FFFFFF",
+      fontColour = "#000000",
+      fontName = "Arial"
     ),
     header = openxlsx::createStyle(
-      fontSize     = 10,
-      textDecoration = NULL,
-      border       = c("top", "bottom"),
-      borderStyle  = "thin",
+      fontSize = 10,
+      border = c("top", "bottom"),
+      borderStyle = "thin",
       borderColour = "#000000",
-      halign       = "center",
-      valign       = "center",
-      fgFill       = "#FFFFFF",
-      fontName     = "Arial"
+      halign = "center",
+      valign = "center",
+      fgFill = "#FFFFFF",
+      fontName = "Arial"
     ),
     body_txt = openxlsx::createStyle(
-      fontSize     = 10,
-      textDecoration = NULL,
-      border       = c(),
-      halign       = "left",
-      valign       = "center",
-      fgFill       = "#FFFFFF",
-      fontName     = "Arial",
-      wrapText     = TRUE
+      fontSize = 10,
+      halign = "left",
+      valign = "center",
+      fgFill = "#FFFFFF",
+      fontName = "Arial",
+      wrapText = TRUE
     ),
+
+    # Conteos (n) -> entero
     body_int = openxlsx::createStyle(
-      fontSize     = 10,
-      textDecoration = NULL,
-      numFmt       = "#,##0",
-      border       = c(),
-      halign       = "right",
-      valign       = "center",
-      fgFill       = "#FFFFFF",
-      fontName     = "Arial"
+      fontSize = 10,
+      numFmt   = "#,##0",
+      halign   = "right",
+      valign   = "center",
+      fgFill   = "#FFFFFF",
+      fontName = "Arial"
     ),
+
+    # >>> CLAVE: numérico mostrado como TEXTO con punto fijo (12.0, 3.4)
+    body_num_txt = openxlsx::createStyle(
+      fontSize = 10,
+      numFmt   = "@",     # texto
+      halign   = "right",
+      valign   = "center",
+      fgFill   = "#FFFFFF",
+      fontName = "Arial"
+    ),
+
     body_pct = openxlsx::createStyle(
-      fontSize     = 10,
-      textDecoration = NULL,
-      numFmt       = "0.0%",
-      border       = c(),
-      halign       = "right",
-      valign       = "center",
-      fgFill       = "#FFFFFF",
-      fontName     = "Arial"
+      fontSize = 10,
+      numFmt   = "0.0%",
+      halign   = "right",
+      valign   = "center",
+      fgFill   = "#FFFFFF",
+      fontName = "Arial"
     ),
+
+    # Total en frecuencias (n) -> entero
     total_row = openxlsx::createStyle(
-      fontSize     = 10,
+      fontSize = 10,
       textDecoration = NULL,
-      numFmt       = "#,##0",
-      halign       = "right",
-      valign       = "center",
-      fgFill       = "#FFFFFF",
-      fontName     = "Arial"
+      numFmt = "#,##0",
+      halign = "right",
+      valign = "center",
+      fgFill = "#FFFFFF",
+      fontName = "Arial"
     ),
     total_label = openxlsx::createStyle(
-      fontSize     = 10,
-      textDecoration = NULL,
-      halign       = "left",
-      valign       = "center",
-      fgFill       = "#FFFFFF",
-      fontName     = "Arial"
+      fontSize = 10,
+      halign = "left",
+      valign = "center",
+      fgFill = "#FFFFFF",
+      fontName = "Arial"
     ),
     table_end = openxlsx::createStyle(
-      border       = c("bottom"),
-      borderStyle  = "thin",
+      border = "bottom",
+      borderStyle = "thin",
       borderColour = "#000000"
     )
   )
@@ -1015,14 +1027,22 @@ mk_styles_spss <- function() {
       fontName = "Arial",
       wrapText = TRUE
     ),
+    # Conteos (n) -> entero
     body_int = openxlsx::createStyle(
       fontSize = 10,
-      textDecoration = NULL,
-      numFmt = "#,##0",
-      border = c(),
-      halign = "right",
-      valign = "center",
-      fgFill = "#FFFFFF",
+      numFmt   = "#,##0",
+      halign   = "right",
+      valign   = "center",
+      fgFill   = "#FFFFFF",
+      fontName = "Arial"
+    ),
+    # Numéricos resumen -> 1 decimal (o lo que uses)
+    body_num = openxlsx::createStyle(
+      fontSize = 10,
+      numFmt   = "#,##0.0",
+      halign   = "right",
+      valign   = "center",
+      fgFill   = "#FFFFFF",
       fontName = "Arial"
     ),
     body_pct = openxlsx::createStyle(
@@ -1203,8 +1223,32 @@ write_one_numeric <- function(wb, sheet, data, var, dic_vars,
   r_ini <- fila
   r_fin <- fila + nrow(tabn) - 1
 
-  openxlsx::addStyle(wb, sheet, st$body_txt, rows = r_ini:r_fin, cols = start_col,     gridExpand = TRUE)
-  openxlsx::addStyle(wb, sheet, st$body_int, rows = r_ini:r_fin, cols = start_col + 1, gridExpand = TRUE)
+  # Columna texto (Estadístico) -> siempre texto
+  openxlsx::addStyle(
+    wb, sheet, st$body_txt,
+    rows = r_ini:r_fin,
+    cols = start_col,
+    gridExpand = TRUE
+  )
+
+  # Columna valor:
+  # - "Casos válidos" (primera fila del bloque) -> entero
+  openxlsx::addStyle(
+    wb, sheet, st$body_int,
+    rows = r_ini,
+    cols = start_col + 1,
+    gridExpand = TRUE
+  )
+
+  # - resto de estadísticos -> numérico con decimales
+  if (r_fin >= (r_ini + 1)) {
+    openxlsx::addStyle(
+      wb, sheet, st$body_num,
+      rows = (r_ini + 1):r_fin,
+      cols = start_col + 1,
+      gridExpand = TRUE
+    )
+  }
 
   openxlsx::addStyle(wb, sheet, st$table_end, rows = r_fin, cols = start_col:(start_col + 1), gridExpand = TRUE, stack = TRUE)
 
