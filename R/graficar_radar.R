@@ -1,10 +1,15 @@
 # =============================================================================
-# graficar_radar() — plot-ready estilo prosecnur (canvas + export)
-# PARCHES:
-# 1) eje_label_mult: aleja texto de ejes (para que no tape el polígono)
-# 2) coord_equal SIN xlim/ylim fijos + clip="off" + expand: evita cortes “raros”
-# 3) colores_series: respeta paleta nombrada por etiqueta final (y maneja factores)
-# 4) rellenar_poligono: si FALSE, NO mapea fill (evita colores por defecto)
+# graficar_radar() — plot-ready estilo prosecnur (canvas + export) + TABLA DERECHA
+# FIXES:
+# A) PPT (rvg) NO ABORTA:
+#    - En el objeto que va a rvg::dml() NO se usa geom_polygon() (ni en malla ni en fill)
+#    - clip="on" + límites recalculados para que NADA quede fuera del viewport
+#    - sanitización: se eliminan coords no finitas antes de dibujar
+#
+# B) TABLA (canvas):
+#    - Auto-fit REAL (scale = min(w/gw, h/gh) * pad)
+#    - Placeholder con clip=on para que nunca se salga
+#    - Headers centrados (incluye 1ra celda) y cuerpo: 1ra col izquierda, demás centradas
 # =============================================================================
 
 #' @export
@@ -23,8 +28,6 @@ graficar_radar <- function(
     mostrar_niveles = TRUE,
 
     wrap_ejes = 24,
-
-
     eje_label_mult = 1.14,
 
     mostrar_puntos = TRUE,
@@ -32,11 +35,10 @@ graficar_radar <- function(
     alpha_relleno  = 0.18,
     size_punto     = 2.2,
 
-    # ✅ nuevo: no rellenar (solo bordes)
-    rellenar_poligono = FALSE,
+    rellenar_poligono = FALSE,   # ojo: en PPT se forzará FALSE (segfault rvg+polygon)
 
-    etiquetas_series = NULL,  # named: old -> new
-    colores_series   = NULL,  # named por etiqueta final
+    etiquetas_series = NULL,     # named: old -> new
+    colores_series   = NULL,     # named por etiqueta final
 
     mostrar_leyenda   = TRUE,
     leyenda_posicion  = c("abajo", "derecha"),
@@ -69,6 +71,39 @@ graficar_radar <- function(
     color_radios = "#DDDDDD",
     color_fondo  = NA,
 
+    # -------------------------------------------------------------------------
+    # TABLA (derecha)
+    # -------------------------------------------------------------------------
+    mostrar_tabla_derecha = FALSE,
+    titulo_tabla = "TOP TWO BOX",
+    umbral_rojo_pct = 60,
+    tabla_digits = 0L,
+
+    tabla_header_fill = "#062A63",
+    tabla_body_fill   = "#F2F2F2",
+    tabla_grid_col    = "white",
+    tabla_text_blue   = "#062A63",
+    tabla_font_family = "Arial",
+
+    tabla_header_size = 14,
+    tabla_body_size   = 12,
+    tabla_firstcol_bold = TRUE,
+
+    tabla_padding_mm = 3,
+
+    tabla_ph_ancho = 0.40,
+    tabla_ph_gap   = 0.03,
+    tabla_ph_margin_top = 0.04,
+    tabla_ph_margin_bot = 0.06,
+
+    tabla_auto_fit = FALSE,
+    tabla_fit_pad   = 0.98,
+    tabla_allow_upscale = FALSE,
+    tabla_clip      = TRUE,
+
+    # -------------------------------------------------------------------------
+    # CANVAS
+    # -------------------------------------------------------------------------
     usar_canvas = FALSE,
     canvas_h_header_in  = 0.75,
     canvas_h_legend_in  = 0.75,
@@ -92,7 +127,13 @@ graficar_radar <- function(
 
     ppt_append = TRUE,
     ppt_layout = "Blank",
-    ppt_master = "Office Theme"
+    ppt_master = "Office Theme",
+
+    # -------------------------------------------------------------------------
+    # DEBUG PPT (callr / Rscript)
+    # -------------------------------------------------------------------------
+    debug_ppt = FALSE,
+    debug_ppt_log = "radar_ppt_export_debug.log"
 ) {
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
@@ -100,7 +141,7 @@ graficar_radar <- function(
 
   textos_negrita <- textos_negrita %||% character(0)
 
-  # deps
+  # deps base
   if (!requireNamespace("ggplot2", quietly = TRUE)) stop("Requiere ggplot2.", call. = FALSE)
   if (!requireNamespace("dplyr", quietly = TRUE))  stop("Requiere dplyr.",  call. = FALSE)
   if (!requireNamespace("tidyr", quietly = TRUE))  stop("Requiere tidyr.",  call. = FALSE)
@@ -112,6 +153,7 @@ graficar_radar <- function(
   leyenda_posicion <- match.arg(leyenda_posicion)
   pos_titulo       <- match.arg(pos_titulo)
   pos_nota_pie     <- match.arg(pos_nota_pie)
+  ppt_safe <- exportar %in% c("ppt","word", "rplot")
 
   if (!is.data.frame(data)) stop("`data` debe ser data.frame/tibble.", call. = FALSE)
   if (!all(c(var_eje, var_grupo, var_valor) %in% names(data))) {
@@ -141,8 +183,176 @@ graficar_radar <- function(
   eje_label_mult <- suppressWarnings(as.numeric(eje_label_mult))
   if (!is.finite(eje_label_mult) || eje_label_mult <= 0) eje_label_mult <- 1.14
 
+  # clamps tabla
+  tabla_header_size <- suppressWarnings(as.numeric(tabla_header_size))
+  if (!is.finite(tabla_header_size) || tabla_header_size <= 0) tabla_header_size <- 14
+  tabla_body_size <- suppressWarnings(as.numeric(tabla_body_size))
+  if (!is.finite(tabla_body_size) || tabla_body_size <= 0) tabla_body_size <- 12
+  tabla_padding_mm <- suppressWarnings(as.numeric(tabla_padding_mm))
+  if (!is.finite(tabla_padding_mm) || tabla_padding_mm < 0) tabla_padding_mm <- 3
+  tabla_fit_pad <- suppressWarnings(as.numeric(tabla_fit_pad))
+  if (!is.finite(tabla_fit_pad) || tabla_fit_pad <= 0 || tabla_fit_pad > 1.2) tabla_fit_pad <- 0.98
+
   hjust_titulo  <- hjust_from_pos(pos_titulo)
   hjust_caption <- hjust_from_pos(pos_nota_pie)
+
+  # ---------------------------------------------------------------------------
+  # Helpers: tabla Top Two Box
+  # ---------------------------------------------------------------------------
+
+  # A) construir data.frame (texto) para la tabla
+  .make_tabla_ttb_df <- function(df_plot, ejes, grupos, digits = 0L, titulo_left = "TOP TWO BOX") {
+    digits <- suppressWarnings(as.integer(digits))
+    if (!is.finite(digits) || digits < 0L) digits <- 0L
+
+    wide <- df_plot |>
+      dplyr::transmute(
+        eje   = as.character(.data$.eje),
+        grupo = as.character(.data$.grupo),
+        valor = as.numeric(.data$.valor)
+      ) |>
+      tidyr::complete(eje = ejes, grupo = grupos, fill = list(valor = 0)) |>
+      tidyr::pivot_wider(names_from = "grupo", values_from = "valor")
+
+    fmt_pct <- function(x) {
+      x <- suppressWarnings(as.numeric(x))
+      x[!is.finite(x) | is.na(x)] <- 0
+      p <- round(x * 100, digits)
+      if (digits == 0L) sprintf("%.0f%%", p) else sprintf(paste0("%.", digits, "f%%"), p)
+    }
+
+    out <- as.data.frame(wide)
+    out[[1]] <- as.character(out[[1]])
+    for (j in 2:ncol(out)) out[[j]] <- fmt_pct(out[[j]])
+    names(out)[1] <- titulo_left
+    out
+  }
+
+  # B) construir grob con estilo (tableGrob)
+  .make_table_grob_ttb_style <- function(
+    tb,
+    header_fill = "#062A63",
+    header_text = "white",
+    body_fill   = "#F2F2F2",
+    grid_col    = "white",
+    text_blue   = "#062A63",
+    font_family = "Arial",
+    header_size = 14,
+    body_size   = 12,
+    firstcol_bold = TRUE,
+    highlight_threshold = 60,
+    highlight_col = "red",
+    padding_mm = 3,
+    firstcol_frac = 0.62
+  ) {
+    if (!requireNamespace("gridExtra", quietly = TRUE)) stop("Requiere gridExtra.", call. = FALSE)
+
+    n_data <- nrow(tb)
+    n_cols <- ncol(tb)
+
+    firstcol_frac <- suppressWarnings(as.numeric(firstcol_frac))
+    if (!is.finite(firstcol_frac)) firstcol_frac <- 0.62
+    firstcol_frac <- max(0.40, min(0.80, firstcol_frac))
+
+    tg <- gridExtra::tableGrob(
+      tb,
+      rows = NULL,
+      theme = gridExtra::ttheme_minimal(
+        base_size   = body_size,
+        base_family = font_family,
+        padding     = grid::unit(rep(padding_mm, 2), "mm"),
+        colhead = list(
+          fg_params = list(col = header_text, fontface = "bold"),
+          bg_params = list(fill = header_fill, col = grid_col, lwd = 2)
+        ),
+        core = list(
+          fg_params = list(col = text_blue),
+          bg_params = list(fill = body_fill, col = grid_col, lwd = 2)
+        )
+      )
+    )
+
+    # widths post-creation
+    if (n_cols >= 2) {
+      rest <- (1 - firstcol_frac) / (n_cols - 1)
+      tg$widths <- grid::unit(c(firstcol_frac, rep(rest, n_cols - 1)), "npc")
+    } else {
+      tg$widths <- grid::unit(1, "npc")
+    }
+
+    # header centered
+    for (j in seq_len(n_cols)) {
+      k <- which(tg$layout$t == 1 & tg$layout$l == j & tg$layout$name == "colhead-fg")
+      if (length(k)) {
+        tg$grobs[[k]]$just <- "center"
+        tg$grobs[[k]]$x <- grid::unit(0.5, "npc")
+        tg$grobs[[k]]$gp <- grid::gpar(col = header_text, fontface = "bold", fontsize = header_size)
+      }
+    }
+
+    # body centered; first col bold
+    for (i in seq_len(n_data)) {
+      r <- i + 1
+
+      k1 <- which(tg$layout$t == r & tg$layout$l == 1 & tg$layout$name == "core-fg")
+      if (length(k1)) {
+        tg$grobs[[k1]]$just <- "center"
+        tg$grobs[[k1]]$x <- grid::unit(0.5, "npc")
+        tg$grobs[[k1]]$y <- grid::unit(0.5, "npc")
+        tg$grobs[[k1]]$gp <- grid::gpar(
+          col = text_blue,
+          fontface = if (isTRUE(firstcol_bold)) "bold" else "plain",
+          fontsize = body_size,
+          lineheight = 0.95
+        )
+      }
+
+      if (n_cols >= 2) {
+        for (j in 2:n_cols) {
+          kj <- which(tg$layout$t == r & tg$layout$l == j & tg$layout$name == "core-fg")
+          if (length(kj)) {
+            tg$grobs[[kj]]$just <- "center"
+            tg$grobs[[kj]]$x <- grid::unit(0.5, "npc")
+            tg$grobs[[kj]]$y <- grid::unit(0.5, "npc")
+            tg$grobs[[kj]]$gp <- grid::gpar(col = text_blue, fontface = "plain", fontsize = body_size)
+          }
+        }
+      }
+    }
+
+    # highlight <= threshold
+    parse_pct <- function(x) suppressWarnings(as.numeric(gsub("%", "", x)))
+    if (n_cols >= 2) {
+      for (j in 2:n_cols) {
+        vals <- parse_pct(tb[[j]])
+        idx_low <- which(is.finite(vals) & !is.na(vals) & vals <= highlight_threshold)
+        if (length(idx_low)) {
+          for (ii in idx_low) {
+            r <- ii + 1
+            kj <- which(tg$layout$t == r & tg$layout$l == j & tg$layout$name == "core-fg")
+            if (length(kj)) {
+              tg$grobs[[kj]]$gp <- grid::gpar(col = highlight_col, fontface = "bold", fontsize = body_size)
+              tg$grobs[[kj]]$just <- "center"
+              tg$grobs[[kj]]$x <- grid::unit(0.5, "npc")
+            }
+          }
+        }
+      }
+    }
+
+    tg
+  }
+
+  .wrap_clip <- function(g) {
+    grid::grobTree(
+      g,
+      vp = grid::viewport(
+        x = 0.5, y = 0.5, width = 1, height = 1,
+        just = c("center","center"),
+        clip = "on"
+      )
+    )
+  }
 
   # ---------------------------------------------------------------------------
   # 1) Preparar data plot-ready
@@ -161,11 +371,9 @@ graficar_radar <- function(
   if (!nrow(df0)) stop("`data` no tiene filas válidas para radar.", call. = FALSE)
 
   df0$.valor[!is.finite(df0$.valor) | is.na(df0$.valor)] <- 0
-
   if (escala_valor == "proporcion_100") df0$.valor <- df0$.valor / 100
   df0$.valor <- pmax(0, pmin(1, df0$.valor))
 
-  # relabel grupos
   if (!is.null(etiquetas_series) && length(etiquetas_series) > 0) {
     if (is.null(names(etiquetas_series))) stop("`etiquetas_series` debe ser nombrado: old -> new.", call. = FALSE)
     mp <- as.character(etiquetas_series)
@@ -173,7 +381,6 @@ graficar_radar <- function(
     df0$.grupo <- dplyr::recode(df0$.grupo, !!!mp)
   }
 
-  # niveles de ejes y grupos (fijos)
   ejes   <- unique(df0$.eje)
   grupos <- unique(df0$.grupo)
 
@@ -188,7 +395,6 @@ graficar_radar <- function(
     tidyr::complete(.eje, .grupo, fill = list(.valor = 0)) |>
     dplyr::arrange(.grupo, .eje)
 
-  # wrap ejes
   lab_ejes <- levels(df_plot$.eje)
   if (!is.null(wrap_ejes) && is.finite(wrap_ejes) && wrap_ejes > 0) {
     if (requireNamespace("stringr", quietly = TRUE)) {
@@ -235,18 +441,13 @@ graficar_radar <- function(
     if (r_lim[2] <= r_lim[1]) r_lim <- c(0, 1)
   }
 
-  rings <- seq(r_lim[1], r_lim[2], length.out = cortes_grilla)
-  rings <- unique(rings)
+  rings <- unique(seq(r_lim[1], r_lim[2], length.out = cortes_grilla))
 
   grid_df <- NULL
   if (isTRUE(mostrar_tela)) {
     grid_df <- lapply(rings, function(rr) {
       lvl <- angle_tbl |>
-        dplyr::mutate(
-          .r = rr,
-          x  = rr * cos(.data$.ang),
-          y  = rr * sin(.data$.ang)
-        ) |>
+        dplyr::mutate(.r = rr, x = rr * cos(.data$.ang), y = rr * sin(.data$.ang)) |>
         dplyr::arrange(.data$.idx)
       dplyr::bind_rows(lvl, lvl[1, , drop = FALSE])
     }) |> dplyr::bind_rows()
@@ -255,19 +456,12 @@ graficar_radar <- function(
   axes_df <- NULL
   if (isTRUE(mostrar_radios)) {
     axes_df <- angle_tbl |>
-      dplyr::mutate(
-        x0 = 0, y0 = 0,
-        x1 = r_lim[2] * cos(.data$.ang),
-        y1 = r_lim[2] * sin(.data$.ang)
-      )
+      dplyr::mutate(x0 = 0, y0 = 0, x1 = r_lim[2] * cos(.data$.ang), y1 = r_lim[2] * sin(.data$.ang))
   }
 
   level_lab <- NULL
-  if (isTRUE(mostrar_niveles)) {
-    level_lab <- tibble::tibble(.nivel = rings, x = rings, y = 0)
-  }
+  if (isTRUE(mostrar_niveles)) level_lab <- tibble::tibble(.nivel = rings, x = rings, y = 0)
 
-  # ✅ etiquetas ejes alejadas del centro
   label_ring <- r_lim[2] * eje_label_mult
   lab_axes <- angle_tbl |>
     dplyr::mutate(
@@ -277,37 +471,26 @@ graficar_radar <- function(
     )
 
   # ---------------------------------------------------------------------------
-  # 4) Paleta — respeta names por etiqueta final
+  # 4) Paleta
   # ---------------------------------------------------------------------------
   pal <- NULL
   if (!is.null(colores_series)) {
     cs <- as.character(colores_series)
-
     if (is.null(names(cs))) {
-      # sin nombres: asignar por orden de grupos
       cs <- cs[seq_len(min(length(cs), length(grupos)))]
       cs <- stats::setNames(cs, as.character(grupos)[seq_along(cs)])
     } else {
-      # con nombres: normalizar nombres y mapear contra niveles reales de grupo
       names(cs) <- trimws(as.character(names(cs)))
     }
-
-    # grupos puede ser factor: convertir a character
     g_chr <- as.character(grupos)
-
-    # map directo por nombre (etiqueta final)
     pal <- cs[g_chr]
-
-    # si quedó NA (por mismatch), intentar también con niveles tal cual
     if (all(is.na(pal)) || length(pal) == 0) pal <- NULL
-  } else {
-    if (requireNamespace("scales", quietly = TRUE)) {
-      pal <- stats::setNames(scales::hue_pal()(length(grupos)), as.character(grupos))
-    }
+  } else if (requireNamespace("scales", quietly = TRUE)) {
+    pal <- stats::setNames(scales::hue_pal()(length(grupos)), as.character(grupos))
   }
 
   # ---------------------------------------------------------------------------
-  # 5) Plot
+  # 5) Plot (base)
   # ---------------------------------------------------------------------------
   leg_pos <- if (!isTRUE(mostrar_leyenda)) "none" else if (leyenda_posicion == "derecha") "right" else "bottom"
 
@@ -318,8 +501,6 @@ graficar_radar <- function(
       axis.title       = ggplot2::element_blank(),
       axis.text        = ggplot2::element_blank(),
       axis.ticks       = ggplot2::element_blank(),
-
-      # ✅ clave para que NO corte texto “fuera” del panel
       plot.margin      = ggplot2::margin(0,0,0,0),
       panel.spacing    = grid::unit(0, "pt"),
       legend.position  = leg_pos,
@@ -332,39 +513,49 @@ graficar_radar <- function(
       legend.key.width      = grid::unit(legend_key_cm, "cm"),
       legend.key.height     = grid::unit(legend_key_cm, "cm"),
       legend.key.spacing.x  = grid::unit(legend_key_spacing_x_cm, "cm"),
-
       plot.title = ggplot2::element_text(
-        color = color_titulo,
-        size  = size_titulo,
+        color = color_titulo, size = size_titulo,
         face  = if ("titulo" %in% textos_negrita) "bold" else "plain",
         hjust = hjust_titulo
       ),
       plot.subtitle = ggplot2::element_text(
-        color = color_subtitulo,
-        size  = size_subtitulo,
+        color = color_subtitulo, size = size_subtitulo,
         face  = if ("subtitulo" %in% textos_negrita) "bold" else "plain",
         hjust = hjust_titulo
       ),
       plot.caption = ggplot2::element_text(
-        color = color_nota_pie,
-        size  = size_nota_pie,
+        color = color_nota_pie, size = size_nota_pie,
         face  = if ("nota_pie" %in% textos_negrita) "bold" else "plain",
         hjust = hjust_caption
       ),
-
       plot.background  = ggplot2::element_rect(fill = color_fondo, color = NA),
       panel.background = ggplot2::element_rect(fill = color_fondo, color = NA)
     ) +
     ggplot2::labs(title = titulo, subtitle = subtitulo, caption = nota_pie)
 
+  # ---------------------------------------------------------------------------
+  # Capas “normales” (para rplot/png/word).
+  # ---------------------------------------------------------------------------
   if (isTRUE(mostrar_tela) && !is.null(grid_df)) {
-    p <- p + ggplot2::geom_polygon(
-      data = grid_df,
-      ggplot2::aes(x = .data$x, y = .data$y, group = .data$.r),
-      fill = NA, color = color_grilla, linewidth = 0.5
-    )
-  }
 
+    grid_df2 <- grid_df |>
+      dplyr::filter(is.finite(.data$x), is.finite(.data$y), !is.na(.data$x), !is.na(.data$y))
+
+    if (ppt_safe) {
+      # Importante: Es PPT SAFE, NO polygon (evita C_polygon segfault)
+      p <- p + ggplot2::geom_path(
+        data = grid_df2,
+        ggplot2::aes(x = .data$x, y = .data$y, group = .data$.r),
+        color = color_grilla, linewidth = 0.5
+      )
+    } else {
+      p <- p + ggplot2::geom_polygon(
+        data = grid_df2,
+        ggplot2::aes(x = .data$x, y = .data$y, group = .data$.r),
+        fill = NA, color = color_grilla, linewidth = 0.5
+      )
+    }
+  }
   if (isTRUE(mostrar_radios) && !is.null(axes_df)) {
     p <- p + ggplot2::geom_segment(
       data = axes_df,
@@ -372,8 +563,6 @@ graficar_radar <- function(
       color = color_radios, linewidth = 0.5
     )
   }
-
-  # ✅ si no se rellena: NO mapear fill (evita colores por defecto)
   if (isTRUE(rellenar_poligono)) {
     p <- p + ggplot2::geom_polygon(
       data = df_poly,
@@ -408,10 +597,7 @@ graficar_radar <- function(
   if (isTRUE(mostrar_niveles) && !is.null(level_lab)) {
     p <- p + ggplot2::geom_text(
       data = level_lab,
-      ggplot2::aes(
-        x = .data$x, y = .data$y,
-        label = paste0(round(.data$.nivel * 100), "%")
-      ),
+      ggplot2::aes(x = .data$x, y = .data$y, label = paste0(round(.data$.nivel * 100), "%")),
       size = 3,
       color = "grey40",
       fontface = if ("niveles" %in% textos_negrita) "bold" else "plain",
@@ -419,20 +605,18 @@ graficar_radar <- function(
     )
   }
 
-  # ✅ clave: NO fijar xlim/ylim manual (produce “recortes” raros).
-  # Expand con "add" da colchón real para etiquetas.
   lim_xy <- r_lim[2] * max(1.28, eje_label_mult * 1.10)
+
+  clip_mode <- if (ppt_safe) "on" else "off"
+
   p <- p +
-    ggplot2::coord_equal(clip = "off") +
+    ggplot2::coord_equal(clip = clip_mode) +
     ggplot2::scale_x_continuous(limits = c(-lim_xy, lim_xy), expand = ggplot2::expansion(mult = 0, add = 0)) +
     ggplot2::scale_y_continuous(limits = c(-lim_xy, lim_xy), expand = ggplot2::expansion(mult = 0, add = 0))
 
-  # escalas (solo color; fill solo si rellena)
   if (!is.null(pal)) {
     p <- p + ggplot2::scale_color_manual(values = pal, breaks = as.character(grupos), drop = FALSE)
-    if (isTRUE(rellenar_poligono)) {
-      p <- p + ggplot2::scale_fill_manual(values = pal, breaks = as.character(grupos), drop = FALSE)
-    }
+    if (isTRUE(rellenar_poligono)) p <- p + ggplot2::scale_fill_manual(values = pal, breaks = as.character(grupos), drop = FALSE)
   } else {
     p <- p + ggplot2::scale_color_discrete(drop = FALSE)
     if (isTRUE(rellenar_poligono)) p <- p + ggplot2::scale_fill_discrete(drop = FALSE)
@@ -454,7 +638,7 @@ graficar_radar <- function(
   )
 
   # ---------------------------------------------------------------------------
-  # CANVAS (igual filosofía que barras)
+  # CANVAS (radar + tabla opcional)
   # ---------------------------------------------------------------------------
   if (isTRUE(usar_canvas)) {
     if (!requireNamespace("cowplot", quietly = TRUE)) stop("Para `usar_canvas=TRUE` se requiere cowplot.", call. = FALSE)
@@ -465,10 +649,7 @@ graficar_radar <- function(
 
     p_panel <- p +
       ggplot2::labs(title = NULL, subtitle = NULL, caption = NULL) +
-      ggplot2::theme(
-        legend.position = "none",
-        plot.margin = ggplot2::margin(0,0,0,0)
-      )
+      ggplot2::theme(legend.position = "none", plot.margin = ggplot2::margin(0,0,0,0))
 
     leg_grob <- NULL
     if (has_legend) {
@@ -537,6 +718,7 @@ graficar_radar <- function(
 
     canvas <- cowplot::ggdraw()
 
+    # Header
     if (has_header) {
       y_header_center <- y_header0 + header_h * 0.5
       dy_head <- encabezado_desplazamiento_in / h_total_in
@@ -576,30 +758,169 @@ graficar_radar <- function(
       if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_header0, 1, header_h)
     }
 
-    canvas <- canvas + cowplot::draw_plot(p_panel, x = 0, y = y_panel0, width = 1, height = panel_h)
-    if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_panel0, 1, panel_h)
+    # Panel: radar + tabla
+    if (isTRUE(mostrar_tabla_derecha)) {
+      tabla_ph_ancho <- suppressWarnings(as.numeric(tabla_ph_ancho))
+      if (!is.finite(tabla_ph_ancho) || tabla_ph_ancho <= 0 || tabla_ph_ancho >= 0.85) tabla_ph_ancho <- 0.40
+      tabla_ph_gap <- suppressWarnings(as.numeric(tabla_ph_gap))
+      if (!is.finite(tabla_ph_gap) || tabla_ph_gap < 0) tabla_ph_gap <- 0.03
+      tabla_ph_margin_top <- suppressWarnings(as.numeric(tabla_ph_margin_top))
+      if (!is.finite(tabla_ph_margin_top) || tabla_ph_margin_top < 0) tabla_ph_margin_top <- 0.04
+      tabla_ph_margin_bot <- suppressWarnings(as.numeric(tabla_ph_margin_bot))
+      if (!is.finite(tabla_ph_margin_bot) || tabla_ph_margin_bot < 0) tabla_ph_margin_bot <- 0.06
 
-    if (has_legend && !is.null(leg_grob)) {
-      pos_leyenda_x <- 0.5
-      if (!is.na(centro_cowplot) && is.finite(centro_cowplot)) pos_leyenda_x <- centro_cowplot
+      w_tab <- tabla_ph_ancho
+      w_gap <- tabla_ph_gap
+      w_radar <- 1 - w_tab - w_gap
+      if (w_radar <= 0.10) {
+        w_tab <- min(0.45, max(0.25, w_tab))
+        w_gap <- min(0.05, max(0.01, w_gap))
+        w_radar <- 1 - w_tab - w_gap
+      }
 
-      y_legend_center <- y_legend0 + legend_h * 0.5
-      dy_leg <- leyenda_desplazamiento_in / h_total_in
+      # Radar izquierda
+      canvas <- canvas + cowplot::draw_plot(p_panel, x = 0, y = y_panel0, width = w_radar, height = panel_h)
+      if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_panel0, w_radar, panel_h)
 
-      leg_w_npc <- grid::convertWidth(sum(leg_grob$widths), "npc", valueOnly = TRUE)
-      if (!is.finite(leg_w_npc) || leg_w_npc <= 0) leg_w_npc <- 1
+      # Tabla derecha con top/bot
+      y_tab <- y_panel0 + tabla_ph_margin_bot
+      h_tab <- panel_h - tabla_ph_margin_top - tabla_ph_margin_bot
+      if (h_tab <= 0) {
+        y_tab <- y_panel0
+        h_tab <- panel_h
+      }
 
-      canvas <- canvas + cowplot::draw_grob(
-        leg_grob,
-        x = pos_leyenda_x,
-        y = y_legend_center + dy_leg,
-        width  = leg_w_npc,
-        height = legend_h,
-        hjust = 0.5, vjust = 0.5
+      tb <- .make_tabla_ttb_df(
+        df_plot,
+        ejes   = levels(df_plot$.eje),
+        grupos = levels(df_plot$.grupo),
+        digits = tabla_digits,
+        titulo_left = titulo_tabla
       )
-      if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_legend0, 1, legend_h)
+
+      # ------------------------------------------------------------
+      # WRAP 1RA COLUMNA (ejes) según el ancho real del PH de la tabla
+      # ------------------------------------------------------------
+      if (requireNamespace("stringr", quietly = TRUE)) {
+
+        # ancho real disponible del PH de la tabla (en pulgadas)
+        ph_w_in <- ancho * w_tab
+
+        # porcentaje del PH que se quiere para la 1ra columna (ajustable)
+        firstcol_frac <- 0.62
+        firstcol_in   <- ph_w_in * firstcol_frac
+
+        # estimación: caracteres por pulgada según tamaño de fuente
+        # (0.55 es un factor práctico para fuentes tipo Arial)
+        chars_per_in <- 72 / (tabla_body_size * 0.55)
+
+        wrap_n <- floor(firstcol_in * chars_per_in)
+        wrap_n <- max(12, min(60, wrap_n))  # clamps razonables
+
+        tb[[1]] <- stringr::str_wrap(tb[[1]], width = wrap_n)
+      }
+
+      tab_grob <- .make_table_grob_ttb_style(
+        tb,
+        header_fill = tabla_header_fill,
+        body_fill   = tabla_body_fill,
+        grid_col    = tabla_grid_col,
+        text_blue   = tabla_text_blue,
+        font_family = tabla_font_family,
+        header_size = tabla_header_size,
+        body_size   = tabla_body_size,
+        firstcol_bold = tabla_firstcol_bold,
+        highlight_threshold = umbral_rojo_pct,
+        highlight_col = "red",
+        padding_mm = tabla_padding_mm
+      )
+
+      tab_draw <- if (isTRUE(tabla_clip)) .wrap_clip(tab_grob) else tab_grob
+
+      # -----------------------------------------------------------------
+      # AUTO-FIT (robusto): medir el grob en pulgadas y escalar contra el PH
+      # -----------------------------------------------------------------
+      scale_tab <- 1
+
+      if (isTRUE(tabla_auto_fit)) {
+
+        # OJO: esto es más estable que grobWidth() en algunos devices
+        gw_in <- suppressWarnings(grid::convertWidth(sum(tab_grob$widths),  "in", valueOnly = TRUE))
+        gh_in <- suppressWarnings(grid::convertHeight(sum(tab_grob$heights), "in", valueOnly = TRUE))
+
+        # Tamaño disponible del PH (en pulgadas) usando el tamaño final del canvas
+        ph_w_in <- ancho * w_tab
+        ph_h_in <- alto  * h_tab
+
+        if (is.finite(gw_in) && gw_in > 0 && is.finite(gh_in) && gh_in > 0) {
+
+          s_w <- ph_w_in / gw_in
+          s_h <- ph_h_in / gh_in
+
+          scale_tab <- min(s_w, s_h)
+
+          if (!isTRUE(tabla_allow_upscale)) scale_tab <- min(1, scale_tab)
+
+          scale_tab <- scale_tab * tabla_fit_pad
+          if (!is.finite(scale_tab) || scale_tab <= 0) scale_tab <- 1
+        }
+      }
+
+      # IMPORTANTE: centrar el grob dentro del PH:
+      # draw_grob con hjust/vjust = 0.5 y x/y al centro del PH
+      canvas <- canvas + cowplot::draw_grob(
+        tab_draw,
+        x = (w_radar + w_gap) + (w_tab * 0.5),
+        y = y_tab + (h_tab * 0.5),
+        width  = w_tab,
+        height = h_tab,
+        hjust = 0.5, vjust = 0.5,
+        scale = scale_tab
+      )
+
+      if (debug_ph_bordes) canvas <- canvas + .ph_border(w_radar + w_gap, y_tab, w_tab, h_tab)
+
+    } else {
+      canvas <- canvas + cowplot::draw_plot(p_panel, x = 0, y = y_panel0, width = 1, height = panel_h)
+      if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_panel0, 1, panel_h)
     }
 
+  # ---------------------------------------------------------------
+  # LEYENDA CENTRADA SOLO EN EL PH DEL PANEL
+  # ---------------------------------------------------------------
+  if (has_legend && !is.null(leg_grob)) {
+
+    # ancho del panel (izquierda)
+    panel_w <- if (isTRUE(mostrar_tabla_derecha)) w_radar else 1
+
+    # leyenda solo ocupa ancho del panel
+    legend_ph_x <- 0
+    legend_ph_w <- panel_w
+
+    y_legend_center <- y_legend0 + legend_h * 0.5
+    dy_leg <- leyenda_desplazamiento_in / h_total_in
+
+    leg_w_npc <- suppressWarnings(
+      grid::convertWidth(sum(leg_grob$widths), "npc", valueOnly = TRUE)
+    )
+    if (!is.finite(leg_w_npc) || leg_w_npc <= 0) leg_w_npc <- 1
+
+    canvas <- canvas + cowplot::draw_grob(
+      leg_grob,
+      x = legend_ph_x + (legend_ph_w * 0.5),
+      y = y_legend_center + dy_leg,
+      width  = legend_ph_w,
+      height = legend_h,
+      hjust = 0.5,
+      vjust = 0.5
+    )
+
+    if (debug_ph_bordes) {
+      canvas <- canvas + .ph_border(legend_ph_x, y_legend0, legend_ph_w, legend_h)
+    }
+  }
+
+    # Caption
     if (has_caption) {
       canvas <- canvas + cowplot::draw_text(
         nota_pie,
@@ -614,6 +935,9 @@ graficar_radar <- function(
       if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_caption0, 1, caption_h)
     }
 
+    # -------------------------------------------------------------------------
+    # EXPORT desde CANVAS
+    # -------------------------------------------------------------------------
     if (exportar == "rplot") return(canvas)
 
     if (is.null(path_salida) || !nzchar(path_salida)) stop("`path_salida` es requerido para exportar.", call. = FALSE)
@@ -623,11 +947,104 @@ graficar_radar <- function(
       return(invisible(canvas))
     }
 
+    # ============ PPT/WORD =============
     if (exportar %in% c("ppt","word")) {
       if (!requireNamespace("officer", quietly = TRUE)) stop("Para exportar a PPT/Word se requiere officer.", call. = FALSE)
       if (!requireNamespace("rvg", quietly = TRUE))     stop("Para exportar a PPT/Word se requiere rvg.", call. = FALSE)
 
+      # ---- PPT SAFE OBJ (para rvg): NO polygons + clip on ----
+      # Nota: exportamos el CANVAS (cowplot) tal cual; la estabilidad viene de:
+      # - El radar base ya está sin “fill” si exportar=="ppt" (ver bloque abajo),
+      # - Y la tabla es un grob (grid) sin polygons problemáticos.
+      #
+      # Aun así, si hay aborts, se recomienda exportar el radar a rvg y la tabla con officer como tabla nativa.
       if (exportar == "ppt") {
+
+        # Debug por steps (Rscript) para aislar segfaults (si se activa)
+        .run_ppt_step <- function(step = c("01_read", "02_slide", "03_size", "04_ph_with", "05_print"),
+                                  plot_obj,
+                                  path_out,
+                                  ppt_layout = "Blank",
+                                  ppt_master = "Office Theme") {
+          step <- match.arg(step)
+
+          f_plot <- tempfile(fileext = ".rds")
+          f_err  <- tempfile(fileext = ".txt")
+          f_scr  <- tempfile(fileext = ".R")
+
+          saveRDS(plot_obj, f_plot)
+
+          code <- c(
+            "suppressPackageStartupMessages({library(officer); library(rvg); library(ggplot2); library(cowplot); library(grid)})",
+            sprintf("p <- readRDS('%s')", gsub("\\\\", "/", f_plot)),
+            sprintf("out <- '%s'", gsub("\\\\", "/", path_out)),
+            "doc <- read_pptx()",
+            if (step %in% c("02_slide","03_size","04_ph_with","05_print"))
+              sprintf("doc <- add_slide(doc, layout = '%s', master = '%s')", ppt_layout, ppt_master)
+            else "invisible(NULL)",
+            if (step %in% c("03_size","04_ph_with","05_print"))
+              "ss <- slide_size(doc); sw <- ss$width; sh <- ss$height"
+            else "invisible(NULL)",
+            if (step %in% c("04_ph_with","05_print"))
+              "doc <- ph_with(doc, value = rvg::dml(ggobj = p), location = ph_location(left=0, top=0, width=sw, height=sh))"
+            else "invisible(NULL)",
+            if (step %in% c("05_print"))
+              "print(doc, target = out)"
+            else "invisible(NULL)",
+            "cat('OK\\n')"
+          )
+
+          writeLines(code, f_scr)
+
+          rscript <- Sys.which("Rscript")
+          if (!nzchar(rscript)) stop("No se encontró Rscript en PATH.", call. = FALSE)
+
+          suppressWarnings(system2(rscript, args = c(shQuote(f_scr)), stdout = FALSE, stderr = f_err))
+
+          err <- if (file.exists(f_err)) paste(readLines(f_err, warn = FALSE), collapse = "\n") else ""
+          list(stderr = err, out_exists = file.exists(path_out))
+        }
+
+        if (isTRUE(debug_ppt)) {
+          cat("PPT EXPORT DEBUG START\n", file = debug_ppt_log)
+          .log <- function(...) cat(..., "\n", file = debug_ppt_log, append = TRUE)
+
+          steps <- c("01_read", "02_slide", "03_size", "04_ph_with", "05_print")
+          last_ok <- NA_character_
+
+          for (st in steps) {
+            out_step <- tempfile(fileext = paste0("_", st, ".pptx"))
+            res <- .run_ppt_step(
+              step       = st,
+              plot_obj   = canvas,
+              path_out   = out_step,
+              ppt_layout = ppt_layout,
+              ppt_master = ppt_master
+            )
+
+            .log("[TRY] ", st)
+            if (nzchar(res$stderr)) {
+              .log("[STDERR] ")
+              .log(res$stderr)
+              .log("[WARN?] ", st, " (ver STDERR arriba)")
+            } else {
+              .log("[OK] ", st)
+              last_ok <- st
+            }
+
+            if (st == "05_print") {
+              if (isTRUE(res$out_exists)) {
+                .log("[OK] 05_print (pptx creado)")
+              } else {
+                .log("[FAIL] 05_print")
+                .log("STOP: aborta en print() o antes (no se creó pptx). Último OK: ", last_ok %||% "ninguno")
+              }
+            }
+          }
+          .log("PPT EXPORT DEBUG END")
+          message("PPT export debug log -> ", normalizePath(debug_ppt_log, winslash = "/"))
+        }
+
         doc <- if (ppt_append && file.exists(path_salida)) officer::read_pptx(path_salida) else officer::read_pptx()
         doc <- officer::add_slide(doc, layout = ppt_layout, master = ppt_master)
         doc <- officer::ph_with(doc, value = rvg::dml(ggobj = canvas), location = officer::ph_location_fullsize())
@@ -647,7 +1064,9 @@ graficar_radar <- function(
     stop("Tipo de exportación no soportado.", call. = FALSE)
   }
 
+  # ---------------------------------------------------------------------------
   # NO CANVAS
+  # ---------------------------------------------------------------------------
   if (exportar == "rplot") return(p)
 
   if (is.null(path_salida) || !nzchar(path_salida)) stop("`path_salida` es requerido para exportar.", call. = FALSE)
@@ -662,11 +1081,250 @@ graficar_radar <- function(
     if (!requireNamespace("rvg", quietly = TRUE))     stop("Para exportar a PPT/Word se requiere rvg.", call. = FALSE)
 
     if (exportar == "ppt") {
+      # ---- PLOT PPT SAFE (reconstrucción SIN polygons) ----
+      # 1) Forzar NO fill en PPT (aunque el usuario lo pida)
+      rellenar_ppt <- FALSE
+
+      # 2) Malla sin geom_polygon: se reemplaza por geom_path
+      #    y se filtran coords no finitas por seguridad
+      grid_df_ppt <- grid_df
+      if (!is.null(grid_df_ppt)) {
+        grid_df_ppt <- grid_df_ppt |>
+          dplyr::filter(is.finite(.data$x), is.finite(.data$y), !is.na(.data$x), !is.na(.data$y))
+      }
+      axes_df_ppt <- axes_df
+      if (!is.null(axes_df_ppt)) {
+        axes_df_ppt <- axes_df_ppt |>
+          dplyr::filter(is.finite(.data$x0), is.finite(.data$y0), is.finite(.data$x1), is.finite(.data$y1))
+      }
+      df_poly_ppt <- df_poly |>
+        dplyr::filter(is.finite(.data$x), is.finite(.data$y), !is.na(.data$x), !is.na(.data$y))
+      df_xy_ppt <- df_xy |>
+        dplyr::filter(is.finite(.data$x), is.finite(.data$y), !is.na(.data$x), !is.na(.data$y))
+
+      # 3) límites: incluir labels dentro del viewport
+      lim_xy_ppt <- max(r_lim[2] * 1.25, (r_lim[2] * eje_label_mult) * 1.12)
+
+      fondo_ppt <- if (is.na(color_fondo) || is.null(color_fondo)) "transparent" else color_fondo
+
+      p_ppt <- ggplot2::ggplot() +
+        ggplot2::theme_minimal(base_size = 9) +
+        ggplot2::theme(
+          panel.grid       = ggplot2::element_blank(),
+          axis.title       = ggplot2::element_blank(),
+          axis.text        = ggplot2::element_blank(),
+          axis.ticks       = ggplot2::element_blank(),
+          plot.margin      = ggplot2::margin(0,0,0,0),
+          panel.spacing    = grid::unit(0, "pt"),
+          legend.position  = leg_pos,
+          legend.title     = ggplot2::element_blank(),
+          legend.text      = ggplot2::element_text(
+            color  = color_leyenda,
+            size   = size_leyenda,
+            family = "sans",
+            margin = ggplot2::margin(l = legend_espaciado/2, r = legend_espaciado/2, unit = "pt")
+          ),
+          legend.key.width      = grid::unit(legend_key_cm, "cm"),
+          legend.key.height     = grid::unit(legend_key_cm, "cm"),
+          legend.key.spacing.x  = grid::unit(legend_key_spacing_x_cm, "cm"),
+          plot.title = ggplot2::element_text(
+            color = color_titulo, size = size_titulo, family = "sans",
+            face  = if ("titulo" %in% textos_negrita) "bold" else "plain",
+            hjust = hjust_titulo
+          ),
+          plot.subtitle = ggplot2::element_text(
+            color = color_subtitulo, size = size_subtitulo, family = "sans",
+            face  = if ("subtitulo" %in% textos_negrita) "bold" else "plain",
+            hjust = hjust_titulo
+          ),
+          plot.caption = ggplot2::element_text(
+            color = color_nota_pie, size = size_nota_pie, family = "sans",
+            face  = if ("nota_pie" %in% textos_negrita) "bold" else "plain",
+            hjust = hjust_caption
+          ),
+          plot.background  = ggplot2::element_rect(fill = fondo_ppt, color = NA),
+          panel.background = ggplot2::element_rect(fill = fondo_ppt, color = NA)
+        ) +
+        ggplot2::labs(title = titulo, subtitle = subtitulo, caption = nota_pie)
+
+      if (isTRUE(mostrar_tela) && !is.null(grid_df_ppt)) {
+        p_ppt <- p_ppt + ggplot2::geom_path(
+          data = grid_df_ppt,
+          ggplot2::aes(x = .data$x, y = .data$y, group = .data$.r),
+          color = color_grilla, linewidth = 0.5
+        )
+      }
+
+      if (isTRUE(mostrar_radios) && !is.null(axes_df_ppt)) {
+        p_ppt <- p_ppt + ggplot2::geom_segment(
+          data = axes_df_ppt,
+          ggplot2::aes(x = .data$x0, y = .data$y0, xend = .data$x1, yend = .data$y1),
+          color = color_radios, linewidth = 0.5
+        )
+      }
+
+      # NO geom_polygon() en PPT
+      if (isTRUE(rellenar_ppt) && FALSE) {
+        p_ppt <- p_ppt + ggplot2::geom_polygon(
+          data = df_poly_ppt,
+          ggplot2::aes(x = .data$x, y = .data$y, group = .data$.grupo, fill = .data$.grupo),
+          color = NA, alpha = alpha_relleno
+        )
+      }
+
+      p_ppt <- p_ppt + ggplot2::geom_path(
+        data = df_poly_ppt,
+        ggplot2::aes(x = .data$x, y = .data$y, group = .data$.grupo, color = .data$.grupo),
+        linewidth = size_linea
+      )
+
+      if (isTRUE(mostrar_puntos)) {
+        p_ppt <- p_ppt + ggplot2::geom_point(
+          data = df_xy_ppt,
+          ggplot2::aes(x = .data$x, y = .data$y, color = .data$.grupo),
+          size = size_punto
+        )
+      }
+
+      p_ppt <- p_ppt + ggplot2::geom_text(
+        data = lab_axes,
+        ggplot2::aes(x = .data$x, y = .data$y, label = .data$eje),
+        size = size_ejes / 3,
+        colour = color_ejes,
+        family = "sans",
+        fontface = if ("ejes" %in% textos_negrita) "bold" else "plain",
+        lineheight = 1
+      )
+
+      if (isTRUE(mostrar_niveles) && !is.null(level_lab)) {
+        p_ppt <- p_ppt + ggplot2::geom_text(
+          data = level_lab,
+          ggplot2::aes(x = .data$x, y = .data$y, label = paste0(round(.data$.nivel * 100), "%")),
+          size = 3,
+          color = "grey40",
+          family = "sans",
+          fontface = if ("niveles" %in% textos_negrita) "bold" else "plain",
+          vjust = -0.2
+        )
+      }
+
+      p_ppt <- p_ppt +
+        ggplot2::coord_equal(clip = "on") +
+        ggplot2::scale_x_continuous(limits = c(-lim_xy_ppt, lim_xy_ppt), expand = ggplot2::expansion(mult = 0, add = 0)) +
+        ggplot2::scale_y_continuous(limits = c(-lim_xy_ppt, lim_xy_ppt), expand = ggplot2::expansion(mult = 0, add = 0))
+
+      if (!is.null(pal)) {
+        p_ppt <- p_ppt + ggplot2::scale_color_manual(values = pal, breaks = as.character(grupos), drop = FALSE)
+      } else {
+        p_ppt <- p_ppt + ggplot2::scale_color_discrete(drop = FALSE)
+      }
+
+      p_ppt <- p_ppt + ggplot2::guides(
+        color = ggplot2::guide_legend(
+          ncol  = if (leyenda_posicion == "abajo") legend_n_por_fila else 1,
+          byrow = TRUE,
+          keywidth  = grid::unit(legend_key_cm, "cm"),
+          keyheight = grid::unit(legend_key_cm, "cm")
+        )
+      )
+
+      # --- Debug steps (opcional) para p_ppt ---
+      if (isTRUE(debug_ppt)) {
+        cat("PPT EXPORT DEBUG START\n", file = debug_ppt_log)
+        .log <- function(...) cat(..., "\n", file = debug_ppt_log, append = TRUE)
+
+        .run_ppt_step <- function(step = c("01_read", "02_slide", "03_size", "04_ph_with", "05_print"),
+                                  plot_obj,
+                                  path_out,
+                                  ppt_layout = "Blank",
+                                  ppt_master = "Office Theme") {
+          step <- match.arg(step)
+
+          f_plot <- tempfile(fileext = ".rds")
+          f_err  <- tempfile(fileext = ".txt")
+          f_scr  <- tempfile(fileext = ".R")
+
+          saveRDS(plot_obj, f_plot)
+
+          code <- c(
+            "suppressPackageStartupMessages({library(officer); library(rvg); library(ggplot2); library(grid)})",
+            sprintf("p <- readRDS('%s')", gsub("\\\\", "/", f_plot)),
+            sprintf("out <- '%s'", gsub("\\\\", "/", path_out)),
+            "doc <- read_pptx()",
+            if (step %in% c("02_slide","03_size","04_ph_with","05_print"))
+              sprintf("doc <- add_slide(doc, layout = '%s', master = '%s')", ppt_layout, ppt_master)
+            else "invisible(NULL)",
+            if (step %in% c("03_size","04_ph_with","05_print"))
+              "ss <- slide_size(doc); sw <- ss$width; sh <- ss$height"
+            else "invisible(NULL)",
+            if (step %in% c("04_ph_with","05_print"))
+              "doc <- ph_with(doc, value = rvg::dml(ggobj = p), location = ph_location(left=0, top=0, width=sw, height=sh))"
+            else "invisible(NULL)",
+            if (step %in% c("05_print"))
+              "print(doc, target = out)"
+            else "invisible(NULL)",
+            "cat('OK\\n')"
+          )
+
+          writeLines(code, f_scr)
+
+          rscript <- Sys.which("Rscript")
+          if (!nzchar(rscript)) stop("No se encontró Rscript en PATH.", call. = FALSE)
+
+          suppressWarnings(system2(rscript, args = c(shQuote(f_scr)), stdout = FALSE, stderr = f_err))
+
+          err <- if (file.exists(f_err)) paste(readLines(f_err, warn = FALSE), collapse = "\n") else ""
+          list(stderr = err, out_exists = file.exists(path_out))
+        }
+
+        steps <- c("01_read", "02_slide", "03_size", "04_ph_with", "05_print")
+        last_ok <- NA_character_
+
+        for (st in steps) {
+          out_step <- tempfile(fileext = paste0("_", st, ".pptx"))
+          res <- .run_ppt_step(
+            step       = st,
+            plot_obj   = p_ppt,
+            path_out   = out_step,
+            ppt_layout = ppt_layout,
+            ppt_master = ppt_master
+          )
+
+          .log("[TRY] ", st)
+          if (nzchar(res$stderr)) {
+            .log("[STDERR] ")
+            .log(res$stderr)
+            .log("[WARN?] ", st, " (ver STDERR arriba)")
+          } else {
+            .log("[OK] ", st)
+            last_ok <- st
+          }
+
+          if (st == "05_print") {
+            if (isTRUE(res$out_exists)) {
+              .log("[OK] 05_print (pptx creado)")
+            } else {
+              .log("[FAIL] 05_print")
+              .log("STOP: aborta en print() o antes (no se creó pptx). Último OK: ", last_ok %||% "ninguno")
+            }
+          }
+        }
+        .log("PPT EXPORT DEBUG END")
+        message("PPT export debug log -> ", normalizePath(debug_ppt_log, winslash = "/"))
+      }
+
       doc <- if (ppt_append && file.exists(path_salida)) officer::read_pptx(path_salida) else officer::read_pptx()
       doc <- officer::add_slide(doc, layout = ppt_layout, master = ppt_master)
-      doc <- officer::ph_with(doc, value = rvg::dml(ggobj = p), location = officer::ph_location_fullsize())
+
+      ss <- officer::slide_size(doc)
+      doc <- officer::ph_with(
+        doc,
+        value    = rvg::dml(ggobj = p_ppt),
+        location = officer::ph_location(left = 0, top = 0, width = ss$width, height = ss$height)
+      )
+
       print(doc, target = path_salida)
-      return(invisible(p))
+      return(invisible(p_ppt))
     }
 
     if (exportar == "word") {
