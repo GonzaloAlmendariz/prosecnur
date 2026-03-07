@@ -18,7 +18,8 @@ reporte_interactivo(
   logo_png = NULL,
   logo_alt = "Logo",
   logo_height_px = 52,
-  tabs = c("resumen", "relacion", "base_datos")
+  tabs = c("resumen", "relacion", "base_datos"),
+  theme_app = NULL
 )
 }
 \description{

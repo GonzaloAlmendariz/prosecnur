@@ -8,13 +8,24 @@
 `%||%` <- function(x, y) if (!is.null(x)) x else y
 
 # -----------------------------------------------------------------------------
-# Helpers internos (IGUAL que tu archivo)
+# Helpers internos
 # -----------------------------------------------------------------------------
 
+.get_label_col_safe <- function(df) {
+  if (is.null(df)) return(NULL)
+  if ("label" %in% names(df)) return("label")
+  lab_candidates <- grep("^label(::|$)", names(df), value = TRUE)
+  if (length(lab_candidates)) return(lab_candidates[1])
+  NULL
+}
+
 .get_list_name_safe <- function(survey, var) {
-  if (is.null(survey) || !all(c("name","list_name") %in% names(survey))) return(NA_character_)
+  if (is.null(survey) || !all(c("name", "list_name") %in% names(survey))) {
+    return(NA_character_)
+  }
   i <- which(!is.na(survey$name) & survey$name == var)[1]
   if (is.na(i)) return(NA_character_)
+
   ln <- as.character(survey$list_name[i])
   if (is.na(ln) || !nzchar(ln)) return(NA_character_)
   ln
@@ -25,7 +36,7 @@
   if (requireNamespace("stringr", quietly = TRUE)) {
     x <- stringr::str_wrap(x, width = width)
   }
-  gsub("\n", "<br>", x, fixed = TRUE)  # plotly interpreta <br>
+  gsub("\n", "<br>", x, fixed = TRUE)
 }
 
 .resolver_paleta_var <- function(var,
@@ -62,17 +73,26 @@
   fila <- surv[surv$name == var, , drop = FALSE]
   list_var <- if (nrow(fila)) fila$list_name[1] else NA_character_
 
+  label_col <- .get_label_col_safe(instrumento$choices)
+
   if (!is.null(instrumento$choices) &&
-      all(c("list_name", "name", "label") %in% names(instrumento$choices)) &&
+      all(c("list_name", "name") %in% names(instrumento$choices)) &&
+      !is.null(label_col) && label_col %in% names(instrumento$choices) &&
       !is.na(list_var) && nzchar(list_var) &&
       !is.null(names(pal))) {
 
     ch <- instrumento$choices[instrumento$choices$list_name == list_var, , drop = FALSE]
-    map_code_to_label <- stats::setNames(as.character(ch$label), as.character(ch$name))
+    map_code_to_label <- stats::setNames(
+      as.character(ch[[label_col]]),
+      as.character(ch$name)
+    )
 
     idx <- names(pal) %in% names(map_code_to_label)
     if (any(idx)) {
-      pal_lab <- stats::setNames(pal[idx], map_code_to_label[names(pal)[idx]])
+      pal_lab <- stats::setNames(
+        pal[idx],
+        map_code_to_label[names(pal)[idx]]
+      )
 
       if (!all(opcion_levels %in% names(pal_lab))) {
         falt <- setdiff(opcion_levels, names(pal_lab))
@@ -95,25 +115,30 @@
 .obtener_label_var <- function(var, instrumento, data = NULL) {
 
   var <- trimws(as.character(var)[1])
-
   surv <- instrumento$survey
 
-  if (!is.null(surv) && all(c("name","label") %in% names(surv))) {
+  if (!is.null(surv) && "name" %in% names(surv)) {
 
-    nm <- trimws(as.character(surv$name))
-    i  <- which(!is.na(nm) & nm == var)[1]
+    label_col <- .get_label_col_safe(surv)
 
-    if (!is.na(i)) {
-      lab <- surv$label[i]
-      if (!is.na(lab) && nzchar(trimws(as.character(lab)))) {
-        return(as.character(lab))
+    if (!is.null(label_col) && label_col %in% names(surv)) {
+      nm <- trimws(as.character(surv$name))
+      i  <- which(!is.na(nm) & nm == var)[1]
+
+      if (!is.na(i)) {
+        lab <- surv[[label_col]][i]
+        if (!is.na(lab) && nzchar(trimws(as.character(lab)))) {
+          return(as.character(lab))
+        }
       }
     }
   }
 
   if (!is.null(data) && var %in% names(data)) {
     vl <- attr(data[[var]], "label", exact = TRUE)
-    if (!is.null(vl) && nzchar(trimws(as.character(vl)))) return(as.character(vl))
+    if (!is.null(vl) && nzchar(trimws(as.character(vl)))) {
+      return(as.character(vl))
+    }
   }
 
   var
@@ -185,6 +210,7 @@
 
   survey  <- instrumento$survey
   choices <- instrumento$choices %||% NULL
+  label_col <- .get_label_col_safe(choices)
 
   if (is.null(survey) || !"name" %in% names(survey)) {
     stop("El `instrumento` debe contener `survey` válido.", call. = FALSE)
@@ -197,24 +223,25 @@
   list_main <- as.character(survey$list_name[idx_var])
 
   if (!is.null(choices) &&
-      all(c("list_name", "name", "label") %in% names(choices)) &&
+      all(c("list_name", "name") %in% names(choices)) &&
+      !is.null(label_col) && label_col %in% names(choices) &&
       !is.na(list_main) && nzchar(list_main)) {
 
     ch_main      <- choices[choices$list_name == list_main, , drop = FALSE]
     codigos_main <- as.character(ch_main$name)
-    labels_main  <- as.character(ch_main$label)
+    labels_main  <- as.character(ch_main[[label_col]])
   } else {
     codigos_main <- sort(unique(as.character(data[[var]])))
     labels_main  <- codigos_main
   }
 
   map_main <- stats::setNames(labels_main, codigos_main)
-
-  # ✅ FIX 1: definir SIEMPRE el orden (para cruce y no-cruce)
   orden_lvls_main <- map_main[codigos_main]
 
   df <- data
-  if (!var %in% names(df)) stop("La variable '", var, "' no existe en `data`.", call. = FALSE)
+  if (!var %in% names(df)) {
+    stop("La variable '", var, "' no existe en `data`.", call. = FALSE)
+  }
 
   df[[var]] <- as.character(df[[var]])
   df <- df[!is.na(df[[var]]), , drop = FALSE]
@@ -223,9 +250,10 @@
     df <- df[!(df[[var]] %in% as.character(codigos_perdidos)), , drop = FALSE]
   }
 
-  if (nrow(df) == 0L) stop("No hay datos válidos para '", var, "'.", call. = FALSE)
+  if (nrow(df) == 0L) {
+    stop("No hay datos válidos para '", var, "'.", call. = FALSE)
+  }
 
-  # ---------------------- SIN CRUCE ----------------------
   if (is.null(var_cruce) || !nzchar(var_cruce)) {
 
     df_tab <- df |>
@@ -238,7 +266,6 @@
       ) |>
       dplyr::select(estrato_label, opcion_label, pct, n)
 
-    # ✅ FIX 2: usar orden_lvls_main (y no el typo orden_lvls_main inexistente)
     df_tab$opcion_label <- factor(
       df_tab$opcion_label,
       levels = unique(orden_lvls_main[!is.na(orden_lvls_main)])
@@ -248,8 +275,9 @@
     return(df_tab)
   }
 
-  # ---------------------- CON CRUCE ----------------------
-  if (!var_cruce %in% names(df)) stop("Cruce '", var_cruce, "' no existe en `data`.", call. = FALSE)
+  if (!var_cruce %in% names(df)) {
+    stop("Cruce '", var_cruce, "' no existe en `data`.", call. = FALSE)
+  }
 
   df[[var_cruce]] <- as.character(df[[var_cruce]])
 
@@ -257,11 +285,12 @@
   list_cruce <- if (nrow(fila_cruce)) fila_cruce$list_name[1] else NA_character_
 
   if (!is.null(choices) &&
-      all(c("list_name", "name", "label") %in% names(choices)) &&
+      all(c("list_name", "name") %in% names(choices)) &&
+      !is.null(label_col) && label_col %in% names(choices) &&
       !is.na(list_cruce) && nzchar(list_cruce)) {
 
     ch_cruce  <- choices[choices$list_name == list_cruce, , drop = FALSE]
-    map_cruce <- stats::setNames(as.character(ch_cruce$label), as.character(ch_cruce$name))
+    map_cruce <- stats::setNames(as.character(ch_cruce[[label_col]]), as.character(ch_cruce$name))
   } else {
     niveles_cruce <- sort(unique(df[[var_cruce]]))
     map_cruce     <- stats::setNames(niveles_cruce, niveles_cruce)
@@ -280,10 +309,14 @@
     ) |>
     dplyr::select(estrato_label, opcion_label, pct, n)
 
-  df_tab$opcion_label  <- factor(df_tab$opcion_label,
-                                 levels = unique(orden_lvls_main[!is.na(orden_lvls_main)]))
-  df_tab$estrato_label <- factor(df_tab$estrato_label,
-                                 levels = sort(unique(df_tab$estrato_label)))
+  df_tab$opcion_label  <- factor(
+    df_tab$opcion_label,
+    levels = unique(orden_lvls_main[!is.na(orden_lvls_main)])
+  )
+  df_tab$estrato_label <- factor(
+    df_tab$estrato_label,
+    levels = sort(unique(df_tab$estrato_label))
+  )
 
   if (length(unique(df_tab$estrato_label)) == 1 &&
       unique(as.character(df_tab$estrato_label)) %in% c("Total", "TOTAL", "total")) {
@@ -548,133 +581,16 @@
   list(plot = p, legend = legend_df, title_html = titulo_kpi)
 }
 
-.resolver_var_spec <- function(var_sel, ctx){
-
-  # ctx debe tener: data, instrumento, sm_cols_map, label_var
-  data <- ctx$data
-  inst <- ctx$instrumento
-
-  # 1) Si existe como columna -> SO (o una recod ya materializada)
-  if (var_sel %in% names(data)) {
-    return(list(
-      tipo      = "so",
-      var_madre = var_sel,
-      cols      = var_sel
-    ))
-  }
-
-  # 2) Si NO existe pero es madre SM -> usar mapa de dummies
-  if (!is.null(ctx$sm_cols_map) && var_sel %in% names(ctx$sm_cols_map)) {
-
-    cols <- ctx$sm_cols_map[[var_sel]]
-    cols <- cols[cols %in% names(data)]
-    if (!length(cols)) stop("SM madre sin dummies encontradas: ", var_sel, call. = FALSE)
-
-    # construir opciones (labels) desde instrumento$choices usando list_name de survey
-    surv <- inst$survey
-    choices <- inst$choices
-
-    fila <- surv[surv$name == var_sel, , drop = FALSE]
-    ln   <- if (nrow(fila)) as.character(fila$list_name[1]) else NA_character_
-
-    if (!is.na(ln) && nzchar(ln) &&
-        !is.null(choices) && all(c("list_name","name","label") %in% names(choices))) {
-
-      ch <- choices[choices$list_name == ln, , drop = FALSE]
-      # ojo: tus dummies suelen terminar en ".<code>"
-      # entonces se usa `name` como code (p.ej. "70") y label como opción
-      map_code_to_label <- stats::setNames(as.character(ch$label), as.character(ch$name))
-
-    } else {
-      map_code_to_label <- NULL
-    }
-
-    return(list(
-      tipo      = "sm",
-      var_madre = var_sel,
-      cols      = cols,
-      map_code_to_label = map_code_to_label
-    ))
-  }
-
-  stop("No se pudo resolver variable seleccionada: ", var_sel, call. = FALSE)
-}
-
-.plot_dummy_yesno <- function(x, label_opcion) {
-
-  x <- x[!is.na(x)]
-  if (!length(x)) {
-    return(plotly::plot_ly(height = BAR_HEIGHT) |>
-             plotly::layout(
-               annotations = list(list(text="Sin datos", showarrow=FALSE)),
-               margin = list(l=10, r=10, t=0, b=0)
-             ) |>
-             plotly::config(displayModeBar = FALSE)
-    )
-  }
-
-  n_si <- sum(x == 1)
-  n_no <- sum(x == 0)
-  tot  <- n_si + n_no
-
-  tab <- data.frame(
-    resp = c("Sí","No"),
-    pct  = c(n_si, n_no) / tot
-  )
-
-  p <- plotly::plot_ly(height = BAR_HEIGHT) |>
-    plotly::add_bars(
-      data = tab,
-      x = ~pct,
-      y = I("Total"),
-      orientation = "h",
-      marker = list(
-        color = c("#1B679D", "#E5ECF6"),
-        line = list(width = 0)
-      ),
-      text = paste0("<b>", round(100 * tab$pct, 0), "%</b>"),
-      textposition = "inside",
-      insidetextanchor = "middle",
-      textfont = list(color="white", size=PCT_FSIZE),
-      hoverinfo = "skip"
-    ) |>
-    plotly::layout(
-      barmode = "stack",
-      xaxis = list(range=c(0,1), visible=FALSE),
-      yaxis = list(visible=FALSE),
-      margin = list(l=10, r=10, t=0, b=0),
-      showlegend = FALSE
-    ) |>
-    plotly::config(displayModeBar = FALSE)
-
-  p
-}
-
-
 # =============================================================================
-# resolver_var_spec()
-# -----------------------------------------------------------------------------
 # Helper para variables select_multiple "madre" que en la data viven como dummies
-# (p.ej. p106_recod.1, p106_recod.2, ...) y/o como compacta (_ORIG o madre).
-#
-# Retorna:
-# - cols: vector de dummies disponibles (ordenadas)
-# - map_code_to_label: named list (code -> label) para subtítulos UI
-# - var_madre: nombre de la madre (tal cual se pidió)
-# - list_name: list_name del XLSForm si existe
-# - col_compact: columna compacta detectada si existe (p.ej. p106_recod_ORIG)
 # =============================================================================
 resolver_var_spec <- function(var_madre, ctx, df = NULL) {
 
   `%||%` <- get0("%||%", ifnotfound = function(x, y) if (!is.null(x)) x else y)
 
-  # data: priorizar df si viene (p.ej. data_filtrada()), si no usar ctx$data
   data <- df %||% ctx$data
   inst <- ctx$instrumento
 
-  # ------------------------------------------------------------
-  # 0) Guardas
-  # ------------------------------------------------------------
   if (is.null(data) || !is.data.frame(data) || is.null(inst)) {
     return(list(
       var_madre = var_madre,
@@ -685,16 +601,10 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     ))
   }
 
-  # ------------------------------------------------------------
-  # 1) Detectar dummies disponibles (soporta v. y v_recod.)
-  # ------------------------------------------------------------
   var_esc <- gsub("([\\W])", "\\\\\\1", var_madre)
   pat_dum <- paste0("^", var_esc, "(\\.|_recod\\.)")
   cols <- grep(pat_dum, names(data), value = TRUE)
 
-  # ------------------------------------------------------------
-  # 2) Detectar columna compacta (madre o _ORIG) si existe
-  # ------------------------------------------------------------
   col_compact <- NA_character_
   cand1 <- paste0(var_madre, "_ORIG")
   if (cand1 %in% names(data)) {
@@ -703,10 +613,6 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     col_compact <- var_madre
   }
 
-  # ------------------------------------------------------------
-  # 3) Obtener list_name y diccionario code->label desde inst
-  #    (NA-safe: evita el bug de surv$name con NA)
-  # ------------------------------------------------------------
   surv <- inst$survey %||% NULL
   ch   <- inst$choices %||% NULL
 
@@ -720,22 +626,13 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
   }
 
   map_code_to_label <- NULL
+  label_col <- .get_label_col_safe(ch)
 
-  # 3a) preferir choices del instrumento
-  if (!is.null(ch) && all(c("list_name", "name") %in% names(ch))) {
+  if (!is.null(ch) &&
+      all(c("list_name", "name") %in% names(ch)) &&
+      !is.null(label_col) && label_col %in% names(ch)) {
 
-    # label puede ser "label" o "label::Spanish (ES)" etc.
-    label_col <- NULL
-    if ("label" %in% names(ch)) {
-      label_col <- "label"
-    } else {
-      lab_candidates <- grep("^label(::|$)", names(ch), value = TRUE)
-      if (length(lab_candidates)) label_col <- lab_candidates[1]
-    }
-
-    if (!is.na(list_name) && nzchar(list_name) &&
-        !is.null(label_col) && label_col %in% names(ch)) {
-
+    if (!is.na(list_name) && nzchar(list_name)) {
       ch_v <- ch[ch$list_name == list_name, , drop = FALSE]
       if (nrow(ch_v)) {
         map_code_to_label <- stats::setNames(
@@ -746,9 +643,7 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     }
   }
 
-  # 3b) fallback: labels del atributo si existe (compacta o primera dummy)
   if (is.null(map_code_to_label)) {
-
     cand_attr <- NULL
     if (!is.na(col_compact) && col_compact %in% names(data)) cand_attr <- col_compact
     if (is.null(cand_attr) && length(cols)) cand_attr <- cols[1]
@@ -766,23 +661,17 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
 
   if (is.null(map_code_to_label)) map_code_to_label <- character(0)
 
-  # ------------------------------------------------------------
-  # 4) Ordenar opciones y reordenar dummies coherentemente
-  # ------------------------------------------------------------
-  # extraer code desde dummy: "p40.70" -> "70" ; "p40_recod.70" -> "70"
   dummy_code <- function(x) {
     sub(paste0("^", var_esc, "(\\.|_recod\\.)"), "", x)
   }
 
   dummy_codes <- if (length(cols)) dummy_code(cols) else character(0)
 
-  # 4a) si existe diccionario, usar su orden
   codes_order <- character(0)
   if (length(map_code_to_label) > 0) {
     codes_order <- as.character(names(map_code_to_label))
   }
 
-  # 4b) fallback: si hay compacta, derivar codes existentes en data (split ;)
   if (!length(codes_order) && !is.na(col_compact) && col_compact %in% names(data)) {
     x <- as.character(data[[col_compact]])
     x <- x[!is.na(x) & nzchar(x) & x != "NA"]
@@ -794,12 +683,10 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     }
   }
 
-  # 4c) fallback final: usar codes de dummies
   if (!length(codes_order) && length(dummy_codes)) {
     codes_order <- unique(dummy_codes)
   }
 
-  # Orden numérico si aplica
   if (length(codes_order)) {
     suppressWarnings(num <- as.numeric(codes_order))
     if (!all(is.na(num))) {
@@ -810,14 +697,11 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     }
   }
 
-  # Reordenar cols según codes_order
   if (length(cols) && length(codes_order)) {
     ord_idx <- match(dummy_codes, codes_order)
     if (all(is.na(ord_idx))) {
-      # si por alguna razón no matchea, dejar como está
       ord_idx <- seq_along(cols)
     } else {
-      # los no encontrados al final, estable
       nf <- is.na(ord_idx)
       if (any(nf)) {
         base <- max(ord_idx, na.rm = TRUE)
@@ -827,9 +711,6 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     cols <- cols[order(ord_idx)]
   }
 
-  # ------------------------------------------------------------
-  # 5) Asegurar que map_code_to_label cubra todos los codes visibles
-  # ------------------------------------------------------------
   if (length(dummy_codes)) {
     falt <- setdiff(dummy_codes, names(map_code_to_label))
     if (length(falt)) {
@@ -838,7 +719,6 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     }
   }
 
-  # devolver como LIST para acceso [[code]] fácil
   map_list <- as.list(map_code_to_label)
 
   list(
@@ -850,6 +730,59 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
   )
 }
 
+.plot_dummy_yesno <- function(x, label_opcion = NULL) {
+
+  BAR_HEIGHT <- 64
+  PCT_FSIZE  <- 13
+
+  x <- x[!is.na(x)]
+  if (!length(x)) {
+    return(
+      plotly::plot_ly(height = BAR_HEIGHT) |>
+        plotly::layout(
+          annotations = list(list(text = "Sin datos", showarrow = FALSE)),
+          margin = list(l = 10, r = 10, t = 0, b = 0)
+        ) |>
+        plotly::config(displayModeBar = FALSE, responsive = TRUE)
+    )
+  }
+
+  n_si <- sum(x == 1)
+  n_no <- sum(x == 0)
+  tot  <- n_si + n_no
+
+  tab <- data.frame(
+    resp = c("Sí", "No"),
+    pct  = c(n_si, n_no) / tot
+  )
+
+  p <- plotly::plot_ly(height = BAR_HEIGHT) |>
+    plotly::add_bars(
+      data = tab,
+      x = ~pct,
+      y = I("Total"),
+      orientation = "h",
+      marker = list(
+        color = c("#1B679D", "#E5ECF6"),
+        line = list(width = 0)
+      ),
+      text = paste0("<b>", round(100 * tab$pct, 0), "%</b>"),
+      textposition = "inside",
+      insidetextanchor = "middle",
+      textfont = list(color = "white", size = PCT_FSIZE),
+      hoverinfo = "skip"
+    ) |>
+    plotly::layout(
+      barmode = "stack",
+      xaxis = list(range = c(0, 1), visible = FALSE),
+      yaxis = list(visible = FALSE),
+      margin = list(l = 10, r = 10, t = 0, b = 0),
+      showlegend = FALSE
+    ) |>
+    plotly::config(displayModeBar = FALSE, responsive = TRUE)
+
+  p
+}
 
 # -----------------------------------------------------------------------------
 # Registry de pestañas
@@ -872,15 +805,14 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
           data        = ctx$data,
           instrumento = ctx$instrumento,
           secciones   = ctx$secciones_limpias,
-
-          vars_so       = ctx$so_vars %||% character(0),
+          vars_so     = ctx$so_vars %||% character(0),
           vars_sm_madres = ctx$sm_madres %||% character(0),
-
           colores_apiladas_por_listname = ctx$colores_apiladas_por_listname,
           codigos_perdidos = ctx$codigos_perdidos,
           weight_col = "peso",
           orders_list = ctx$instrumento$orders_list %||% NULL,
-          labels_override = NULL
+          labels_override = NULL,
+          theme_app = ctx$theme_app
         )
       }
     ),
@@ -920,7 +852,8 @@ reporte_interactivo <- function(
     logo_png   = NULL,
     logo_alt   = "Logo",
     logo_height_px = 52,
-    tabs = c("resumen", "relacion", "base_datos")
+    tabs = c("resumen", "relacion", "base_datos"),
+    theme_app  = NULL
 ) {
 
   if (!requireNamespace("shiny", quietly = TRUE) ||
@@ -930,7 +863,15 @@ reporte_interactivo <- function(
     stop("Se requieren 'shiny', 'plotly', 'dplyr' y 'DT' para `reporte_interactivo()`.", call. = FALSE)
   }
 
-  # --- mantener EXACTO lo que haces hoy ---
+  if (!exists("reporte_interactivo_theme_css", mode = "function") ||
+      !exists("reporte_interactivo_theme_js",  mode = "function")) {
+    stop(
+      "No se encontraron las funciones de tema visual. ",
+      "Asegúrate de cargar también el archivo `reporte_interactivo_theme.R`.",
+      call. = FALSE
+    )
+  }
+
   tiene_labels <- any(vapply(names(data), function(v) {
     !is.null(attr(data[[v]], "label",  exact = TRUE)) ||
       !is.null(attr(data[[v]], "labels", exact = TRUE)) ||
@@ -962,11 +903,12 @@ reporte_interactivo <- function(
     vd <- as.character(attr(data, "vars_datetime", exact = TRUE) %||% instrumento$vars_datetime %||% character(0))
     if (v %in% c(vf, vh, vd)) return(TRUE)
 
-    if (!is.null(instrumento$survey) && all(c("name","type") %in% names(instrumento$survey))) {
+    if (!is.null(instrumento$survey) && all(c("name", "type") %in% names(instrumento$survey))) {
       fila <- instrumento$survey[instrumento$survey$name == v, , drop = FALSE]
       if (nrow(fila)) {
         tp <- tolower(as.character(fila$type[1]))
-        if (tp %in% c("start","end","deviceid","subscriberid","simserial","phonenumber","today","username","audit")) {
+        if (tp %in% c("start", "end", "deviceid", "subscriberid", "simserial",
+                      "phonenumber", "today", "username", "audit")) {
           return(TRUE)
         }
       }
@@ -977,14 +919,12 @@ reporte_interactivo <- function(
 
   label_var <- function(v) .obtener_label_var(v, instrumento, data)
 
-  # visibles
   vars_data_visibles <- setdiff(
     names(data),
     names(data)[vapply(names(data), .is_tecnica, logical(1), instrumento = instrumento)]
   )
 
-  # diccionario conceptual
-  so_inst <- survey$name[grepl("^select_one\\b",  tolower(survey$type))]
+  so_inst <- survey$name[grepl("^select_one\\b", tolower(survey$type))]
   sm_inst <- survey$name[grepl("^select_multiple\\b", tolower(survey$type))]
 
   so_vars <- intersect(so_inst, vars_data_visibles)
@@ -1024,19 +964,14 @@ reporte_interactivo <- function(
     out
   }
 
-  # KPIs
   kpi_vars <- (kpi_vars %||% character(0))
   kpi_vars <- unique(kpi_vars[kpi_vars %in% names(data)])
   if (length(kpi_vars) > 2L) kpi_vars <- kpi_vars[1:2]
 
-  # secciones: mantener vars que existan como columna
-  # O mantener SM madres si tienen hijas en sm_cols_map
   secciones_limpias <- lapply(secciones, function(vs) {
 
-    # las que sí existen como columnas (SO típicamente)
     keep <- vs[vs %in% names(data)]
 
-    # las que NO existen como columna, pero sí son SM madres con hijas
     falt <- setdiff(vs, keep)
     if (length(falt)) {
       falt_sm <- falt[falt %in% names(sm_cols_map)]
@@ -1059,11 +994,9 @@ reporte_interactivo <- function(
 
   logo_src <- NULL
   if (!is.null(logo_png) && nzchar(logo_png)) {
-    # Si viene "www/xxx.png", normalizar a "xxx.png"
     logo_src <- sub("^www/", "", logo_png)
   }
 
-  # ---- Contexto compartido ----
   ctx <- list(
     data = data,
     instrumento = instrumento,
@@ -1079,1116 +1012,20 @@ reporte_interactivo <- function(
     colores_apiladas_por_listname = colores_apiladas_por_listname,
     id_unidad = id_unidad,
     kpi_vars = kpi_vars,
-
-    # para Relación
     so_vars   = so_vars,
-    sm_madres = sm_disponibles
+    sm_madres = sm_disponibles,
+    theme_app = theme_app
   )
 
-  # registry (según vector `tabs`)
   tabs_registry <- .make_tabs_registry(ctx, tabs = tabs)
 
-  # -------------------------------- UI ---------------------------------------
   ui <- shiny::fluidPage(
 
     shiny::tags$head(
-
-      # ============================================================
-      # CSS
-      # ============================================================
-      shiny::tags$style(shiny::HTML("
-
-/* ============================================================
-   ====== Base ======
-   ============================================================ */
-body { background: #f5f6fa; color: #1f2933; }
-.container-fluid { max-width: 1400px; }
-
-/* ============================================================
-   ====== Tipografía ======
-   ============================================================ */
-h2, h3, h4 { font-weight: 800; color: #002457; }
-.title { font-weight: 900; color: #002457; }
-
-/* ============================================================
-   ====== Sidebar ======
-   ============================================================ */
-.well, .sidebarPanel {
-  background: #ffffff !important;
-  border: 1px solid #e6e9f2 !important;
-  border-radius: 16px !important;
-  box-shadow: 0 12px 28px rgba(0, 36, 87, 0.06);
-}
-.sidebar h3 { margin-top: 0; color: #002457; }
-.sidebar p  { color: #5f6b7a; font-size: 13px; }
-.sidebar hr { border-top: 1px solid #edf0f7; }
-
-/* ============================================================
-   ====== Inputs ======
-   ============================================================ */
-.selectize-input, .form-control {
-  border-radius: 12px !important;
-  border: 1px solid #e6e9f2 !important;
-  box-shadow: none !important;
-  font-size: 13px;
-}
-.selectize-input.focus, .form-control:focus {
-  border-color: #002457 !important;
-  box-shadow: 0 0 0 3px rgba(0, 36, 87, 0.15) !important;
-}
-
-/* ============================================================
-   ====== Botones ======
-   ============================================================ */
-.btn {
-  border-radius: 12px !important;
-  border: 1px solid #e6e9f2 !important;
-  background: #ffffff !important;
-  font-weight: 700;
-  color: #002457 !important;
-}
-.btn:hover {
-  background: rgba(0, 36, 87, 0.05) !important;
-  border-color: #002457 !important;
-}
-
-/* ============================================================
-   ====== Cards ======
-   ============================================================ */
-.cardbox {
-  background: #ffffff;
-  border: 1px solid #e6e9f2;
-  border-radius: 18px;
-  box-shadow: 0 14px 34px rgba(0, 36, 87, 0.07);
-  padding: 12px;
-}
-
-/* ============================================================
-   ====== Layout spacing ======
-   ============================================================ */
-.row { margin-left: -10px; margin-right: -10px; }
-.col-sm-6, .col-sm-12, .col-sm-9, .col-sm-3 { padding-left: 10px; padding-right: 10px; }
-
-/* ============================================================
-   ====== Header con logo ======
-   ============================================================ */
-.topbar{
-  background:#ffffff;
-  border:1px solid #e6e9f2;
-  border-radius:18px;
-  box-shadow:0 14px 34px rgba(0, 36, 87, 0.07);
-  padding:14px 16px;
-  margin-bottom:14px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:14px;
-}
-.topbar-title{
-  font-size:26px;
-  font-weight:900;
-  color:#002457;
-  line-height:1.1;
-  flex: 1 1 auto;
-}
-.topbar-logo{
-  height:52px;
-  max-width:240px;
-  object-fit:contain;
-  display:block;
-  flex: 0 0 auto;
-}
-
-/* ============================================================
-   ====== Card header (editorial) ======
-   ============================================================ */
-.cardbox-header{
-  padding:10px 12px 6px 12px;
-  border-bottom:1px solid #edf0f7;
-  margin:-12px -12px 10px -12px;
-}
-.cardbox-title{
-  font-size:18px;
-  font-weight:900;
-  color:#002457;
-  line-height:1.15;
-  margin:0;
-}
-.cardbox-subtitle{
-  margin-top:4px;
-  font-size:12px;
-  color:#5f6b7a;
-}
-
-/* ============================================================
-   ====== Plotly ======
-   ============================================================ */
-.plot-container, .svg-container { width: 100% !important; }
-.plotly .main-svg { overflow: visible !important; }
-
-/* ============================================================
-   ====== DataTable: look más “ejecutivo” ======
-   ============================================================ */
-table.dataTable { border-collapse: collapse !important; }
-table.dataTable thead th{
-  background:#f1f3f9;
-  color:#002457;
-  font-weight:800;
-  border-bottom: 1px solid #dfe5f2 !important;
-  border-right: 1px solid #dfe5f2 !important;
-}
-table.dataTable tbody td{
-  font-size:12px;
-  color:#1f2933;
-  border-bottom: 1px solid #edf0f7 !important;
-  border-right: 1px solid #edf0f7 !important;
-}
-table.dataTable tbody tr:hover td{
-  background: #fafbff !important;
-}
-
-/* ============================================================
-   ====== Toggle (switch) elegante: Códigos <-> Etiquetas ======
-   ============================================================ */
-.toggle-row{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  margin-top: 10px;
-  margin-bottom: 10px;
-}
-.toggle-label{
-  font-size: 12px;
-  color: #5f6b7a;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 52px;
-  height: 28px;
-  flex: 0 0 auto;
-}
-.switch input { display:none; }
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background-color: #e6e9f2;
-  transition: .25s;
-  border-radius: 999px;
-  border: 1px solid #dfe5f2;
-}
-.slider:before {
-  position: absolute;
-  content: \"\";
-  height: 22px;
-  width: 22px;
-  left: 3px;
-  bottom: 2.5px;
-  background-color: white;
-  transition: .25s;
-  border-radius: 50%;
-  box-shadow: 0 6px 14px rgba(0,0,0,0.12);
-}
-input:checked + .slider {
-  background-color: rgba(0, 36, 87, 0.20);
-  border-color: rgba(0, 36, 87, 0.35);
-}
-input:checked + .slider:before {
-  transform: translateX(23px);
-}
-
-/* ============================================================
-   ====== Diccionario ======
-   ============================================================ */
-.dicc-kv{
-  display:grid;
-  grid-template-columns: 92px 1fr;
-  gap: 6px 10px;
-  font-size: 12px;
-  color: #1f2933;
-}
-.dicc-k{
-  color: #5f6b7a;
-  font-weight: 800;
-}
-.dicc-v{
-  color: #1f2933;
-  font-weight: 600;
-  word-break: break-word;
-}
-
-/* ============================================================
-   DataTable fijo + wrap
-   ============================================================ */
-table.dataTable { table-layout: fixed !important; width: 100% !important; }
-table.dataTable thead th, table.dataTable tbody td{
-  white-space: normal !important;
-  word-wrap: break-word !important;
-  overflow-wrap: anywhere !important;
-}
-
-/* ============================================================
-   ====== KPI BLOCK (Perfil) ======
-   ============================================================ */
-.kpi-block{
-  display:flex;
-  flex-direction:column;
-  gap:10px;
-  padding-bottom: 6px;
-}
-
-.kpi-block-title{
-  font-size:14px;
-  font-weight:900;
-  color:#002457;
-  line-height:1.15;
-  margin:0;
-}
-
-.kpi-block-subtitle{
-  margin-top:4px;
-  font-size:12px;
-  color:#5f6b7a;
-}
-
-.kpi-n-chip{
-  width:100%;
-  padding:10px 12px;
-  border:1px solid #edf0f7;
-  border-radius:14px;
-  background:#fafbff;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-
-.kpi-n-text{
-  font-size:18px;
-  font-weight:900;
-  color:#002457;
-  letter-spacing:0.01em;
-}
-
-/* Donuts como “pareja” */
-.kpi-grid{
-  display:flex;
-  gap:12px;
-  width:100%;
-  align-items:stretch;
-}
-
-.kpi-cell{
-  flex:1 1 0;
-  border:1px solid #edf0f7;
-  border-radius:16px;
-  padding:8px 8px 10px 8px;
-  background:#ffffff;
-}
-
-/* Leyenda más secundaria */
-.kpi-legend{
-  margin-top:6px;
-  display:flex;
-  flex-wrap:wrap;
-  gap:4px 10px;
-  justify-content:center;
-  font-size:10px;
-  color:#5f6b7a;
-  line-height:1.15;
-}
-
-.kpi-legend-item{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-}
-
-.kpi-legend-swatch{
-  display:inline-block;
-  width:10px;
-  height:10px;
-  border-radius:3px;
-}
-
-/* ====== KPI cell: evitar desbordes del título ====== */
-.kpi-cell{
-  overflow: hidden;
-}
-
-/* plotly title dentro del KPI: wrap fuerte */
-.kpi-cell .plotly .gtitle,
-.kpi-cell .plotly .g-gtitle,
-.kpi-cell .plotly text{
-  white-space: normal !important;
-}
-
-.kpi-cell .plotly{
-  overflow: hidden !important;
-}
-
-/* Título encima del donut (wrap real, centrado) */
-.kpi-donut-title{
-  font-size: 14px;
-  font-weight: 900;
-  color: #002457;
-  text-align: center;
-  line-height: 1.15;
-  margin: 4px 6px 2px 6px;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-/* KPI cell: layout vertical controlado */
-.kpi-cell{
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-}
-
-/* Centrar encabezados y celdas en DataTable */
-table.dataTable thead th { text-align: center !important; vertical-align: middle !important; }
-table.dataTable tbody td { text-align: center !important; vertical-align: middle !important; }
-
-/* ============================================================
-   ====== PERFIL (nuevo layout horizontal) ======
-   ============================================================ */
-.kpi-profile-row{
-  display:flex;
-  gap:12px;
-  align-items:stretch;
-}
-
-/* Columna izquierda: N (cuasi-cuadrado) */
-.kpi-n-card{
-  flex: 0 0 42%;
-  min-width: 320px;
-  border:1px solid #edf0f7;
-  border-radius:16px;
-  background:#ffffff;
-  padding:12px;
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-}
-
-/* Título “Perfil de la muestra” arriba del N */
-.kpi-n-card .kpi-block-title{
-  margin:0 0 8px 0;
-}
-
-/* Chip de N más protagonista */
-.kpi-n-chip{
-  padding:18px 14px;
-  border-radius:16px;
-}
-.kpi-n-text{
-  font-size:22px;
-}
-
-/* Columna derecha: dos donuts */
-.kpi-donuts{
-  flex: 1 1 auto;
-  display:flex;
-  gap:12px;
-  align-items:stretch;
-}
-
-/* Cada donut mantiene estética actual */
-.kpi-donuts .kpi-cell{
-  flex:1 1 0;
-  min-width: 260px;
-}
-
-/* ============================================================
-   ====== RESUMEN SECCIÓN: lista de filas ======
-   ============================================================ */
-.section-summary{
-  display:flex;
-  flex-direction:column;
-  gap:10px;
-}
-
-/* Cada fila editorial */
-.summary-row{
-  border:1px solid #edf0f7;
-  border-radius:16px;
-  background:#ffffff;
-  padding:10px 12px;
-  box-shadow: 0 10px 22px rgba(0, 36, 87, 0.04);
-}
-
-/* Título de la fila (wrap fuerte) */
-.summary-row-title{
-  font-size:13px;
-  font-weight:900;
-  color:#002457;
-  line-height:1.2;
-  margin:0 0 6px 0;
-  overflow-wrap:anywhere;
-}
-
-/* Subtítulo (SO vs SM) */
-.summary-row-subtitle{
-  font-size:11px;
-  color:#5f6b7a;
-  font-weight:700;
-  margin:0 0 8px 0;
-}
-
-/* Contenedor del plot: alto fijo para consistencia */
-.summary-row-plot{
-  height:84px;
-  overflow:hidden;
-}
-
-/* ====== Plotly: texto dentro de barras ====== */
-.plotly text{
-  font-weight:800 !important;
-}
-
-/* Evita recortes raros de svg */
-.plotly .main-svg{
-  overflow: visible !important;
-}
-
-/* ====== Plotly hover: look limpio ====== */
-.plotly .hoverlayer .hovertext{
-  font-family: Arial, sans-serif !important;
-  border-radius: 10px !important;
-}
-
-/* ====== DT centrado total ====== */
-table.dataTable thead th,
-table.dataTable tbody td{
-  text-align:center !important;
-  vertical-align:middle !important;
-}
-
-/* ============================================================
-   Sidebar KPI stack: todo estira al mismo ancho
-   ============================================================ */
-.kpi-sidebar-stack{
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  align-items: stretch;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-/* Los 3 bloques deben tener el mismo ancho */
-.kpi-n-card,
-.kpi-cell{
-  width: 100%;
-  box-sizing: border-box;
-}
-
-/* N centrado y sin “sobresalirse” */
-.kpi-n-card{
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 12px 10px;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-/* Texto N */
-.kpi-n-text{
-  font-weight: 700;
-  font-size: 16px;
-  line-height: 1.2;
-  max-width: 100%;
-  white-space: normal;
-  word-break: break-word;
-}
-
-/* Donut title centrado */
-.kpi-donut-title{
-  text-align: center;
-}
-
-/* ============================================================
-   ====== PATCH FINAL KPI SIDEBAR (NO ROMPER NADA) ======
-   ============================================================ */
-.sidebarPanel .cardbox{ overflow:hidden; }
-.kpi-sidebar-stack .kpi-profile-row{ display:block !important; }
-.kpi-sidebar-stack .kpi-donuts{ display:block !important; }
-
-.kpi-sidebar-stack .kpi-n-card{
-  flex: 0 0 auto !important;
-  min-width: 0 !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  box-sizing: border-box !important;
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 12px 12px !important;
-  border-radius: 16px !important;
-}
-
-.kpi-sidebar-stack .kpi-n-chip{
-  width: 100% !important;
-  max-width: 100% !important;
-  box-sizing: border-box !important;
-  margin: 0 !important;
-  justify-content: center !important;
-}
-
-.kpi-sidebar-stack .kpi-n-text{
-  width: 100% !important;
-  text-align: center !important;
-  max-width: 100% !important;
-  white-space: normal !important;
-  word-break: break-word !important;
-  font-weight: 900 !important;
-  font-size: 18px !important;
-}
-
-.kpi-sidebar-stack .kpi-cell{
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
-  box-sizing: border-box !important;
-  margin: 0 !important;
-}
-
-.kpi-sidebar-stack .plotly.html-widget,
-.kpi-sidebar-stack .plot-container,
-.kpi-sidebar-stack .svg-container{
-  width: 100% !important;
-  max-width: 100% !important;
-}
-
-.kpi-sidebar-stack .kpi-cell{ overflow:hidden !important; }
-
-/* ============================================================
-   PATCH EXTRA: evitar KPIs “comprimidos” en sidebar
-   ============================================================ */
-.kpi-sidebar-stack .kpi-cell{
-  min-height: 310px;
-  padding: 10px 10px 12px 10px;
-  gap: 6px;
-}
-
-#kpi_plot_1, #kpi_plot_2{
-  height: 210px !important;
-  min-height: 210px !important;
-}
-
-#kpi_plot_1 .plot-container,
-#kpi_plot_2 .plot-container,
-#kpi_plot_1 .svg-container,
-#kpi_plot_2 .svg-container{
-  height: 210px !important;
-  min-height: 210px !important;
-}
-
-.kpi-sidebar-stack .plotly.html-widget{
-  width: 100% !important;
-  max-width: 100% !important;
-  flex: 0 0 auto !important;
-}
-
-/* IMPORTANTE: para donuts, permitir overflow visible del SVG */
-.kpi-sidebar-stack .kpi-cell{
-  overflow: visible !important;
-}
-
-.kpi-sidebar-stack .kpi-legend{
-  max-height: 36px;
-  overflow: hidden;
-}
-
-/* ============================================================
-   FIX: leyenda KPI no se corta (sidebar)
-   ============================================================ */
-.kpi-sidebar-stack .kpi-cell{
-  overflow: visible !important;
-  padding-bottom: 14px !important;
-}
-
-.kpi-sidebar-stack .kpi-legend{
-  margin-top: 8px !important;
-  padding-bottom: 6px !important;
-  line-height: 1.25 !important;
-  white-space: normal !important;
-}
-
-.kpi-sidebar-stack .kpi-cell .kpi-legend{
-  max-height: 90px;
-  overflow-y: auto;
-}
-
-#kpi_plot_1, #kpi_plot_2{
-  height: 210px !important;
-  min-height: 210px !important;
-}
-#kpi_plot_1 .plot-container,
-#kpi_plot_2 .plot-container,
-#kpi_plot_1 .svg-container,
-#kpi_plot_2 .svg-container{
-  height: 210px !important;
-  min-height: 210px !important;
-}
-
-.sidebarPanel .cardbox{
-  overflow: visible !important;
-}
-
-/* ===== KPI sidebar: más alto real + nada de recorte ===== */
-.kpi-sidebar-stack .kpi-cell{
-  overflow: visible !important;
-  padding-bottom: 14px !important;
-}
-
-#kpi_plot_1, #kpi_plot_2{
-  height: 260px !important;
-  min-height: 260px !important;
-}
-#kpi_plot_1 .plot-container,
-#kpi_plot_2 .plot-container,
-#kpi_plot_1 .svg-container,
-#kpi_plot_2 .svg-container{
-  height: 260px !important;
-  min-height: 260px !important;
-}
-
-.kpi-sidebar-stack .kpi-legend{
-  margin-top: 8px !important;
-  padding-bottom: 8px !important;
-  line-height: 1.25 !important;
-  white-space: normal !important;
-}
-
-.sidebarPanel .cardbox{
-  overflow: visible !important;
-}
-
-/* ============================================================
-   ====== PATCH KPI SIDEBAR v2 (leyenda DENTRO y completa) ======
-   ============================================================ */
-.kpi-sidebar-stack .kpi-cell{
-  overflow: hidden !important;
-  height: auto !important;
-  min-height: 340px !important;
-  padding-bottom: 14px !important;
-}
-
-#kpi_plot_1, #kpi_plot_2{
-  height: 220px !important;
-  min-height: 220px !important;
-}
-#kpi_plot_1 .plot-container,
-#kpi_plot_2 .plot-container,
-#kpi_plot_1 .svg-container,
-#kpi_plot_2 .svg-container{
-  height: 220px !important;
-  min-height: 220px !important;
-}
-
-.kpi-sidebar-stack .kpi-legend{
-  margin-top: 8px !important;
-  padding: 0 8px 10px 8px !important;
-  line-height: 1.25 !important;
-  white-space: normal !important;
-  justify-content: center !important;
-}
-
-.sidebarPanel .cardbox{
-  overflow: hidden !important;
-}
-
-/* ============================================================
-   FIX RESUMEN: Select_multiple con múltiples barras
-   ============================================================ */
-.summary-row-plot:has(.sm-card-inner){
-  height: auto !important;
-  overflow: visible !important;
-}
-
-.sm-card-inner{
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  height: auto !important;
-  overflow: visible !important;
-}
-
-.sm-option-block{
-  height: auto !important;
-  overflow: visible !important;
-}
-
-/* ============================================================
-   Respiración general arriba
-   ============================================================ */
-body{ padding-top: 14px; }
-
-/* Topbar: más aire */
-.topbar{
-  padding: 18px 18px;
-  margin-bottom: 16px;
-}
-.topbar-title{ padding-top: 2px; }
-
-/* ============================================================
-   Contenedor nav: darle aire
-   ============================================================ */
-.navbar{
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  margin-bottom: 18px !important;
-}
-
-/* UL de tabs: barra moderna */
-.navbar .navbar-nav{
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 0;
-  padding: 10px 12px;
-  background: #ffffff;
-  border: 1px solid #e6e9f2;
-  border-radius: 18px;
-  box-shadow: 0 14px 34px rgba(0, 36, 87, 0.06);
-}
-
-/* Tab como “pill” */
-.navbar .navbar-nav > li > a{
-  border-radius: 999px !important;
-  padding: 10px 14px !important;
-  font-weight: 800;
-  color: #002457 !important;
-  background: transparent !important;
-  border: 1px solid transparent !important;
-}
-
-/* Hover */
-.navbar .navbar-nav > li > a:hover{
-  background: rgba(0, 36, 87, 0.06) !important;
-  border-color: rgba(0, 36, 87, 0.12) !important;
-}
-
-/* Activo: pill sólida suave */
-.navbar .navbar-nav > .active > a,
-.navbar .navbar-nav > .active > a:focus,
-.navbar .navbar-nav > .active > a:hover{
-  background: rgba(0, 36, 87, 0.10) !important;
-  border-color: rgba(0, 36, 87, 0.22) !important;
-  color: #002457 !important;
-}
-
-/* Navbar sin padding propio */
-.navbar{
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
-
-/* Alinear pestañas con sidebar */
-.navbar .navbar-nav{
-  margin-left: 0 !important;
-  padding-left: 0 !important;
-}
-
-/* Match exacto con sidebar */
-.navbar .navbar-nav{
-  padding-left: 10px;
-}
-
-.col-sm-3, .col-sm-9{
-  padding-left: 10px;
-  padding-right: 10px;
-}
-
-/* ============================================================
-   PATCH NAV + TOPBAR (sin romper pestañas)
-   ============================================================ */
-body{ padding-top: 10px; }
-
-.topbar{
-  margin-top: 6px;
-  padding: 16px 18px;
-}
-
-.topbar-title{
-  font-size: 28px;
-  line-height: 1.12;
-}
-.topbar-logo{
-  margin-right: 2px;
-}
-
-.navbar{
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  margin-bottom: 14px !important;
-  min-height: auto !important;
-}
-
-.navbar > .container-fluid{
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
-
-.navbar .nav{
-  margin-left: 0 !important;
-}
-
-.navbar .nav > li > a{
-  color: #002457 !important;
-  font-weight: 900 !important;
-  font-size: 14px;
-  padding: 10px 14px !important;
-  margin-right: 6px;
-  border-radius: 12px;
-  border-bottom: 3px solid transparent;
-  background: transparent !important;
-}
-
-.navbar .nav > li > a:hover{
-  background: rgba(0, 36, 87, 0.05) !important;
-  border-bottom-color: rgba(0, 36, 87, 0.18);
-}
-
-.navbar .nav > li.active > a,
-.navbar .nav > li.active > a:hover,
-.navbar .nav > li.active > a:focus{
-  background: rgba(0, 36, 87, 0.08) !important;
-  border-bottom-color: #002457 !important;
-  color: #002457 !important;
-  box-shadow: none !important;
-}
-
-.navbar .nav{
-  padding-bottom: 6px;
-  border-bottom: 1px solid #e6e9f2;
-}
-
-.container-fluid{
-  padding-left: 15px;
-  padding-right: 15px;
-}
-
-.navbar > .container-fluid{
-  padding-left: 15px !important;
-  padding-right: 15px !important;
-}
-
-/* ============================================================
-   NAVBAR COMO TOGGLE (Apple-ish) + SIN LÍNEA AZUL
-   ============================================================ */
-.navbar{
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  margin-bottom: 14px !important;
-  min-height: auto !important;
-}
-
-.navbar > .container-fluid{
-  padding-left: 15px !important;
-  padding-right: 15px !important;
-}
-
-.navbar .nav{
-  border-bottom: 0 !important;
-  box-shadow: none !important;
-}
-
-.navbar .nav.navbar-nav{
-  position: relative;
-  display: inline-flex !important;
-  align-items: center;
-  gap: 2px;
-  padding: 4px;
-  border-radius: 999px;
-  background: rgba(230, 233, 242, 0.85);
-  border: 1px solid #e6e9f2;
-  box-shadow: 0 10px 22px rgba(0, 36, 87, 0.06);
-}
-
-.navbar .nav.navbar-nav::before{
-  content: \"\";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  height: calc(100% - 6px);
-  width: var(--pill-w, 0px);
-  transform: translateX(var(--pill-x, 0px));
-  border-radius: 999px;
-  background: #ffffff;
-  border: 1px solid rgba(0, 36, 87, 0.10);
-  box-shadow: 0 10px 24px rgba(0,0,0,0.10);
-  transition: transform 220ms cubic-bezier(.2,.9,.2,1),
-              width 220ms cubic-bezier(.2,.9,.2,1);
-  z-index: 0;
-}
-
-.navbar .nav > li{
-  position: relative;
-  z-index: 1;
-}
-
-.navbar .nav > li > a{
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-
-  color: #002457 !important;
-  font-weight: 900 !important;
-  font-size: 13px;
-  padding: 8px 14px !important;
-  border-radius: 999px;
-  line-height: 1;
-}
-
-.navbar .nav > li > a:hover{
-  background: rgba(0, 36, 87, 0.06) !important;
-}
-
-.navbar .nav > li.active > a,
-.navbar .nav > li.active > a:hover,
-.navbar .nav > li.active > a:focus{
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  outline: none !important;
-}
-
-.navbar .nav > li.active > a{
-  color: #002457 !important;
-}
-
-.navbar .nav > li > a{
-  border-bottom: 0 !important;
-}
-
-")),
-
-      # ============================================================
-      # JS (NUEVO, robusto): asegura que el pill siga al tab activo
-      # ============================================================
-      shiny::tags$script(shiny::HTML("
-(function(){
-  function getNav(){
-    return document.querySelector('.navbar .nav.navbar-nav') ||
-           document.querySelector('.navbar .nav'); // fallback
-  }
-
-  function getActiveLink(nav){
-    if(!nav) return null;
-    return nav.querySelector('li.active > a') ||
-           nav.querySelector('li.active a') ||
-           nav.querySelector('a[aria-selected=\"true\"]');
-  }
-
-  function updatePill(){
-    var nav = getNav();
-    if(!nav) return;
-
-    // Solo tiene sentido si el CSS del pill existe (navbar-nav::before)
-    // Igual calculamos siempre, no rompe nada.
-    var active = getActiveLink(nav);
-    if(!active) return;
-
-    var navRect = nav.getBoundingClientRect();
-    var aRect   = active.getBoundingClientRect();
-
-    // Posición relativa
-    var x = (aRect.left - navRect.left);
-    var w = aRect.width;
-
-    nav.style.setProperty('--pill-x', x + 'px');
-    nav.style.setProperty('--pill-w', w + 'px');
-  }
-
-  function bindNavClicks(){
-    // Si el cambio de tab se da por click, recalculamos al toque
-    document.addEventListener('click', function(e){
-      var a = e.target && (e.target.closest ? e.target.closest('.navbar a') : null);
-      if(!a) return;
-
-      // Dejamos que Bootstrap/Shiny cambien la clase active, luego recalculamos
-      setTimeout(updatePill, 0);
-      setTimeout(updatePill, 50);
-      setTimeout(updatePill, 120);
-    }, true);
-  }
-
-  function observeActiveChanges(){
-    var nav = getNav();
-    if(!nav || !window.MutationObserver) return;
-
-    var obs = new MutationObserver(function(muts){
-      // Si cambió clase/atributos dentro del nav, recalculamos
-      var should = muts.some(function(m){
-        return m.type === 'attributes' || m.type === 'childList';
-      });
-      if(should){
-        // micro-debounce
-        window.requestAnimationFrame(updatePill);
-      }
-    });
-
-    obs.observe(nav, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ['class','style','aria-selected']
-    });
-  }
-
-  // 1) Primer render
-  document.addEventListener('DOMContentLoaded', function(){
-    setTimeout(updatePill, 80);
-    setTimeout(updatePill, 200);
-    bindNavClicks();
-    observeActiveChanges();
-  });
-
-  // 2) Si Bootstrap emite evento al cambiar tab (algunas versiones sí)
-  document.addEventListener('shown.bs.tab', function(){
-    setTimeout(updatePill, 0);
-  });
-
-  // 3) Cuando Shiny actualiza UI (tabs dinámicas / re-render)
-  if(window.Shiny){
-    // cada vez que Shiny “da valor” a algo, puede haberse movido el layout
-    document.addEventListener('shiny:value', function(){
-      setTimeout(updatePill, 0);
-      setTimeout(updatePill, 80);
-    });
-
-    // cuando Shiny termina de hacer binding del DOM
-    document.addEventListener('shiny:connected', function(){
-      setTimeout(updatePill, 120);
-    });
-  }
-
-  // 4) Resize
-  window.addEventListener('resize', function(){
-    updatePill();
-  });
-
-})();
-"))
-
-
+      reporte_interactivo_theme_css(theme_app = theme_app),
+      reporte_interactivo_theme_js()
     ),
 
-    # ============================================================
-    # Header
-    # ============================================================
     shiny::div(
       class = "topbar",
       shiny::div(class = "topbar-title", titulo),
@@ -2200,9 +1037,6 @@ body{ padding-top: 10px; }
       )
     ),
 
-    # ============================================================
-    # Navbar dinámico
-    # ============================================================
     do.call(
       shiny::navbarPage,
       c(
@@ -2212,8 +1046,6 @@ body{ padding-top: 10px; }
     )
   )
 
-
-  # ------------------------------- SERVER ------------------------------------
   server <- function(input, output, session) {
     for (nm in names(tabs_registry)) {
       tabs_registry[[nm]]$server(ctx, input, output, session)
