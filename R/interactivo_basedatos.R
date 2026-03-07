@@ -1,5 +1,5 @@
 # =============================================================================
-# Tab 2: Base de datos (UI + server) — SM dummies visibles + diccionario elegante
+# Tab 3: Base de datos (UI + server) — SM dummies visibles + diccionario elegante
 # =============================================================================
 #' @keywords internal
 #' @noRd

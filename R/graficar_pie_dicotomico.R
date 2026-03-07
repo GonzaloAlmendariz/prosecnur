@@ -101,8 +101,8 @@ graficar_pie <- function(
 
     # Debug
     debug_ph_bordes = FALSE,
-    debug_color     = "#8A2BE2",
-    debug_lw        = 2.8,
+    debug_ph_col     = "#8A2BE2",
+    debug_ph_lwd        = 2.8,
 
     # Exportación
     exportar    = c("rplot", "png", "ppt", "word"),
@@ -303,7 +303,7 @@ graficar_pie <- function(
       cowplot::ggdraw(g) +
         cowplot::draw_grob(
           grid::rectGrob(
-            gp = grid::gpar(col = debug_color, fill = NA, lwd = debug_lw)
+            gp = grid::gpar(col = debug_ph_col, fill = NA, lwd = debug_ph_lwd)
           ),
           x = 0, y = 0, width = 1, height = 1
         )

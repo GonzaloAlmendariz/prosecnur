@@ -95,6 +95,8 @@ graficar_radar <- function(
     tabla_ph_gap   = 0.03,
     tabla_ph_margin_top = 0.04,
     tabla_ph_margin_bot = 0.06,
+    tabla_firstcol_frac = 0.55,
+    tabla_wrap_header   = 14,
 
     tabla_auto_fit = FALSE,
     tabla_fit_pad   = 0.98,
@@ -243,7 +245,7 @@ graficar_radar <- function(
     highlight_threshold = 60,
     highlight_col = "red",
     padding_mm = 3,
-    firstcol_frac = 0.62
+    firstcol_frac = tabla_firstcol_frac
   ) {
     if (!requireNamespace("gridExtra", quietly = TRUE)) stop("Requiere gridExtra.", call. = FALSE)
 
@@ -251,8 +253,16 @@ graficar_radar <- function(
     n_cols <- ncol(tb)
 
     firstcol_frac <- suppressWarnings(as.numeric(firstcol_frac))
-    if (!is.finite(firstcol_frac)) firstcol_frac <- 0.62
+    if (!is.finite(firstcol_frac)) firstcol_frac <- tabla_firstcol_frac
     firstcol_frac <- max(0.40, min(0.80, firstcol_frac))
+
+    if (requireNamespace("stringr", quietly=TRUE) && is.finite(tabla_wrap_header) && tabla_wrap_header > 0) {
+      nms <- names(tb)
+      if (length(nms) >= 2) {
+        nms[-1] <- stringr::str_wrap(nms[-1], width = as.integer(tabla_wrap_header))
+        names(tb) <- nms
+      }
+    }
 
     tg <- gridExtra::tableGrob(
       tb,

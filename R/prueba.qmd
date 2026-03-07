@@ -1,598 +1,82 @@
-
-# Ejemplo 1
-
+---
+title: "prueba"
+format: html
+---
 
 ```{r}
-# ============================================================
-# EJEMPLO RÁPIDO (FAKE DATA) — CANVAS ON + BUFFERS + LEYENDA CUADRADA
-# Nota: el ejemplo queda alineado con la versión corregida de la función:
-# - ya NO existen: etiquetas_margin_r_pt, etiquetas_expand_y, extra_center_x, extra_titulo_shift_x
-# - el título del PH extra se controla con `titulo_barra_extra` (o preset) y se dibuja arriba del PH
-# ============================================================
+# =============================================================================
+# Ejemplo COMPLETO (Radar + tabla derecha estilo TOP TWO BOX)
+# - Usa tu paleta SI o SI (colores_series nombrado por etiqueta final)
+# - La tabla usa el mismo orden de ejes y grupos del radar
+# - Umbral rojo configurable (<= umbral_rojo_pct)
+# =============================================================================
 
 library(dplyr)
 library(tidyr)
-library(ggplot2)
-library(cowplot)
+library(tibble)
 
-# -------------------------
-# 1) Data ficticia (ancha)
-# -------------------------
-set.seed(123)
-
-df_fake <- tibble::tibble(
-  categoria = c("Atención", "Infraestructura", "Información", "Resolución de casos", "Trato"),
-  N         = c(180, 160, 150, 170, 180),
-  pct_1     = runif(5, 0.05, 0.20),
-  pct_2     = runif(5, 0.10, 0.25),
-  pct_3     = runif(5, 0.15, 0.30),
-  pct_4     = runif(5, 0.15, 0.35),
-  pct_5     = runif(5, 0.10, 0.30)
+df_fake_radar_plot <- tibble::tribble(
+  ~Opciones, ~Docentes, ~Estudiantes, ~Administrativos,
+  "Mejorar la orientación inicial y el acompañamiento durante el proceso",       0.82, 0.94, 0.66,
+  "Implementar canales claros de información y derivación entre servicios",      0.76, 0.69, 0.61,
+  "Fortalecer la disponibilidad de horarios y la flexibilidad de atención",      0.94, 0.58, 0.47,
+  "Reducir tiempos de espera y simplificar pasos para completar el trámite",     0.85, 0.49, 0.92,
+  "Mejorar el trato y la claridad de las explicaciones (comunicación empática)", 0.41, 0.33, 0.12
 )
 
-# Normalizar a 1 por fila (tu función igual normaliza, pero ok)
-df_fake <- df_fake |>
-  rowwise() |>
-  mutate(
-    s = sum(c_across(starts_with("pct_"))),
-    across(starts_with("pct_"), ~ .x / s)
-  ) |>
-  ungroup() |>
-  select(-s)
+df_fake_radar_long <- df_fake_radar_plot |>
+  pivot_longer(
+    cols      = c("Docentes","Estudiantes","Administrativos"),
+    names_to  = ".grupo",
+    values_to = ".valor"
+  )
 
-cols_porcentaje <- c("pct_1","pct_2","pct_3","pct_4","pct_5")
+p_radar <- graficar_radar(
+  data = df_fake_radar_long,
+  var_eje   = "Opciones",
+  var_grupo = ".grupo",
+  var_valor = ".valor",
 
-etiquetas_grupos <- c(
-  pct_1 = "Muy insatisfecho",
-  pct_2 = "Insatisfecho",
-  pct_3 = "Neutral",
-  pct_4 = "Satisfecho",
-  pct_5 = "Muy satisfecho"
-)
+  escala_valor   = "proporcion_1",
+  cortes_grilla  = 6,
+  limites        = c(0, 1),
 
-colores_grupos <- c(
-  "Muy insatisfecho" = "#C0392B",
-  "Insatisfecho"     = "#E67E22",
-  "Neutral"          = "#F1C40F",
-  "Satisfecho"       = "#27AE60",
-  "Muy satisfecho"   = "#1E8449"
-)
+  rellenar_poligono = FALSE,
+  mostrar_radios    = FALSE,
 
-# -------------------------
-# 2) Llamada — CANVAS ON
-# -------------------------
-p <- graficar_barras_apiladas(
-  data             = df_fake,
-  var_categoria    = "categoria",
-  var_n            = "N",
-  cols_porcentaje  = cols_porcentaje,
-  etiquetas_grupos = etiquetas_grupos,
-  escala_valor     = "proporcion_1",
-  colores_grupos   = colores_grupos,
+  eje_label_mult    = 1.2,
+  mostrar_niveles   = FALSE,
+  textos_negrita    = c("ejes", "leyenda"),
+  colores_series = c("Docentes"        = "#1B4F72",
+                     "Estudiantes"     = "#7D3C98",
+                     "Administrativos" = "#B03A2E"),
 
-  # comportamiento
-  mostrar_valores     = TRUE,
-  umbral_etiqueta     = 0.06,
-  umbral_etiqueta_peq = 0.035,
-  decimales           = 0,
+  mostrar_leyenda   = TRUE,
+  leyenda_posicion  = "abajo",
+  legend_n_por_fila = 3,
+  legend_key_cm     = 0.60,
+  legend_espaciado  = 20,
+  size_leyenda      = 12,
+  size_ejes = 10,
 
-  # barra extra
-  mostrar_barra_extra = TRUE,
-  barra_extra_preset  = "totales",
-  # --- CANVAS ---
+  
+  mostrar_tabla_derecha = TRUE,
+  titulo_tabla    = "TOP TWO BOX",
+  umbral_rojo_pct = 60,
+  tabla_digits    = 0,
+
+  # =========================
+  # CANVAS
+  # =========================
   usar_canvas = TRUE,
-
-  canvas_w_etiquetas      = 0.12,
-  canvas_w_buf_etq_bars   = 0.02,   
-  canvas_w_bars           = 0.60,
-  canvas_w_buf_bars_extra = 0.02,   
-  canvas_w_extra          = 0.12,
-  canvas_h_toprow_in      = 0.10,
-
-
-  legend_key_cm = 0.40,
-  legend_espaciado = 20,
-  legend_n_por_fila = 6,
-
-  # alturas (pulgadas)
-  canvas_h_header_in  = 0.75,
-  canvas_h_legend_in  = 0.35,
-  canvas_h_caption_in = 0.20,
-
-  # panel: 8 filas -> bajar un poco para que no se “aplasten”
-  alto_por_categoria  = 0.46,
-
-  # grosor
-  grosor_modo        = "auto",
-  grosor_barras      = 0.72,
-  grosor_barras_mult = 1.05,
-
-  # textos
-  titulo    = "Lorem ipsum dolor sit amet, consectetur adipiscing elit",
-  subtitulo = "Nulla pulvinar ligula laoreet nulla sollicitudin sodales",
-
-
-  # estilo de texto (tamaños y colores)
-  size_titulo      = 12,
-  size_subtitulo   = 9,
-  size_leyenda     = 10,
-  size_ejes        = 10,
-  size_nota_pie    = 8,
-  size_barra_extra = 10,
-  size_titulo_extra = 10,
-  ancho_max_eje_y = 15,
-  size_texto_barras = 4,
-
-  
-  color_titulo     = "#000000",
-  color_subtitulo  = "#000000",
-  color_leyenda    = "#000000",
-  color_ejes       = "#000000",
-  color_nota_pie   = "#000000",
-
-  textos_negrita = c("titulo", "leyenda", "barra_extra", "eje_y"),
-  
-  encabezado_desplazamiento_in = 0,  
-  encabezado_separacion_in     = 0.20,  
-  leyenda_desplazamiento_in    = 0, 
-
-  # debug: bordes de placeholders
-  debug_ph_bordes = T,
-  debug_ph_col    = "#FF00FF",
-  debug_ph_lwd    = 0.6,
-
-  # salida
-  exportar = "rplot",
-  path_salida = "prueba.pptx"
-)
-
-p
-```
-
-
-# Ejemplo 2
-
-```{r}
-# ============================================================
-# EJEMPLO (FAKE DATA) — 2 FILAS + 8 CATEGORÍAS — CANVAS ON
-# - 8 categorías (filas)
-# - 5 segmentos (Likert)
-# - título / subtítulo distintos
-# ============================================================
-
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(cowplot)
-
-set.seed(2026)
-
-# ------------------------------------------------------------
-# 1) Data ficticia (8 categorías)
-# ------------------------------------------------------------
-df_fake2 <- tibble::tibble(
-  categoria = c(
-    "Acceso y orientación",
-    "Infraestructura del local",
-    "Trato del personal",
-    "Tiempo de espera",
-    "Claridad de la información",
-    "Solución del caso",
-    "Seguimiento posterior",
-    "Satisfacción general"
-  ),
-  N     = sample(120:260, 8, replace = TRUE),
-  pct_1 = runif(8, 0.03, 0.18),
-  pct_2 = runif(8, 0.05, 0.22),
-  pct_3 = runif(8, 0.10, 0.30),
-  pct_4 = runif(8, 0.18, 0.40),
-  pct_5 = runif(8, 0.08, 0.35)
-)
-
-# Normalizar a 1 por fila (tu función igual normaliza y “cierra” a 1, pero ok)
-df_fake2 <- df_fake2 |>
-  rowwise() |>
-  mutate(
-    s = sum(c_across(starts_with("pct_"))),
-    across(starts_with("pct_"), ~ .x / s)
-  ) |>
-  ungroup() |>
-  select(-s)
-
-cols_porcentaje <- c("pct_1","pct_2","pct_3","pct_4","pct_5")
-
-etiquetas_grupos <- c(
-  pct_1 = "Muy insatisfecho",
-  pct_2 = "Insatisfecho",
-  pct_3 = "Neutral",
-  pct_4 = "Satisfecho",
-  pct_5 = "Muy satisfecho"
-)
-
-colores_grupos <- c(
-  "Muy insatisfecho" = "#C0392B",
-  "Insatisfecho"     = "#E67E22",
-  "Neutral"          = "#F1C40F",
-  "Satisfecho"       = "#27AE60",
-  "Muy satisfecho"   = "#1E8449"
-)
-
-# ------------------------------------------------------------
-# 2) Llamada — CANVAS ON (ajustes para 8 filas)
-# ------------------------------------------------------------
-p2 <- graficar_barras_apiladas(
-  data             = df_fake2,
-  var_categoria    = "categoria",
-  var_n            = "N",
-  cols_porcentaje  = cols_porcentaje,
-  etiquetas_grupos = etiquetas_grupos,
-  escala_valor     = "proporcion_1",
-  colores_grupos   = colores_grupos,
-
-  # comportamiento
-  mostrar_valores     = TRUE,
-  umbral_etiqueta     = 0.055,
-  umbral_etiqueta_peq = 0.030,
-  decimales           = 0,
-
-  # barra extra
-  mostrar_barra_extra = TRUE,
-  barra_extra_preset  = "totales",
-
-  # --- CANVAS ---
-  usar_canvas = TRUE,
-
-  # columnas: etiquetas | buf | barras | buf | extra
-  canvas_w_etiquetas      = 0.12,
-  canvas_w_buf_etq_bars   = 0.02,   
-  canvas_w_bars           = 0.60,
-  canvas_w_buf_bars_extra = 0.02,   
-  canvas_w_extra          = 0.12,
-  canvas_h_toprow_in      = 0.10,
-
-  # alturas (pulgadas)
-  canvas_h_header_in  = 0.75,
-  canvas_h_legend_in  = 0.75,
-  canvas_h_caption_in = 0.20,
-
-  # panel: 8 filas -> bajar un poco para que no se “aplasten”
-  alto_por_categoria  = 0.46,
-
-  # grosor
-  grosor_modo        = "auto",
-  grosor_barras      = 0.72,
-  grosor_barras_mult = 1.05,
-
-  # textos
-  titulo    = "Lorem ipsum dolor sit amet, consectetur adipiscing elit",
-  subtitulo = "Nulla pulvinar ligula laoreet nulla sollicitudin sodales",
-
- # estilo de texto (tamaños y colores)
-  size_titulo      = 12,
-  size_subtitulo   = 9,
-  size_leyenda     = 10,
-  size_ejes        = 10,
-  size_nota_pie    = 8,
-  size_barra_extra = 10,
-  size_titulo_extra = 10,
-  ancho_max_eje_y = 15,
-  size_texto_barras = 4,
-  
-        
-  
-  color_titulo     = "#000000",
-  color_subtitulo  = "#000000",
-  color_leyenda    = "#000000",
-  color_ejes       = "#000000",
-  color_nota_pie   = "#000000",
-
-  textos_negrita = c("titulo", "leyenda", "barra_extra", "eje_y"),
- 
-  encabezado_desplazamiento_in = 0,  
-  encabezado_separacion_in     = 0.20,  
-  leyenda_desplazamiento_in    = 0,  
- 
-  legend_key_cm = 0.40,
-  legend_espaciado = 20,
-  legend_n_por_fila = 5,
-
-  # debug: bordes de placeholders
+  exportar = "ppt",
   debug_ph_bordes = TRUE,
-  debug_ph_col    = "#FF00FF",
-  debug_ph_lwd    = 0.6,
+  path_salida = "radar.pptx",
 
-  # salida
-  exportar = "rplot",
-  path_salida = "prueba.pptx"
+  canvas_h_header_in = 0.45,
+  canvas_h_legend_in = 0.15
 )
 
-p2
+p_radar
 ```
-
-# Ejemplo 3
-
-```{r}
-# ============================================================
-# EJEMPLO (FAKE DATA) — 2 CATEGORÍAS (2 BARRAS) + 8 OPCIONES (8 SEGMENTOS)
-# - 2 filas (categorías)
-# - 8 segmentos apilados (100%)
-# ============================================================
-
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(cowplot)
-
-set.seed(2026)
-
-# ------------------------------------------------------------
-# 1) Data ficticia (2 categorías x 8 opciones)
-# ------------------------------------------------------------
-df_fake3 <- tibble::tibble(
-  categoria = c("Grupo A", "Grupo B"),
-  N         = sample(250:450, 2, replace = TRUE),
-
-  pct_1 = runif(2, 0.02, 0.18),
-  pct_2 = runif(2, 0.02, 0.18),
-  pct_3 = runif(2, 0.02, 0.18),
-  pct_4 = runif(2, 0.02, 0.18),
-  pct_5 = runif(2, 0.02, 0.18),
-  pct_6 = runif(2, 0.02, 0.18),
-  pct_7 = runif(2, 0.02, 0.18),
-  pct_8 = runif(2, 0.02, 0.18)
-)
-
-# Normalizar a 1 por fila
-df_fake3 <- df_fake3 |>
-  rowwise() |>
-  mutate(
-    s = sum(c_across(starts_with("pct_"))),
-    across(starts_with("pct_"), ~ .x / s)
-  ) |>
-  ungroup() |>
-  select(-s)
-
-cols_porcentaje_8 <- paste0("pct_", 1:8)
-
-etiquetas_grupos_8 <- c(
-  pct_1 = "Opción 1",
-  pct_2 = "Opción 2",
-  pct_3 = "Opción 3",
-  pct_4 = "Opción 4",
-  pct_5 = "Opción 5",
-  pct_6 = "Opción 6",
-  pct_7 = "Opción 7",
-  pct_8 = "Opción 8"
-)
-
-# Paleta simple (8)
-colores_grupos_8 <- c(
-  "Opción 1" = "#1B9E77",
-  "Opción 2" = "#D95F02",
-  "Opción 3" = "#7570B3",
-  "Opción 4" = "#E7298A",
-  "Opción 5" = "#66A61E",
-  "Opción 6" = "#E6AB02",
-  "Opción 7" = "#A6761D",
-  "Opción 8" = "#666666"
-)
-
-# ------------------------------------------------------------
-# 2) Llamada — CANVAS ON
-# ------------------------------------------------------------
-p3 <- graficar_barras_apiladas(
-  data             = df_fake3,
-  var_categoria    = "categoria",
-  var_n            = "N",
-  cols_porcentaje  = cols_porcentaje_8,
-  etiquetas_grupos = etiquetas_grupos_8,
-  escala_valor     = "proporcion_1",
-  colores_grupos   = colores_grupos_8,
-
-  # comportamiento (2 barras => umbral puede ser más alto)
-  mostrar_valores     = TRUE,
-  umbral_etiqueta     = 0.08,
-  umbral_etiqueta_peq = 0.045,
-  decimales           = 0,
-
-  # barra extra
-  mostrar_barra_extra = TRUE,
-  barra_extra_preset  = "totales",
-
-  usar_canvas = TRUE,
-
-  # columnas
-  canvas_w_etiquetas      = 0.12,
-  canvas_w_buf_etq_bars   = 0.02,   
-  canvas_w_bars           = 0.60,
-  canvas_w_buf_bars_extra = 0.02,   
-  canvas_w_extra          = 0.12,
-  canvas_h_toprow_in      = 0.10,
-
-  # alturas
-  canvas_h_header_in  = 0.35,
-  canvas_h_legend_in  = 0.35,
-  canvas_h_caption_in = 0.20,
-
-  # 2 filas => panel compacto
-  alto_por_categoria  = 0.3,
-
-
-  grosor_modo        = "auto",
-  grosor_barras      = 0.72,
-  grosor_barras_mult = 0.9,
-
-  # textos
-  titulo    = "Lorem ipsum dolor sit amet, consectetur adipiscing elit",
-  subtitulo = "Nulla pulvinar ligula laoreet nulla sollicitudin sodales",
-
-  size_titulo       = 13,
-  size_subtitulo    = 9,
-  size_leyenda      = 10,
-  size_ejes         = 11,
-  size_nota_pie     = 8,
-  size_texto_barras = 4,
-  size_barra_extra  = 10,
-  size_titulo_extra = 10,
-
-  # wrap eje Y (por si “Grupo A/B” se vuelve largo en tu caso real)
-  ancho_max_eje_y = 18,
-
-  textos_negrita = c("titulo", "leyenda", "barra_extra", "eje_y"),
-  
-  legend_key_cm = 0.40,
-  legend_espaciado = 20,
-  legend_n_por_fila = 8,
-  leyenda_desplazamiento_in = 0.1,
-  
-
-  debug_ph_bordes = TRUE,
-  debug_ph_col    = "#FF00FF",
-  debug_ph_lwd    = 0.6,
-
-  # salida
-  exportar = "rplot",
-  path_salida = "prueba.pptx"
-)
-
-p3
-```
-
-# Ejemplo 4
-
-```{r}
-# ============================================================
-# EJEMPLO RÁPIDO (FAKE DATA) — "AGRUPADAS" + CANVAS ON (SIN LEYENDA)
-# SOLO 1 SERIE: % de menciones por alternativa (pregunta abierta codificada)
-# 8 filas (alternativas tipo Lorem ipsum), % independientes (NO suman 100)
-# ============================================================
-
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(cowplot)
-
-set.seed(129)
-
-# -------------------------
-# 1) Data ficticia (ancha)
-# -------------------------
-df_fake <- tibble::tibble(
-  alternativa = c(
-    "Lorem ipsum dolor",
-    "Sit amet consectetur",
-    "Adipiscing elit sed",
-    "Do eiusmod tempor",
-    "Incididunt ut labore",
-    "Et dolore magna",
-    "Aliqua ut enim",
-    "Ad minim veniam"
-  ),
-  N = sample(140:520, 8, replace = TRUE),
-
-  # % 0–100 por alternativa (independiente; NO suma 100)
-  pct_mencion = runif(8,  5, 65)
-)
-
-cols_porcentaje <- c("pct_mencion")
-
-# OJO: names deben coincidir con cols_porcentaje (solo una serie)
-etiquetas_series <- c(
-  pct_mencion = "Mención"
-)
-
-colores_series <- c(
-  "Mención" = "#002768"
-)
-
-# -------------------------
-# 2) Llamada — CANVAS ON (SIN LEYENDA)
-# -------------------------
-p <- graficar_barras_agrupadas(
-  data             = df_fake,
-  var_categoria    = "alternativa",
-  var_n            = "N",
-  cols_porcentaje  = cols_porcentaje,
-  etiquetas_series = etiquetas_series,
-  escala_valor     = "proporcion_100",
-  orientacion      = "horizontal",
-  colores_series   = colores_series,
-
-  # comportamiento
-  mostrar_valores   = TRUE,
-  decimales         = 0,
-  umbral_etiqueta   = 0.001,
-  umbral_posicion   = 0.07,
-  sufijo_etiqueta   = "",
-
-  # REGLA: eje fijo 0–100% salvo TRUE
-  usar_eje_libre    = FALSE,
-
-  # barra extra (columna derecha independiente)
-  mostrar_barra_extra = TRUE,
-  prefijo_barra_extra = "N = ",
-  titulo_barra_extra  = "Base",
-  invertir_barras = T,
-
-  # --- CANVAS ---
-  usar_canvas = TRUE,
-
-  canvas_w_etiquetas      = 0.12,
-  canvas_w_buf_etq_bars   = 0.02,   
-  canvas_w_bars           = 0.60,
-  canvas_w_buf_bars_extra = 0.02,   
-  canvas_w_extra          = 0.12,
-
-  canvas_h_header_in  = 0.70,
-  canvas_h_legend_in  = 0.00,  # SIN LEYENDA
-  canvas_h_caption_in = 0.30,
-  canvas_h_toprow_in  = 0.10,
-  alto_por_categoria  = 0.48,
-  ancho_max_eje_y = 18,
-
-  # textos
-  titulo    = "Alternativas codificadas (pregunta abierta) — % de menciones",
-  subtitulo = "Porcentaje independiente por alternativa (respuesta múltiple; no suma 100%)",
-
-  size_titulo       = 12,
-  size_subtitulo    = 9,
-  size_ejes         = 10,
-  size_nota_pie     = 8,
-  size_texto_barras = 3.8,
-  size_barra_extra  = 9,
-
-  color_titulo      = "#000000",
-  color_subtitulo   = "#000000",
-  color_ejes        = "#000000",
-  color_nota_pie    = "#000000",
-  color_barra_extra = "#000000",
-
-  textos_negrita = c("titulo", "barra_extra", "eje_y"),
-
-  # SIN LEYENDA
-  mostrar_leyenda = FALSE,
-
-  # debug placeholders
-  debug_ph_bordes = TRUE,
-  debug_ph_col    = "#FF00FF",
-  debug_ph_lwd    = 0.6,
-
-  # salida
-  exportar = "rplot"
-)
-
-p
-```
-
-
-
-
-
-
-
-
-
-
-
-
 

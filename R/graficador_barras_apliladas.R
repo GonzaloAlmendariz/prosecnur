@@ -167,6 +167,13 @@ graficar_barras_apiladas <- function(
     textos_negrita        = NULL,
 
     # ==========================
+    # BOXES POR LABEL
+    # ==========================
+    top2box_labels     = NULL,  # ej: c("De acuerdo","Muy de acuerdo")
+    top3box_labels     = NULL,  # ej: c("Algo de acuerdo","De acuerdo","Muy de acuerdo")
+    bottom2box_labels  = NULL,   # ej: c("Nada de acuerdo","En desacuerdo")
+
+    # ==========================
     # CANVAS CONTROLADO
     # ==========================
     usar_canvas           = FALSE,
@@ -373,12 +380,15 @@ graficar_barras_apiladas <- function(
     )
   ) +
     ggplot2::geom_col(width = grosor_eff) +
-    ggplot2::scale_x_continuous(limits = c(0, x_max_bars), expand = expand_x) +
+    ggplot2::scale_x_continuous(expand = expand_x) +
     ggplot2::scale_y_discrete(
       limits = cat_lvls, drop = FALSE,
       expand = ggplot2::expansion(mult = c(0, 0), add = c(0, 0))
     ) +
-    ggplot2::coord_cartesian(clip = if (usar_canvas) "on" else "off") +
+    ggplot2::coord_cartesian(
+      xlim = c(0, x_max_bars),
+      clip = if (usar_canvas) "on" else "off"
+    ) +
     ggplot2::theme_minimal(base_size = 9) +
     ggplot2::theme(
       panel.grid.major = ggplot2::element_blank(),
@@ -558,19 +568,46 @@ graficar_barras_apiladas <- function(
       if (is.null(color_barra_extra))   color_barra_extra_int <- pulso_azul
       fontface_barra_extra <- "bold"
     } else {
+
       base_mat <- df_wide_extra[, cols_porcentaje, drop = FALSE]
       if (escala_valor == "proporcion_100") base_mat <- base_mat / 100
-      ordenado <- t(apply(as.matrix(base_mat), 1, sort, decreasing = TRUE))
+
+      # labels disponibles por columna: names(etiquetas_grupos)=cols, values=labels
+      .cols_from_labels <- function(labels_sel, etiquetas_grupos, cols_porcentaje) {
+        if (is.null(labels_sel) || !length(labels_sel)) return(character(0))
+        labels_sel <- trimws(as.character(labels_sel))
+        hit <- names(etiquetas_grupos)[as.character(etiquetas_grupos) %in% labels_sel]
+        hit <- hit[hit %in% cols_porcentaje]
+        unique(hit)
+      }
+
+      # defaults (si no se indican labels): asume cols_porcentaje en orden ordinal
+      .default_top2    <- function(cols_porcentaje)  tail(cols_porcentaje, 2)
+      .default_top3    <- function(cols_porcentaje)  tail(cols_porcentaje, 3)
+      .default_bottom2 <- function(cols_porcentaje)  head(cols_porcentaje, 2)
 
       if (barra_extra_preset == "top2box") {
-        df_wide_extra$valor_extra <- ordenado[, 1] + ordenado[, 2]
+
+        cols_sel <- .cols_from_labels(top2box_labels, etiquetas_grupos, cols_porcentaje)
+        if (!length(cols_sel)) cols_sel <- .default_top2(cols_porcentaje)
+
+        df_wide_extra$valor_extra <- rowSums(as.matrix(base_mat[, cols_sel, drop = FALSE]), na.rm = TRUE)
         if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) titulo_extra_int <- "TOP TWO BOX"
+
       } else if (barra_extra_preset == "top3box") {
-        df_wide_extra$valor_extra <- ordenado[, 1] + ordenado[, 2] + ordenado[, 3]
+
+        cols_sel <- .cols_from_labels(top3box_labels, etiquetas_grupos, cols_porcentaje)
+        if (!length(cols_sel)) cols_sel <- .default_top3(cols_porcentaje)
+
+        df_wide_extra$valor_extra <- rowSums(as.matrix(base_mat[, cols_sel, drop = FALSE]), na.rm = TRUE)
         if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) titulo_extra_int <- "TOP THREE BOX"
+
       } else if (barra_extra_preset == "bottom2box") {
-        nc <- ncol(ordenado)
-        df_wide_extra$valor_extra <- ordenado[, nc] + ordenado[, nc - 1]
+
+        cols_sel <- .cols_from_labels(bottom2box_labels, etiquetas_grupos, cols_porcentaje)
+        if (!length(cols_sel)) cols_sel <- .default_bottom2(cols_porcentaje)
+
+        df_wide_extra$valor_extra <- rowSums(as.matrix(base_mat[, cols_sel, drop = FALSE]), na.rm = TRUE)
         if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) titulo_extra_int <- "BOTTOM TWO BOX"
       }
 
