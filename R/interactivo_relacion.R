@@ -19,57 +19,90 @@ relacion_tab_ui <- function(id) {
     shiny::sidebarLayout(
       shiny::sidebarPanel(
         width = 3,
-
-        shiny::h3("Relación"),
+        class = "sidebar-panel-base",
 
         shiny::div(
-          class = "cardbox",
-          style = "padding:12px 12px 10px 12px;",
-
+          class = "sidebar-stack",
           shiny::div(
-            style = "font-weight:600; color:#111827; margin-bottom:8px;",
-            "Variable"
-          ),
-
-          shiny::selectInput(
-            inputId = ns("main_seccion"),
-            label   = "Sección",
-            choices = NULL
-          ),
-
-          shiny::selectInput(
-            inputId = ns("main_var"),
-            label   = "Variable",
-            choices = NULL
-          ),
-
-          shiny::div(
-            style = "margin-top:-6px; margin-bottom:12px; font-size:12px; color:#6b7280;",
-            "Se muestra la distribución de la variable elegida."
-          ),
-
-          shiny::hr(style = "margin:10px 0 12px 0; border-color:#eef2f7;"),
-
-          shiny::div(
-            style = "font-weight:600; color:#111827; margin-bottom:8px;",
-            "Cruce"
-          ),
-
-          shiny::selectInput(
-            inputId = ns("cruce_seccion"),
-            label   = "Sección",
-            choices = NULL
-          ),
-
-          shiny::selectInput(
-            inputId = ns("cruce_var"),
-            label   = "Segmento",
-            choices = NULL
-          ),
-
-          shiny::div(
-            style = "margin-top:-6px; font-size:12px; color:#6b7280;",
-            "Se calcula dentro de cada grupo del cruce."
+            class = "sidebar-module sidebar-module-rel",
+            shiny::h3(class = "sidebar-module-title", "Relación"),
+            shiny::p(
+              class = "sidebar-module-help",
+              "Define variable principal y segmento para explorar patrones y diferencias."
+            ),
+            shiny::div(
+              class = "sidebar-module-card",
+              shiny::div(class = "sidebar-subtitle", "Variable principal"),
+              shiny::selectizeInput(
+                inputId = ns("main_seccion"),
+                label   = "Sección",
+                choices = NULL,
+                options = list(dropdownParent = "body")
+              ),
+              shiny::selectizeInput(
+                inputId = ns("main_var"),
+                label   = "Variable",
+                choices = NULL,
+                options = list(dropdownParent = "body")
+              ),
+              shiny::div(
+                class = "sidebar-module-help rel-sidebar-hint",
+                "Se grafica la distribución de la variable elegida."
+              )
+            ),
+            shiny::div(
+              class = "sidebar-module-card rel-sidebar-card-gap",
+              shiny::div(class = "sidebar-subtitle", "Cruce"),
+              shiny::selectizeInput(
+                inputId = ns("cruce_seccion"),
+                label   = "Sección",
+                choices = NULL,
+                options = list(dropdownParent = "body")
+              ),
+              shiny::selectizeInput(
+                inputId = ns("cruce_var"),
+                label   = "Segmento",
+                choices = NULL,
+                options = list(dropdownParent = "body")
+              ),
+              shiny::div(
+                class = "sidebar-module-help rel-sidebar-hint",
+                "La comparación se calcula dentro de cada grupo del segmento."
+              )
+            ),
+            shiny::div(
+              class = "sidebar-module-card rel-sidebar-card-gap",
+              shiny::div(
+                class = "rel-iter-head",
+                shiny::div(class = "sidebar-subtitle rel-iter-head-title", "Iterar"),
+                shiny::tags$label(
+                  class = "switch rel-iter-head-switch",
+                  shiny::tags$input(id = ns("iter_enabled"), type = "checkbox"),
+                  shiny::tags$span(class = "slider")
+                )
+              ),
+              shiny::conditionalPanel(
+                condition = sprintf("input['%s']", ns("iter_enabled")),
+                shiny::selectizeInput(
+                  inputId = ns("iter_seccion"),
+                  label   = "Sección",
+                  choices = NULL,
+                  options = list(dropdownParent = "body")
+                ),
+                shiny::selectizeInput(
+                  inputId = ns("iter_var"),
+                  label   = "Variable",
+                  choices = c("Sin iteración" = ""),
+                  selected = "",
+                  options = list(dropdownParent = "body")
+                ),
+                shiny::uiOutput(ns("iter_hidden_hint_ui"))
+              ),
+              shiny::div(
+                class = "sidebar-module-help rel-sidebar-hint",
+                "Activa esta opción para repetir el mismo cruce por cada nivel de una tercera variable."
+              )
+            )
           )
         )
       ),
@@ -82,7 +115,11 @@ relacion_tab_ui <- function(id) {
             width = 12,
             shiny::div(
               class = "cardbox",
-              shiny::div(class = "cardbox-header", shiny::uiOutput(ns("rel_plot_header"))),
+              shiny::div(
+                class = "cardbox-header rel-plot-header",
+                shiny::div(class = "rel-plot-header-main", shiny::uiOutput(ns("rel_plot_header"))),
+                shiny::div(class = "rel-plot-header-actions", shiny::uiOutput(ns("rel_iter_btn_ui")))
+              ),
               shiny::uiOutput(ns("rel_plot_ui")),
               shiny::uiOutput(ns("rel_so_legend"))
             )
@@ -97,10 +134,18 @@ relacion_tab_ui <- function(id) {
             shiny::div(
               class = "cardbox",
               shiny::div(
-                class = "cardbox-header",
-                shiny::div(class = "cardbox-title", "Tabla de cruces")
+                class = "cardbox-header rel-table-header",
+                shiny::div(
+                  class = "rel-table-header-main",
+                  shiny::div(class = "cardbox-title", "Tabla de cruces"),
+                  shiny::uiOutput(ns("rel_table_subtitle"))
+                ),
+                shiny::div(
+                  class = "rel-table-header-actions",
+                  shiny::uiOutput(ns("rel_descarga_btn_ui"))
+                )
               ),
-              DT::dataTableOutput(ns("rel_tabla"))
+              shiny::uiOutput(ns("rel_tabla_panel_ui"))
             )
           )
         ),
@@ -215,6 +260,215 @@ relacion_tab_server <- function(
         as.character(var)
       }
     )
+
+    .clamp <- function(x, lo, hi) {
+      max(lo, min(hi, x))
+    }
+
+    .calc_left_margin <- function(labels, min_px = 110, max_px = 260, base = 24, per_char = 7) {
+      labs <- as.character(labels %||% character(0))
+      labs <- gsub("<br\\s*/?>", " ", labs, ignore.case = TRUE)
+      labs <- gsub("<[^>]+>", "", labs)
+      labs <- trimws(labs)
+      max_chars <- if (length(labs)) max(nchar(labs, type = "width"), na.rm = TRUE) else 0
+      .clamp(base + per_char * max_chars, min_px, max_px)
+    }
+
+    .clean_file_token <- function(x) {
+      x <- as.character(x %||% "")
+      x <- gsub("[^[:alnum:]_\\-]+", "_", x)
+      x <- gsub("_+", "_", x)
+      x <- gsub("^_|_$", "", x)
+      if (!nzchar(x)) "variable" else x
+    }
+
+    .get_styles_cruces <- function() {
+      f <- get0("mk_styles_cruces", mode = "function", ifnotfound = NULL)
+      if (is.function(f)) return(f())
+
+      list(
+        header = openxlsx::createStyle(
+          fontSize = 10, textDecoration = "bold", halign = "center",
+          valign = "center", border = c("top", "bottom"), borderStyle = "thin",
+          borderColour = "#000000", fontName = "Arial"
+        ),
+        header_A = openxlsx::createStyle(
+          fontSize = 10, textDecoration = "bold", halign = "left",
+          valign = "center", fontName = "Arial"
+        ),
+        body_txt = openxlsx::createStyle(fontSize = 10, halign = "left", valign = "center", fontName = "Arial"),
+        body_int = openxlsx::createStyle(fontSize = 10, numFmt = "#,##0", halign = "right", valign = "center", fontName = "Arial"),
+        body_pct = openxlsx::createStyle(fontSize = 10, numFmt = "0.0%", halign = "right", valign = "center", fontName = "Arial"),
+        total_bold = openxlsx::createStyle(textDecoration = "bold", fontName = "Arial"),
+        table_end = openxlsx::createStyle(border = "bottom", borderStyle = "thin", borderColour = "#000000")
+      )
+    }
+
+    .prepare_export_tabla <- function(cuerpo, estr_labels) {
+      if (!is.data.frame(cuerpo) || !ncol(cuerpo)) return(NULL)
+
+      out <- as.data.frame(cuerpo, stringsAsFactors = FALSE)
+      blocks <- c("Total", as.character(estr_labels %||% character(0)))
+
+      expected <- 1L + 2L * length(blocks)
+      if (ncol(out) != expected) {
+        n_pairs <- max(0L, floor((ncol(out) - 1L) / 2L))
+        blocks <- c("Total", paste0("Segmento ", seq_len(max(0L, n_pairs - 1L))))
+      }
+
+      display_names <- c("Opciones", as.vector(rbind(paste0(blocks, " n"), paste0(blocks, " %"))))
+      display_names <- display_names[seq_len(ncol(out))]
+      names(out) <- display_names
+
+      n_idx <- which(grepl(" n$", names(out)))
+      p_idx <- which(grepl(" %$", names(out)))
+
+      for (j in n_idx) out[[j]] <- suppressWarnings(as.numeric(out[[j]]))
+      for (j in p_idx) out[[j]] <- suppressWarnings(as.numeric(out[[j]]))
+
+      list(
+        data = out,
+        blocks = blocks,
+        n_idx = n_idx,
+        p_idx = p_idx
+      )
+    }
+
+    .sanitize_sheet_name <- function(x, fallback = "Nivel") {
+      y <- as.character(x %||% "")
+      y <- gsub("[\\[\\]\\*\\?/\\\\:]", " ", y)
+      y <- gsub("[[:cntrl:]]", " ", y)
+      y <- gsub("\\s+", " ", trimws(y))
+      if (!nzchar(y)) y <- fallback
+      substr(y, 1, 31)
+    }
+
+    .unique_sheet_names <- function(labels) {
+      used <- character(0)
+      out <- character(length(labels))
+      for (i in seq_along(labels)) {
+        base <- .sanitize_sheet_name(labels[i], fallback = paste0("Nivel_", i))
+        cand <- base
+        j <- 1L
+        while (cand %in% used) {
+          j <- j + 1L
+          suf <- paste0("_", j)
+          cand <- paste0(substr(base, 1, max(1, 31 - nchar(suf))), suf)
+        }
+        out[i] <- cand
+        used <- c(used, cand)
+      }
+      out
+    }
+
+    .write_relacion_sheet <- function(wb, hoja, obj) {
+      exp_tab <- .prepare_export_tabla(
+        cuerpo = obj$cuerpo,
+        estr_labels = obj$estr_labels
+      )
+      if (is.null(exp_tab) || !nrow(exp_tab$data)) {
+        stop("No hay datos para exportar.", call. = FALSE)
+      }
+
+      st <- .get_styles_cruces()
+      x <- exp_tab$data
+      ncols <- ncol(x)
+      blocks <- exp_tab$blocks
+
+      r1 <- rep("", ncols)
+      r1[1] <- as.character(obj$cruce_lbl %||% "Cruce")
+
+      r2 <- rep("", ncols)
+      for (i in seq_along(blocks)) {
+        c0 <- 2 + (i - 1) * 2
+        if (c0 <= ncols) r2[c0] <- blocks[i]
+      }
+
+      r3 <- rep("", ncols)
+      for (i in seq_along(blocks)) {
+        c0 <- 2 + (i - 1) * 2
+        c1 <- c0 + 1
+        if (c0 <= ncols) r3[c0] <- "n"
+        if (c1 <= ncols) r3[c1] <- "%"
+      }
+
+      openxlsx::writeData(wb, hoja, t(r1), startRow = 1, startCol = 1, colNames = FALSE)
+      openxlsx::writeData(wb, hoja, t(r2), startRow = 2, startCol = 1, colNames = FALSE)
+      openxlsx::writeData(wb, hoja, t(r3), startRow = 3, startCol = 1, colNames = FALSE)
+
+      openxlsx::mergeCells(wb, hoja, rows = 1, cols = 1:ncols)
+      openxlsx::mergeCells(wb, hoja, rows = 2:3, cols = 1)
+      for (i in seq_along(blocks)) {
+        c0 <- 2 + (i - 1) * 2
+        c1 <- c0 + 1
+        if (c1 <= ncols) openxlsx::mergeCells(wb, hoja, rows = 2, cols = c0:c1)
+      }
+
+      openxlsx::addStyle(wb, hoja, st$header, rows = 1, cols = 1:ncols, gridExpand = TRUE, stack = TRUE)
+      openxlsx::addStyle(wb, hoja, st$header_A, rows = 2:3, cols = 1, gridExpand = TRUE, stack = TRUE)
+      if (ncols >= 2) openxlsx::addStyle(wb, hoja, st$header, rows = 2:3, cols = 2:ncols, gridExpand = TRUE, stack = TRUE)
+
+      row_ini <- 4
+      openxlsx::writeData(wb, hoja, x, startRow = row_ini, startCol = 1, colNames = FALSE)
+      row_fin <- row_ini + nrow(x) - 1
+
+      openxlsx::addStyle(wb, hoja, st$body_txt, rows = row_ini:row_fin, cols = 1, gridExpand = TRUE, stack = TRUE)
+      if (length(exp_tab$n_idx)) {
+        openxlsx::addStyle(wb, hoja, st$body_int, rows = row_ini:row_fin, cols = exp_tab$n_idx, gridExpand = TRUE, stack = TRUE)
+      }
+      if (length(exp_tab$p_idx)) {
+        openxlsx::addStyle(wb, hoja, st$body_pct, rows = row_ini:row_fin, cols = exp_tab$p_idx, gridExpand = TRUE, stack = TRUE)
+      }
+
+      i_total <- which(trimws(as.character(x[[1]])) == "Total")
+      if (length(i_total)) {
+        rows_total <- row_ini + i_total - 1L
+        openxlsx::addStyle(wb, hoja, st$total_bold, rows = rows_total, cols = 1:ncols, gridExpand = TRUE, stack = TRUE)
+      }
+
+      openxlsx::addStyle(wb, hoja, st$table_end, rows = row_fin, cols = 1:ncols, gridExpand = TRUE, stack = TRUE)
+      openxlsx::setColWidths(wb, hoja, cols = 1, widths = 52)
+      if (ncols >= 2) openxlsx::setColWidths(wb, hoja, cols = 2:ncols, widths = 12)
+    }
+
+    .write_relacion_excel <- function(path, obj_base, iter_entries = NULL, iter_var_label = NULL) {
+      if (!requireNamespace("openxlsx", quietly = TRUE)) {
+        stop("Se requiere el paquete 'openxlsx' para exportar Excel.", call. = FALSE)
+      }
+
+      wb <- openxlsx::createWorkbook()
+
+      has_iter <- !is.null(iter_entries) && length(iter_entries) > 0
+
+      if (!has_iter) {
+        openxlsx::addWorksheet(wb, "Relación")
+        .write_relacion_sheet(wb, "Relación", obj_base)
+      } else {
+        labels <- vapply(iter_entries, function(e) as.character(e$label %||% ""), character(1))
+        bases  <- vapply(iter_entries, function(e) as.numeric(e$base_n %||% NA_real_), numeric(1))
+        sheets <- .unique_sheet_names(labels)
+
+        idx <- data.frame(
+          Iteracion = rep(as.character(iter_var_label %||% "Iteración"), length(iter_entries)),
+          Nivel = labels,
+          Base_ponderada = bases,
+          Hoja = sheets,
+          stringsAsFactors = FALSE
+        )
+
+        openxlsx::addWorksheet(wb, "Indice")
+        openxlsx::writeData(wb, "Indice", idx, startRow = 1, startCol = 1, headerStyle = .get_styles_cruces()$header)
+        openxlsx::setColWidths(wb, "Indice", cols = 1:ncol(idx), widths = "auto")
+
+        for (i in seq_along(iter_entries)) {
+          openxlsx::addWorksheet(wb, sheets[i])
+          .write_relacion_sheet(wb, sheets[i], iter_entries[[i]]$obj)
+        }
+      }
+
+      openxlsx::saveWorkbook(wb, path, overwrite = TRUE)
+      invisible(path)
+    }
 
     # -------------------------------------------------------------------------
     # Helpers base
@@ -552,7 +806,8 @@ relacion_tab_server <- function(
       )
 
       df_tab$opcion_label  <- factor(df_tab$opcion_label, levels = opciones)
-      df_tab$estrato_label <- factor(df_tab$estrato_label, levels = unique(df_tab$estrato_label))
+      df_tab$estrato_label <- factor(df_tab$estrato_label, levels = rev(unique(df_tab$estrato_label)))
+      left_margin <- .calc_left_margin(as.character(df_tab$estrato_label))
 
       p <- plotly::plot_ly()
 
@@ -594,7 +849,7 @@ relacion_tab_server <- function(
           bargap  = 0.25,
           xaxis   = list(
             title = "",
-            range = c(0, 1),
+            range = c(-0.06, 1),
             showgrid = FALSE,
             zeroline = FALSE,
             showticklabels = FALSE,
@@ -606,12 +861,12 @@ relacion_tab_server <- function(
             showgrid = FALSE,
             zeroline = FALSE,
             ticks = "",
-            tickpadding = 10,
+            tickpadding = 18,
             tickfont = list(color = COLOR_TEXTO)
           ),
-          margin  = list(l = 50, r = 25, t = 10, b = 25),
+          margin  = list(l = left_margin, r = 25, t = 10, b = 25),
           hovermode = "closest",
-          transition = list(duration = 450, easing = "cubic-in-out"),
+          transition = list(duration = 520, easing = "cubic-in-out"),
           showlegend = FALSE,
           paper_bgcolor = COLOR_SUPERFICIE,
           plot_bgcolor  = COLOR_SUPERFICIE
@@ -686,8 +941,9 @@ relacion_tab_server <- function(
         )
       }
 
-      dfi$estrato_label <- factor(dfi$estrato_label, levels = unique(dfi$estrato_label))
+      dfi$estrato_label <- factor(dfi$estrato_label, levels = rev(unique(dfi$estrato_label)))
       dfi$pct_bg <- 1 - dfi$pct_yes
+      left_margin <- .calc_left_margin(as.character(dfi$estrato_label))
 
       dfi$txt <- paste0("<b>", round(100 * dfi$pct_yes, 0), "%</b>")
       dfi$hover <- sprintf(
@@ -733,7 +989,7 @@ relacion_tab_server <- function(
         plotly::layout(
           barmode = "stack",
           xaxis = list(
-            range = c(0, 1),
+            range = c(-0.06, 1),
             showgrid = FALSE,
             zeroline = FALSE,
             showticklabels = FALSE,
@@ -745,9 +1001,11 @@ relacion_tab_server <- function(
             automargin = TRUE,
             showgrid = FALSE,
             zeroline = FALSE,
+            tickpadding = 18,
             tickfont = list(color = COLOR_TEXTO)
           ),
-          margin = list(l = 120, r = 15, t = 8, b = 10),
+          margin = list(l = left_margin, r = 15, t = 8, b = 10),
+          transition = list(duration = 520, easing = "cubic-in-out"),
           showlegend = FALSE,
           uniformtext = list(minsize = 10, mode = "hide"),
           paper_bgcolor = COLOR_SUPERFICIE,
@@ -996,11 +1254,13 @@ relacion_tab_server <- function(
     shiny::observe({
       secs <- names(secciones_limpias)
       if (!length(secs)) {
-        shiny::updateSelectInput(session, "main_seccion", choices = c())
-        shiny::updateSelectInput(session, "cruce_seccion", choices = c())
+        shiny::updateSelectizeInput(session, "main_seccion", choices = c(), selected = character(0), server = FALSE)
+        shiny::updateSelectizeInput(session, "cruce_seccion", choices = c(), selected = character(0), server = FALSE)
+        shiny::updateSelectizeInput(session, "iter_seccion", choices = c(), selected = character(0), server = FALSE)
       } else {
-        shiny::updateSelectInput(session, "main_seccion", choices = stats::setNames(secs, secs), selected = secs[1])
-        shiny::updateSelectInput(session, "cruce_seccion", choices = stats::setNames(secs, secs), selected = secs[1])
+        shiny::updateSelectizeInput(session, "main_seccion", choices = stats::setNames(secs, secs), selected = secs[1], server = FALSE)
+        shiny::updateSelectizeInput(session, "cruce_seccion", choices = stats::setNames(secs, secs), selected = secs[1], server = FALSE)
+        shiny::updateSelectizeInput(session, "iter_seccion", choices = stats::setNames(secs, secs), selected = secs[1], server = FALSE)
       }
     })
 
@@ -1019,7 +1279,7 @@ relacion_tab_server <- function(
         vapply(main_choices, function(v) .obtener_label_var(v, instrumento, data), character(1))
       )
 
-      shiny::updateSelectInput(session, "main_var", choices = main_lab, selected = main_choices[1] %||% "")
+      shiny::updateSelectizeInput(session, "main_var", choices = main_lab, selected = main_choices[1] %||% "", server = FALSE)
     }, ignoreInit = TRUE)
 
     shiny::observeEvent(input$cruce_seccion, {
@@ -1035,31 +1295,80 @@ relacion_tab_server <- function(
         vapply(cruce_choices, function(v) .obtener_label_var(v, instrumento, data), character(1))
       )
 
-      shiny::updateSelectInput(session, "cruce_var", choices = cruce_lab, selected = cruce_choices[1] %||% "")
+      shiny::updateSelectizeInput(session, "cruce_var", choices = cruce_lab, selected = cruce_choices[1] %||% "", server = FALSE)
     }, ignoreInit = TRUE)
+
+    .update_iter_var_choices <- function() {
+      if (!isTRUE(input$iter_enabled)) {
+        shiny::updateSelectizeInput(session, "iter_var", choices = c("Sin iteración" = ""), selected = "", server = FALSE)
+        return(invisible(NULL))
+      }
+
+      sec <- input$iter_seccion
+      if (is.null(sec) || !nzchar(sec) || is.null(secciones_limpias[[sec]])) {
+        shiny::updateSelectizeInput(session, "iter_var", choices = c("Sin iteración" = ""), selected = "", server = FALSE)
+        return(invisible(NULL))
+      }
+
+      vars_sec <- secciones_limpias[[sec]]
+      iter_choices <- unique(vars_sec[vars_sec %in% vars_so])
+      iter_choices <- setdiff(iter_choices, c(input$main_var %||% "", input$cruce_var %||% ""))
+
+      iter_lab <- stats::setNames(
+        iter_choices,
+        vapply(iter_choices, function(v) .obtener_label_var(v, instrumento, data), character(1))
+      )
+
+      ch <- c("Sin iteración" = "", iter_lab)
+      cur <- input$iter_var %||% ""
+      sel <- if (cur %in% unname(ch)) cur else ""
+      shiny::updateSelectizeInput(session, "iter_var", choices = ch, selected = sel, server = FALSE)
+      invisible(NULL)
+    }
+
+    shiny::observeEvent(input$iter_seccion, .update_iter_var_choices(), ignoreInit = FALSE)
+    shiny::observeEvent(input$main_var, .update_iter_var_choices(), ignoreInit = TRUE)
+    shiny::observeEvent(input$cruce_var, .update_iter_var_choices(), ignoreInit = TRUE)
+    shiny::observeEvent(input$iter_enabled, .update_iter_var_choices(), ignoreInit = TRUE)
 
     # -------------------------------------------------------------------------
     # Header gráfico
     # -------------------------------------------------------------------------
     output$rel_plot_header <- shiny::renderUI({
-      shiny::req(input$main_var, input$cruce_var)
-      t_main  <- .wrap_titulo_html(.obtener_label_var(input$main_var, instrumento, data), width = 110)
-      t_cruce <- .obtener_label_var(input$cruce_var, instrumento, data)
+      obj <- rel_obj_plot()
+      base_obj <- rel_obj_base()
+      var_main <- obj$var_main %||% base_obj$var_main
+      var_cruce <- obj$var_cruce %||% base_obj$var_cruce
+      shiny::req(var_main, var_cruce)
+
+      t_main  <- .wrap_titulo_html(.obtener_label_var(var_main, instrumento, data), width = 110)
+      t_cruce <- .obtener_label_var(var_cruce, instrumento, data)
+
+      subt <- paste0("Cruce: ", t_cruce)
+      if (isTRUE(obj$iter_active)) {
+        subt <- paste0(
+          subt,
+          " | Iteración: ",
+          as.character(obj$iter_var_label %||% "Variable"),
+          " = ",
+          as.character(obj$iter_level_label %||% "")
+        )
+      }
 
       shiny::tagList(
         shiny::div(class = "cardbox-title", shiny::HTML(t_main)),
         shiny::div(
           class = "cardbox-subtitle",
           style = paste0("color:", COLOR_TEXTO_SUAVE, ";"),
-          paste0("Cruce: ", t_cruce)
+          subt
         )
       )
     })
 
     # -------------------------------------------------------------------------
-    # Reactivo central
+    # Reactivos centrales
     # -------------------------------------------------------------------------
-    rel_obj <- shiny::reactive({
+    rel_obj_base <- shiny::reactive({
       shiny::req(input$main_var, input$cruce_var)
 
       var_main  <- input$main_var
@@ -1090,21 +1399,255 @@ relacion_tab_server <- function(
       )
     })
 
+    rel_iter_payload <- shiny::reactive({
+      base_obj <- rel_obj_base()
+      iter_on <- isTRUE(input$iter_enabled)
+      iter_var <- as.character(input$iter_var %||% "")[1]
+
+      if (!iter_on || !nzchar(iter_var)) {
+        return(list(
+          active = FALSE,
+          iter_var = NULL,
+          iter_var_label = NULL,
+          all_entries = list(),
+          visible_entries = list(),
+          hidden_count = 0L
+        ))
+      }
+
+      if (!is.null(base_obj$error)) {
+        return(list(
+          active = TRUE,
+          iter_var = iter_var,
+          iter_var_label = .obtener_label_var(iter_var, instrumento, data),
+          all_entries = list(),
+          visible_entries = list(),
+          hidden_count = 0L
+        ))
+      }
+
+      df <- base_obj$df
+      if (!(iter_var %in% names(df))) {
+        return(list(
+          active = TRUE,
+          iter_var = iter_var,
+          iter_var_label = .obtener_label_var(iter_var, instrumento, data),
+          all_entries = list(),
+          visible_entries = list(),
+          hidden_count = 0L
+        ))
+      }
+
+      survey <- instrumento$survey %||% NULL
+      cats_iter <- get_categorias_so(iter_var, df, survey, orders_list %||% instrumento$orders_list %||% NULL)
+      iter_codes  <- as.character(cats_iter$codes)
+      iter_labels <- as.character(cats_iter$labels)
+      if (!length(iter_codes)) {
+        return(list(
+          active = TRUE,
+          iter_var = iter_var,
+          iter_var_label = .obtener_label_var(iter_var, instrumento, data),
+          all_entries = list(),
+          visible_entries = list(),
+          hidden_count = 0L
+        ))
+      }
+
+      v_iter <- as.character(df[[iter_var]])
+      usa_codes  <- any(v_iter %in% iter_codes)
+      usa_labels <- any(v_iter %in% iter_labels)
+      iter_keys <- if (usa_codes || !usa_labels) iter_codes else iter_labels
+      iter_labs <- if (usa_codes || !usa_labels) iter_labels else iter_labels
+
+      entries <- list()
+      for (j in seq_along(iter_keys)) {
+        key_j <- iter_keys[j]
+        mask_j <- !is.na(v_iter) & v_iter == key_j
+        df_j <- df[mask_j, , drop = FALSE]
+        if (!nrow(df_j)) next
+
+        out_tab <- .build_cuerpo(df_j, base_obj$var_main, base_obj$var_cruce)
+        cuerpo_j <- out_tab$cuerpo %||% NULL
+        if (!is.data.frame(cuerpo_j) || !nrow(cuerpo_j)) next
+
+        i_total <- which(trimws(as.character(cuerpo_j$Opciones %||% "")) == "Total")[1]
+        base_n <- if (!is.na(i_total) && "Total__n" %in% names(cuerpo_j)) {
+          suppressWarnings(as.numeric(cuerpo_j$Total__n[i_total]))
+        } else {
+          NA_real_
+        }
+
+        tp_main_j <- tipo_pregunta(base_obj$var_main, survey = survey, sm_vars_force = vars_sm_madres, df = df_j)
+        obj_j <- list(
+          df = df_j,
+          var_main = base_obj$var_main,
+          var_cruce = base_obj$var_cruce,
+          tipo_main = tp_main_j,
+          cuerpo = cuerpo_j,
+          cruce_lbl = out_tab$cruce_lbl,
+          estr_labels = out_tab$estr_labels,
+          error = NULL
+        )
+
+        entries[[length(entries) + 1L]] <- list(
+          key = as.character(key_j),
+          label = as.character(iter_labs[j] %||% key_j),
+          base_n = if (is.finite(base_n)) base_n else 0,
+          obj = obj_j
+        )
+      }
+
+      if (length(entries)) {
+        ord <- order(vapply(entries, function(e) -as.numeric(e$base_n %||% 0), numeric(1)))
+        entries <- entries[ord]
+      }
+
+      max_show <- 12L
+      visible_entries <- if (length(entries)) entries[seq_len(min(max_show, length(entries)))] else list()
+      hidden_count <- max(0L, length(entries) - length(visible_entries))
+
+      list(
+        active = TRUE,
+        iter_var = iter_var,
+        iter_var_label = .obtener_label_var(iter_var, instrumento, data),
+        all_entries = entries,
+        visible_entries = visible_entries,
+        hidden_count = hidden_count
+      )
+    })
+
+    output$rel_table_subtitle <- shiny::renderUI({
+      payload <- rel_iter_payload()
+      txt <- if (isTRUE(payload$active)) {
+        "Tabla de frecuencia por cruce e iteración."
+      } else {
+        "Tabla de frecuencia por cruce."
+      }
+      shiny::div(class = "cardbox-subtitle", txt)
+    })
+
+    output$iter_hidden_hint_ui <- shiny::renderUI({
+      payload <- rel_iter_payload()
+      if (!isTRUE(payload$active)) return(NULL)
+      if (payload$hidden_count <= 0) return(NULL)
+      shiny::div(
+        class = "rel-iter-hint",
+        paste0(
+          "Se muestran 12 de ",
+          length(payload$all_entries),
+          " niveles (Top 12 por base)."
+        )
+      )
+    })
+
+    iter_level_key <- shiny::reactiveVal("")
+
+    shiny::observe({
+      payload <- rel_iter_payload()
+      entries <- payload$visible_entries
+      if (!isTRUE(payload$active) || !length(entries)) {
+        iter_level_key("")
+        return()
+      }
+
+      keys <- vapply(entries, function(e) as.character(e$key), character(1))
+      cur <- as.character(iter_level_key() %||% "")[1]
+      if (!nzchar(cur) || !(cur %in% keys)) {
+        iter_level_key(keys[1])
+      }
+    })
+
+    shiny::observeEvent(input$iter_level_next, {
+      payload <- rel_iter_payload()
+      entries <- payload$visible_entries
+      if (!isTRUE(payload$active) || length(entries) <= 1) return()
+
+      keys <- vapply(entries, function(e) as.character(e$key), character(1))
+      cur <- as.character(iter_level_key() %||% "")[1]
+      idx <- which(keys == cur)[1]
+      if (is.na(idx)) idx <- 1L
+      nxt <- if (idx >= length(keys)) 1L else idx + 1L
+      iter_level_key(keys[nxt])
+    }, ignoreInit = TRUE)
+
+    output$rel_iter_btn_ui <- shiny::renderUI({
+      payload <- rel_iter_payload()
+      if (!isTRUE(payload$active)) return(NULL)
+
+      entries <- payload$visible_entries
+      if (!length(entries)) return(NULL)
+
+      keys <- vapply(entries, function(e) as.character(e$key), character(1))
+      cur <- as.character(iter_level_key() %||% "")[1]
+      idx <- which(keys == cur)[1]
+      if (is.na(idx)) idx <- 1L
+      pick <- entries[[idx]]
+      base_txt <- format(round(as.numeric(pick$base_n %||% 0), 0), big.mark = ",")
+
+      shiny::div(
+        class = "rel-iter-level-control",
+        shiny::actionButton(
+          inputId = session$ns("iter_level_next"),
+          label = NULL,
+          icon = shiny::icon("random"),
+          class = "btn rel-iter-circle-btn",
+          title = "Cambiar nivel",
+          `aria-label` = "Cambiar nivel"
+        ),
+        shiny::div(
+          class = "rel-iter-level-chip",
+          shiny::div(class = "rel-iter-level-name", as.character(pick$label)),
+          shiny::div(class = "rel-iter-level-meta", paste0("N ", base_txt))
+        )
+      )
+    })
+
+    rel_obj_plot <- shiny::reactive({
+      payload <- rel_iter_payload()
+      base_obj <- rel_obj_base()
+      if (!isTRUE(payload$active)) {
+        base_obj$iter_active <- FALSE
+        return(base_obj)
+      }
+
+      entries <- payload$visible_entries
+      if (!length(entries)) {
+        return(list(error = "Sin niveles válidos para iterar con la selección actual."))
+      }
+
+      keys <- vapply(entries, function(e) as.character(e$key), character(1))
+      cur <- as.character(iter_level_key() %||% "")[1]
+      idx <- which(keys == cur)[1]
+      if (is.na(idx)) idx <- 1L
+      pick <- entries[[idx]]
+
+      out <- pick$obj
+      out$iter_active <- TRUE
+      out$iter_var_label <- payload$iter_var_label
+      out$iter_level_label <- pick$label
+      out
+    })
+
     # -------------------------------------------------------------------------
     # UI dinámica del gráfico
     # -------------------------------------------------------------------------
     output$rel_plot_ui <- shiny::renderUI({
-      obj <- rel_obj()
+      obj <- rel_obj_plot()
       if (!is.null(obj$error)) {
         return(shiny::div(style = paste0("padding:12px;color:", COLOR_TEXTO_SUAVE, ";"), obj$error))
       }
 
       if (identical(obj$tipo_main, "so")) {
-        return(plotly::plotlyOutput(session$ns("rel_plot"), height = "520px"))
+        return(
+          shiny::div(
+            class = "rel-plot-stage",
+            plotly::plotlyOutput(session$ns("rel_plot"), height = "520px")
+          )
+        )
       }
 
       shiny::div(
-        style = "display:flex; flex-direction:column; gap:12px;",
+        class = "rel-plot-stage",
         shiny::uiOutput(session$ns("rel_sm_chips_ui"))
       )
     })
@@ -1114,7 +1657,7 @@ relacion_tab_server <- function(
     # -------------------------------------------------------------------------
     output$rel_so_legend <- shiny::renderUI({
 
-      obj <- rel_obj()
+      obj <- rel_obj_plot()
       if (!is.null(obj$error)) return(NULL)
       if (!identical(obj$tipo_main, "so")) return(NULL)
 
@@ -1194,7 +1737,7 @@ relacion_tab_server <- function(
     # UI chips SM
     # -------------------------------------------------------------------------
     output$rel_sm_chips_ui <- shiny::renderUI({
-      obj <- rel_obj()
+      obj <- rel_obj_plot()
       if (!is.null(obj$error)) return(NULL)
       if (!identical(obj$tipo_main, "sm")) return(NULL)
 
@@ -1230,18 +1773,20 @@ relacion_tab_server <- function(
       map <- spec$map_code_to_label %||% list()
 
       shiny::div(
-        style = "display:flex; flex-direction:column; gap:12px;",
+        class = "rel-sm-chip-list",
         lapply(seq_along(codes), function(i) {
           code_i <- codes[i]
           lab_i  <- as.character(map[[code_i]] %||% code_i)
           out_id <- paste0("rel_sm_plot_", i)
 
           shiny::div(
+            class = "rel-sm-chip",
             style = paste0(
               "border:1px solid ", COLOR_BORDE, ";",
               "border-radius:14px;",
               "padding:10px 12px;",
-              "background:", COLOR_SUPERFICIE, ";"
+              "background:", COLOR_SUPERFICIE, ";",
+              "animation-delay:", sprintf("%.2fs", 0.04 * i), ";"
             ),
             shiny::div(
               style = paste0(
@@ -1262,7 +1807,7 @@ relacion_tab_server <- function(
     # Render SO
     # -------------------------------------------------------------------------
     output$rel_plot <- plotly::renderPlotly({
-      obj <- rel_obj()
+      obj <- rel_obj_plot()
       if (!is.null(obj$error)) {
         return(
           plotly::plot_ly() |>
@@ -1287,7 +1832,7 @@ relacion_tab_server <- function(
     # Render SM chips
     # -------------------------------------------------------------------------
     shiny::observe({
-      obj <- rel_obj()
+      obj <- rel_obj_plot()
       if (!is.null(obj$error)) return()
       if (!identical(obj$tipo_main, "sm")) return()
 
@@ -1335,12 +1880,78 @@ relacion_tab_server <- function(
       }
     })
 
+    output$rel_descarga_btn_ui <- shiny::renderUI({
+      base_obj <- rel_obj_base()
+      payload <- rel_iter_payload()
+      can_download <- if (isTRUE(payload$active)) {
+        length(payload$all_entries) > 0
+      } else {
+        is.null(base_obj$error) && is.data.frame(base_obj$cuerpo) && nrow(base_obj$cuerpo) > 0
+      }
+
+      if (!can_download) {
+        return(
+          shiny::tags$button(
+            type = "button",
+            class = "btn btn-default btn-sm rel-download-btn",
+            disabled = "disabled",
+            shiny::icon("download"),
+            " Excel"
+          )
+        )
+      }
+
+      shiny::downloadButton(
+        outputId = session$ns("rel_tabla_descargar"),
+        label = "Excel",
+        class = "btn-sm rel-download-btn"
+      )
+    })
+
+    output$rel_tabla_descargar <- shiny::downloadHandler(
+      filename = function() {
+        main_tok <- .clean_file_token(input$main_var)
+        cruce_tok <- .clean_file_token(input$cruce_var)
+        payload <- rel_iter_payload()
+        iter_tok <- if (isTRUE(payload$active) && nzchar(payload$iter_var %||% "")) {
+          paste0("_iter_", .clean_file_token(payload$iter_var))
+        } else {
+          ""
+        }
+        ts <- format(Sys.time(), "%Y%m%d_%H%M%S")
+        paste0("relacion_", main_tok, "_x_", cruce_tok, iter_tok, "_", ts, ".xlsx")
+      },
+      content = function(file) {
+        base_obj <- rel_obj_base()
+        payload <- rel_iter_payload()
+
+        if (!isTRUE(payload$active)) {
+          if (!is.null(base_obj$error)) stop("No hay datos para exportar.", call. = FALSE)
+          .write_relacion_excel(path = file, obj_base = base_obj)
+          return(invisible(NULL))
+        }
+
+        if (!length(payload$all_entries)) stop("No hay iteraciones válidas para exportar.", call. = FALSE)
+        .write_relacion_excel(
+          path = file,
+          obj_base = base_obj,
+          iter_entries = payload$all_entries,
+          iter_var_label = payload$iter_var_label
+        )
+      }
+    )
+
     # -------------------------------------------------------------------------
     # Tabla DT
     # -------------------------------------------------------------------------
-    output$rel_tabla <- DT::renderDataTable({
-
-      obj <- rel_obj()
+    .build_rel_dt_widget <- function(obj) {
+      if (!is.list(obj)) {
+        return(DT::datatable(
+          data.frame(Mensaje = "Sin datos disponibles."),
+          rownames = FALSE,
+          options = list(paging = FALSE, searching = FALSE, info = FALSE, ordering = FALSE)
+        ))
+      }
 
       if (!is.null(obj$error)) {
         return(DT::datatable(
@@ -1374,12 +1985,15 @@ relacion_tab_server <- function(
         cuerpo,
         rownames  = FALSE,
         container = container,
+        class = "display nowrap compact rel-table-dt",
         options = list(
           paging    = FALSE,
           searching = FALSE,
           info      = FALSE,
           ordering  = FALSE,
+          autoWidth = TRUE,
           scrollX   = TRUE,
+          scrollCollapse = TRUE,
           language  = list(url = "//cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json"),
           columnDefs = list(
             list(className = "dt-left",  targets = 0),
@@ -1390,6 +2004,83 @@ relacion_tab_server <- function(
       ) |>
         DT::formatRound(columns = which(is_n), digits = 0) |>
         DT::formatPercentage(columns = which(is_pct), digits = 1)
+    }
+
+    output$rel_tabla_panel_ui <- shiny::renderUI({
+      payload <- rel_iter_payload()
+      if (!isTRUE(payload$active)) {
+        return(DT::dataTableOutput(session$ns("rel_tabla")))
+      }
+
+      entries <- payload$visible_entries
+      if (!length(entries)) {
+        return(
+          shiny::div(
+            class = "table-empty-hint",
+            shiny::div(class = "table-empty-title", "Sin niveles válidos"),
+            shiny::div(
+              class = "table-empty-subtitle",
+              "No hay suficientes datos para iterar con la variable seleccionada."
+            )
+          )
+        )
+      }
+
+      shiny::tagList(
+        if (payload$hidden_count > 0) shiny::div(
+          class = "rel-iter-note",
+          paste0(
+            "Se muestran 12 niveles con mayor base. ",
+            "Hay ",
+            payload$hidden_count,
+            " niveles adicionales en la descarga Excel."
+          )
+        ),
+        shiny::div(
+          class = "rel-iter-table-stack",
+          lapply(seq_along(entries), function(i) {
+            ent <- entries[[i]]
+            out_id <- paste0("rel_tabla_iter_", i)
+            shiny::div(
+              class = "rel-iter-table-block",
+              shiny::div(
+                class = "rel-iter-table-head",
+                shiny::div(class = "rel-iter-table-title", paste0("Nivel: ", ent$label)),
+                shiny::div(
+                  class = "rel-iter-table-subtitle",
+                  paste0(
+                    "Base: ",
+                    format(round(as.numeric(ent$base_n %||% 0), 0), big.mark = ",")
+                  )
+                )
+              ),
+              DT::dataTableOutput(session$ns(out_id))
+            )
+          })
+        )
+      )
+    })
+
+    output$rel_tabla <- DT::renderDataTable({
+      .build_rel_dt_widget(rel_obj_base())
+    })
+
+    shiny::observe({
+      payload <- rel_iter_payload()
+      if (!isTRUE(payload$active)) return()
+      entries <- payload$visible_entries
+      if (!length(entries)) return()
+
+      for (i in seq_along(entries)) {
+        local({
+          ii <- i
+          ent <- entries[[ii]]
+          out_id <- paste0("rel_tabla_iter_", ii)
+          output[[out_id]] <- DT::renderDataTable({
+            .build_rel_dt_widget(ent$obj)
+          })
+        })
+      }
     })
 
     invisible(NULL)

@@ -8,6 +8,9 @@ reporte_interactivo(
   data,
   instrumento,
   secciones,
+  datos_dimensiones = NULL,
+  rotulos_dimensiones = NULL,
+  dimensiones_config = NULL,
   fuente = NULL,
   titulo = "Explorador interactivo",
   colores_apiladas_por_listname = NULL,
@@ -18,7 +21,7 @@ reporte_interactivo(
   logo_png = NULL,
   logo_alt = "Logo",
   logo_height_px = 52,
-  tabs = c("resumen", "relacion", "base_datos"),
+  tabs = c("resumen", "relacion", "base_datos", "dimensiones"),
   theme_app = NULL
 )
 }

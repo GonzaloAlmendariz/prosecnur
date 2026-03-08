@@ -545,9 +545,16 @@
   }
 
   tipo_pregunta <- function(var, survey = NULL, sm_vars_force = NULL, df = NULL) {
+    var <- as.character(var)[1]
+    if (is.na(var) || !nzchar(trimws(var))) return("so")
+
     if (!is.null(sm_vars_force) && var %in% sm_vars_force) return("sm")
-    if (!is.null(survey) && any(survey$name == var)) {
-      tipos <- unique(na.omit(survey$type[survey$name == var]))
+
+    if (!is.null(survey) && "name" %in% names(survey) && "type" %in% names(survey) &&
+        any(survey$name == var, na.rm = TRUE)) {
+
+      mask <- !is.na(survey$name) & as.character(survey$name) == var
+      tipos <- unique(na.omit(survey$type[mask]))
       tipos <- tolower(as.character(tipos))
       if (any(grepl("^select_multiple(\\s|$)", tipos))) return("sm")
       if (any(grepl("^select_one(\\s|$)", tipos))) return("so")

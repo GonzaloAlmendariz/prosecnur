@@ -409,6 +409,271 @@ reporte_construir_indices <- function(
   out
 }
 
+#' Construir configuración de dimensiones para `reporte_interactivo()`
+#'
+#' Genera una configuración lista para el Tab 4 (Dimensiones) a partir de los
+#' metadatos producidos por [reporte_recodificar_items()] y
+#' [reporte_construir_indices()]. El objetivo es separar los nombres técnicos
+#' (`idx_*`, `bloq_*`, `r100_*`) de las etiquetas orientadas al usuario.
+#'
+#' @param data `data.frame` que contiene resultados recodificados/índices.
+#' @param labels_indices Vector/lista nombrada opcional para rotular índices.
+#'   Acepta claves por nombre lógico (`indice_general`) o por columna de salida
+#'   (`idx_indice_general`).
+#' @param labels_bloques Vector/lista nombrada opcional para rotular bloques.
+#'   Acepta claves por nombre lógico (`trato`) o por columna (`bloq_trato`).
+#' @param labels_indicadores Vector/lista nombrada opcional para rotular
+#'   indicadores (`r100_*`).
+#' @param semaforo_cortes Numeric(2) con cortes del semáforo en escala 0-100.
+#'   Por defecto `c(50, 75)`.
+#' @param semaforo_colores Vector nombrado de 3 colores (`rojo`, `ambar`,
+#'   `verde`) para el heatmap semafórico.
+#' @param radar_min_ejes Número mínimo de ejes para usar radar (si no se
+#'   cumple, Tab 4 puede usar barras comparativas).
+#' @param incluir_total_default Si `TRUE`, Tab 4 inicia mostrando `Total`.
+#' @param iteracion_habilitada_default Si `TRUE`, Tab 4 puede iniciar con
+#'   iteración habilitada (si hay variable disponible).
+#' @param max_categorias_principal Máximo de categorías visibles para variable
+#'   principal.
+#' @param max_niveles_iteracion Máximo de niveles visibles de iteración.
+#' @param paleta_radar Paleta cualitativa por defecto del radar (`"okabe_ito"`
+#'   o `"ipe"`).
+#'
+#' @return Una lista con:
+#' \itemize{
+#'   \item `catalog_general`: catálogo de objetivos de vista General.
+#'   \item `catalog_indicadores`: catálogo de objetivos de vista Indicadores.
+#'   \item `labels_indices`, `labels_bloques`, `labels_indicadores`.
+#'   \item `semaforo`: cortes y colores.
+#'   \item `visual`: reglas del motor visual.
+#' }
+#' @export
+reporte_dimensiones_config <- function(
+    data,
+    labels_indices = NULL,
+    labels_bloques = NULL,
+    labels_indicadores = NULL,
+    semaforo_cortes = c(50, 75),
+    semaforo_colores = c(rojo = "#D84B55", ambar = "#E0B44C", verde = "#3A9A5B"),
+    radar_min_ejes = 3L,
+    incluir_total_default = TRUE,
+    iteracion_habilitada_default = FALSE,
+    max_categorias_principal = 8L,
+    max_niveles_iteracion = 12L,
+    paleta_radar = c("okabe_ito", "ipe")
+) {
+  `%||%` <- function(x, y) if (!is.null(x)) x else y
+
+  if (!is.data.frame(data)) {
+    stop("`data` debe ser un data.frame o tibble.", call. = FALSE)
+  }
+
+  paleta_radar <- match.arg(paleta_radar)
+
+  .as_named_chr <- function(x) {
+    if (is.null(x)) return(stats::setNames(character(0), character(0)))
+    v <- as.character(unlist(x, use.names = TRUE))
+    n <- names(v)
+    if (is.null(n)) return(stats::setNames(character(0), character(0)))
+    ok <- !is.na(n) & nzchar(trimws(n)) & !is.na(v) & nzchar(trimws(v))
+    stats::setNames(v[ok], n[ok])
+  }
+
+  .pretty <- function(x) {
+    x <- as.character(x %||% "")
+    x <- gsub("^idx_", "", x)
+    x <- gsub("^bloq_", "", x)
+    x <- gsub("^r100_", "", x)
+    x <- gsub("[_\\.]+", " ", x)
+    x <- trimws(x)
+    if (!nzchar(x)) return("Variable")
+    paste0(toupper(substring(x, 1, 1)), substring(x, 2))
+  }
+
+  .label_data <- function(v) {
+    if (!(v %in% names(data))) return(.pretty(v))
+    lb <- attr(data[[v]], "label", exact = TRUE)
+    lb <- as.character(lb %||% "")
+    lb <- gsub("\\s*\\[0-100\\]$", "", lb)
+    if (nzchar(trimws(lb))) trimws(lb) else .pretty(v)
+  }
+
+  labels_indices <- .as_named_chr(labels_indices)
+  labels_bloques <- .as_named_chr(labels_bloques)
+  labels_indicadores <- .as_named_chr(labels_indicadores)
+
+  .nm_get <- function(x, key) {
+    key <- as.character(key %||% "")[1]
+    if (!nzchar(key)) return(NULL)
+    nms <- names(x)
+    if (is.null(nms)) return(NULL)
+    i <- match(key, nms)
+    if (is.na(i)) return(NULL)
+    as.character(x[i])[1]
+  }
+
+  semaforo_cortes <- suppressWarnings(as.numeric(semaforo_cortes))
+  semaforo_cortes <- semaforo_cortes[is.finite(semaforo_cortes) & !is.na(semaforo_cortes)]
+  if (length(semaforo_cortes) < 2L) semaforo_cortes <- c(50, 75)
+  semaforo_cortes <- sort(unique(semaforo_cortes))[1:2]
+  semaforo_cortes <- pmax(0, pmin(100, semaforo_cortes))
+  if (length(semaforo_cortes) < 2L || semaforo_cortes[1] >= semaforo_cortes[2]) {
+    semaforo_cortes <- c(50, 75)
+  }
+
+  semaforo_colores <- as.character(semaforo_colores %||% character(0))
+  nmsc <- names(semaforo_colores %||% character(0))
+  if (is.null(nmsc)) nmsc <- character(0)
+  col_rojo <- if ("rojo" %in% nmsc) semaforo_colores[["rojo"]] else "#D84B55"
+  col_amb <- if ("ambar" %in% nmsc) semaforo_colores[["ambar"]] else "#E0B44C"
+  col_ver <- if ("verde" %in% nmsc) semaforo_colores[["verde"]] else "#3A9A5B"
+
+  radar_min_ejes <- suppressWarnings(as.integer(radar_min_ejes)[1])
+  if (!is.finite(radar_min_ejes) || is.na(radar_min_ejes) || radar_min_ejes < 1L) radar_min_ejes <- 3L
+
+  max_categorias_principal <- suppressWarnings(as.integer(max_categorias_principal)[1])
+  if (!is.finite(max_categorias_principal) || is.na(max_categorias_principal) || max_categorias_principal < 1L) {
+    max_categorias_principal <- 8L
+  }
+
+  max_niveles_iteracion <- suppressWarnings(as.integer(max_niveles_iteracion)[1])
+  if (!is.finite(max_niveles_iteracion) || is.na(max_niveles_iteracion) || max_niveles_iteracion < 1L) {
+    max_niveles_iteracion <- 12L
+  }
+
+  idx_meta <- attr(data, "indices_meta", exact = TRUE)
+  rec_meta <- attr(data, "recodificacion_items_meta", exact = TRUE)
+  meta_bloques <- if (is.list(idx_meta) && is.list(idx_meta$bloques)) idx_meta$bloques else list()
+  meta_indices <- if (is.list(idx_meta) && is.list(idx_meta$indices)) idx_meta$indices else list()
+
+  block_key_to_var <- stats::setNames(
+    vapply(meta_bloques, function(x) as.character(x$salida %||% NA_character_)[1], character(1)),
+    names(meta_bloques)
+  )
+  block_key_to_var <- block_key_to_var[!is.na(block_key_to_var) & nzchar(block_key_to_var)]
+  block_var_to_key <- stats::setNames(names(block_key_to_var), as.character(block_key_to_var))
+
+  rec_var_to_source <- stats::setNames(character(0), character(0))
+  if (is.list(rec_meta) && length(rec_meta)) {
+    rec_df <- data.frame(
+      src = names(rec_meta),
+      out = vapply(rec_meta, function(x) as.character(x$variable_salida %||% NA_character_)[1], character(1)),
+      stringsAsFactors = FALSE
+    )
+    rec_df <- rec_df[!is.na(rec_df$out) & nzchar(rec_df$out), , drop = FALSE]
+    if (nrow(rec_df)) {
+      rec_var_to_source <- stats::setNames(as.character(rec_df$src), as.character(rec_df$out))
+    }
+  }
+
+  catalog_general <- list()
+  for (id in names(meta_indices)) {
+    it <- meta_indices[[id]]
+    idx_var <- as.character(it$salida %||% NA_character_)[1]
+    if (is.na(idx_var) || !nzchar(idx_var) || !(idx_var %in% names(data))) next
+
+    refs <- unique(c(
+      as.character(it$refs_resueltas %||% character(0)),
+      as.character(it$refs %||% character(0))
+    ))
+
+    axis_vars <- character(0)
+    axis_labels <- character(0)
+    for (r in refs) {
+      rv <- if (r %in% names(data)) {
+        r
+      } else if (r %in% names(block_key_to_var)) {
+        as.character(block_key_to_var[[r]])
+      } else {
+        NA_character_
+      }
+      if (is.na(rv) || !nzchar(rv) || !(rv %in% names(data)) || rv %in% axis_vars) next
+
+      axis_vars <- c(axis_vars, rv)
+
+      bkey <- if (rv %in% names(block_var_to_key)) as.character(block_var_to_key[[rv]]) else rv
+      lb <- .nm_get(labels_bloques, bkey) %||% .nm_get(labels_bloques, rv) %||% .label_data(rv)
+      axis_labels <- c(axis_labels, as.character(lb))
+    }
+    if (!length(axis_vars)) next
+
+    ilab <- .nm_get(labels_indices, id) %||% .nm_get(labels_indices, idx_var) %||% .label_data(idx_var)
+    catalog_general[[idx_var]] <- list(
+      id = idx_var,
+      key = id,
+      label = as.character(ilab),
+      axis_vars = axis_vars,
+      axis_labels = axis_labels
+    )
+  }
+
+  if (!length(catalog_general)) {
+    idx_vars <- grep("^idx_", names(data), value = TRUE)
+    bloq_vars <- grep("^bloq_", names(data), value = TRUE)
+    if (length(idx_vars) && length(bloq_vars)) {
+      axis_labels <- vapply(bloq_vars, function(v) {
+        bkey <- if (v %in% names(block_var_to_key)) as.character(block_var_to_key[[v]]) else v
+        as.character(.nm_get(labels_bloques, bkey) %||% .nm_get(labels_bloques, v) %||% .label_data(v))
+      }, character(1))
+      for (v in idx_vars) {
+        ilab <- .nm_get(labels_indices, v) %||% .label_data(v)
+        catalog_general[[v]] <- list(
+          id = v,
+          key = v,
+          label = as.character(ilab),
+          axis_vars = bloq_vars,
+          axis_labels = axis_labels
+        )
+      }
+    }
+  }
+
+  catalog_indicadores <- list()
+  for (bk in names(meta_bloques)) {
+    bl <- meta_bloques[[bk]]
+    bvar <- as.character(bl$salida %||% NA_character_)[1]
+    vars <- unique(as.character(bl$vars %||% character(0)))
+    vars <- vars[vars %in% names(data)]
+    if (!length(vars)) next
+
+    blab <- .nm_get(labels_bloques, bk) %||% .nm_get(labels_bloques, bvar) %||% .pretty(bk)
+    ilabs <- vapply(vars, function(v) {
+      src <- .nm_get(rec_var_to_source, v) %||% v
+      as.character(.nm_get(labels_indicadores, v) %||% .nm_get(labels_indicadores, src) %||% .label_data(v))
+    }, character(1))
+
+    catalog_indicadores[[bk]] <- list(
+      id = bk,
+      key = bk,
+      label = as.character(blab),
+      block_var = bvar,
+      axis_vars = vars,
+      axis_labels = ilabs
+    )
+  }
+
+  list(
+    version = 1L,
+    catalog_general = catalog_general,
+    catalog_indicadores = catalog_indicadores,
+    labels_indices = labels_indices,
+    labels_bloques = labels_bloques,
+    labels_indicadores = labels_indicadores,
+    semaforo = list(
+      cortes = as.numeric(semaforo_cortes),
+      colores = c(rojo = col_rojo, ambar = col_amb, verde = col_ver)
+    ),
+    visual = list(
+      radar_min_ejes = as.integer(radar_min_ejes),
+      incluir_total_default = isTRUE(incluir_total_default),
+      iteracion_habilitada_default = isTRUE(iteracion_habilitada_default),
+      max_categorias_principal = as.integer(max_categorias_principal),
+      max_niveles_iteracion = as.integer(max_niveles_iteracion),
+      paleta_radar = as.character(paleta_radar)
+    )
+  )
+}
+
 #' Exportar tablas SPSS de promedios (0-100) con cruces horizontales
 #'
 #' Genera tablas de promedios ponderados para variables recodificadas e índices

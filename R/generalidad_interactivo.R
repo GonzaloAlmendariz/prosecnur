@@ -788,7 +788,7 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
 # Registry de pestañas
 # -----------------------------------------------------------------------------
 
-.make_tabs_registry <- function(ctx, tabs = c("resumen", "relacion", "base_datos")) {
+.make_tabs_registry <- function(ctx, tabs = c("resumen", "relacion", "base_datos", "dimensiones")) {
 
   registry <- list(
 
@@ -820,8 +820,17 @@ resolver_var_spec <- function(var_madre, ctx, df = NULL) {
     base_datos = list(
       ui = function(ctx) shiny::tabPanel(title = "Base de datos", .ui_tab_base_datos(ctx)),
       server = function(ctx, input, output, session) .server_tab_base_datos(ctx, input, output, session)
+    ),
+
+    dimensiones = list(
+      ui = function(ctx) shiny::tabPanel(title = "Dimensiones", .ui_tab_dimensiones(ctx)),
+      server = function(ctx, input, output, session) .server_tab_dimensiones(ctx, input, output, session)
     )
   )
+
+  if (!isTRUE(ctx$dimensiones_habilitado)) {
+    registry$dimensiones <- NULL
+  }
 
   tabs <- (tabs %||% c("resumen", "base_datos"))
   tabs <- tabs[tabs %in% names(registry)]
@@ -842,6 +851,9 @@ reporte_interactivo <- function(
     data,
     instrumento,
     secciones,
+    datos_dimensiones = NULL,
+    rotulos_dimensiones = NULL,
+    dimensiones_config = NULL,
     fuente      = NULL,
     titulo      = "Explorador interactivo",
     colores_apiladas_por_listname = NULL,
@@ -852,7 +864,7 @@ reporte_interactivo <- function(
     logo_png   = NULL,
     logo_alt   = "Logo",
     logo_height_px = 52,
-    tabs = c("resumen", "relacion", "base_datos"),
+    tabs = c("resumen", "relacion", "base_datos", "dimensiones"),
     theme_app  = NULL
 ) {
 
@@ -992,6 +1004,471 @@ reporte_interactivo <- function(
   facet_vars <- facet_vars[facet_vars %in% names(data)]
   facet_choices <- stats::setNames(facet_vars, vapply(facet_vars, label_var, character(1)))
 
+  # ---------------------------------------------------------------------------
+  # Contexto opcional: Tab Dimensiones (datos_idx + rn)
+  # ---------------------------------------------------------------------------
+  dimensiones_ctx <- NULL
+  dimensiones_habilitado <- FALSE
+
+  .deep_merge <- function(base, over) {
+    if (is.null(over)) return(base)
+    if (!is.list(base) || !is.list(over)) return(over)
+    out <- base
+    for (nm in names(over)) {
+      if (nm %in% names(out) && is.list(out[[nm]]) && is.list(over[[nm]])) {
+        out[[nm]] <- .deep_merge(out[[nm]], over[[nm]])
+      } else {
+        out[[nm]] <- over[[nm]]
+      }
+    }
+    out
+  }
+
+  .as_named_chr <- function(x) {
+    if (is.null(x)) return(stats::setNames(character(0), character(0)))
+    v <- as.character(unlist(x, use.names = TRUE))
+    n <- names(v)
+    if (is.null(n)) return(stats::setNames(character(0), character(0)))
+    ok <- !is.na(n) & nzchar(trimws(n)) & !is.na(v) & nzchar(trimws(v))
+    stats::setNames(v[ok], n[ok])
+  }
+
+  .nm_get <- function(x, key) {
+    key <- as.character(key %||% "")[1]
+    if (!nzchar(key)) return(NULL)
+    nms <- names(x)
+    if (is.null(nms)) return(NULL)
+    i <- match(key, nms)
+    if (is.na(i)) return(NULL)
+    as.character(x[i])[1]
+  }
+
+  .pretty_dim <- function(x) {
+    x <- as.character(x %||% "")
+    x <- gsub("^idx_", "", x)
+    x <- gsub("^bloq_", "", x)
+    x <- gsub("^r100_", "", x)
+    x <- gsub("[_\\.]+", " ", x)
+    x <- trimws(x)
+    if (!nzchar(x)) return("Variable")
+    paste0(toupper(substring(x, 1, 1)), substring(x, 2))
+  }
+
+  .first_nonempty <- function(...) {
+    vals <- list(...)
+    for (vv in vals) {
+      v <- as.character(vv %||% "")[1]
+      if (!is.na(v) && nzchar(trimws(v))) return(trimws(v))
+    }
+    ""
+  }
+
+  .extract_rotulos_map <- function(rn_obj = NULL, valid_vars = character(0)) {
+    out <- stats::setNames(character(0), character(0))
+
+    if (is.data.frame(rn_obj) && nrow(rn_obj)) {
+      nms <- names(rn_obj)
+      low <- tolower(nms)
+      pick_col <- function(cands) {
+        idx <- which(low %in% cands)[1]
+        if (is.na(idx)) NULL else nms[idx]
+      }
+      col_var <- pick_col(c("variable", "var", "name", "id", "codigo"))
+      col_lab <- pick_col(c("etiqueta", "label", "titulo", "nombre", "dimension"))
+      if (!is.null(col_var) && !is.null(col_lab)) {
+        vars <- as.character(rn_obj[[col_var]])
+        labs <- as.character(rn_obj[[col_lab]])
+        ok <- !is.na(vars) & nzchar(trimws(vars)) & !is.na(labs) & nzchar(trimws(labs))
+        if (any(ok)) out <- stats::setNames(labs[ok], vars[ok])
+      }
+    } else if (is.character(rn_obj) && length(rn_obj) && !is.null(names(rn_obj))) {
+      vals <- as.character(rn_obj)
+      nms <- names(rn_obj)
+      ok <- !is.na(nms) & nzchar(trimws(nms)) & !is.na(vals) & nzchar(trimws(vals))
+      if (any(ok)) out <- stats::setNames(vals[ok], nms[ok])
+    }
+
+    if (length(valid_vars)) {
+      out <- out[names(out) %in% valid_vars]
+    }
+    out
+  }
+
+  .fallback_dim_cfg <- function() {
+    list(
+      version = 1L,
+      catalog_general = list(),
+      catalog_indicadores = list(),
+      labels_indices = stats::setNames(character(0), character(0)),
+      labels_bloques = stats::setNames(character(0), character(0)),
+      labels_indicadores = stats::setNames(character(0), character(0)),
+      semaforo = list(
+        cortes = c(50, 75),
+        colores = c(rojo = "#D84B55", ambar = "#E0B44C", verde = "#3A9A5B")
+      ),
+      visual = list(
+        radar_min_ejes = 3L,
+        incluir_total_default = TRUE,
+        iteracion_habilitada_default = FALSE,
+        max_categorias_principal = 8L,
+        max_niveles_iteracion = 12L,
+        paleta_radar = "okabe_ito"
+      )
+    )
+  }
+
+  datos_dim_ready <- datos_dimensiones
+  if (is.data.frame(datos_dim_ready) && nrow(datos_dim_ready) && ncol(datos_dim_ready)) {
+
+    tiene_labels_dim <- any(vapply(names(datos_dim_ready), function(v) {
+      !is.null(attr(datos_dim_ready[[v]], "label", exact = TRUE)) ||
+        !is.null(attr(datos_dim_ready[[v]], "labels", exact = TRUE)) ||
+        !is.null(attr(datos_dim_ready[[v]], "measure", exact = TRUE))
+    }, logical(1)))
+
+    if (!inherits(datos_dim_ready, "prosecnur_reporte_tbl") || !tiene_labels_dim) {
+      datos_dim_ready <- tryCatch(
+        reporte_data(
+          data = datos_dim_ready,
+          instrumento = instrumento
+        ),
+        error = function(e) datos_dimensiones
+      )
+    }
+
+    idx_vars <- grep("^idx_", names(datos_dim_ready), value = TRUE)
+    idx_vars <- idx_vars[vapply(idx_vars, function(v) {
+      any(is.finite(suppressWarnings(as.numeric(datos_dim_ready[[v]]))), na.rm = TRUE)
+    }, logical(1))]
+
+    if (length(idx_vars)) {
+      catalogo_base <- data.frame(
+        variable = idx_vars,
+        etiqueta = idx_vars,
+        seccion = "Dimensiones",
+        orden = seq_along(idx_vars),
+        stringsAsFactors = FALSE
+      )
+
+      for (i in seq_len(nrow(catalogo_base))) {
+        v <- catalogo_base$variable[i]
+        catalogo_base$etiqueta[i] <- .obtener_label_var(v, instrumento, data = datos_dim_ready)
+      }
+
+      if (!is.null(dimensiones_config) && !is.list(dimensiones_config)) {
+        stop("`dimensiones_config` debe ser NULL o una lista.", call. = FALSE)
+      }
+
+      cfg_infer <- tryCatch(
+        reporte_dimensiones_config(datos_dim_ready),
+        error = function(e) NULL
+      )
+      cfg <- .deep_merge(.fallback_dim_cfg(), cfg_infer)
+      cfg <- .deep_merge(cfg, dimensiones_config)
+
+      idx_meta <- attr(datos_dim_ready, "indices_meta", exact = TRUE)
+      rec_meta <- attr(datos_dim_ready, "recodificacion_items_meta", exact = TRUE)
+      meta_indices <- if (is.list(idx_meta) && is.list(idx_meta$indices)) idx_meta$indices else list()
+      meta_bloques <- if (is.list(idx_meta) && is.list(idx_meta$bloques)) idx_meta$bloques else list()
+
+      idx_key_to_var <- stats::setNames(
+        vapply(meta_indices, function(x) as.character(x$salida %||% NA_character_)[1], character(1)),
+        names(meta_indices)
+      )
+      idx_key_to_var <- idx_key_to_var[!is.na(idx_key_to_var) & nzchar(idx_key_to_var)]
+      idx_var_to_key <- stats::setNames(names(idx_key_to_var), as.character(idx_key_to_var))
+
+      bloq_key_to_var <- stats::setNames(
+        vapply(meta_bloques, function(x) as.character(x$salida %||% NA_character_)[1], character(1)),
+        names(meta_bloques)
+      )
+      bloq_key_to_var <- bloq_key_to_var[!is.na(bloq_key_to_var) & nzchar(bloq_key_to_var)]
+      bloq_var_to_key <- stats::setNames(names(bloq_key_to_var), as.character(bloq_key_to_var))
+
+      rec_out_to_src <- stats::setNames(character(0), character(0))
+      if (is.list(rec_meta) && length(rec_meta)) {
+        rec_df <- data.frame(
+          src = names(rec_meta),
+          out = vapply(rec_meta, function(x) as.character(x$variable_salida %||% NA_character_)[1], character(1)),
+          stringsAsFactors = FALSE
+        )
+        rec_df <- rec_df[!is.na(rec_df$out) & nzchar(rec_df$out), , drop = FALSE]
+        if (nrow(rec_df)) {
+          rec_out_to_src <- stats::setNames(as.character(rec_df$src), as.character(rec_df$out))
+        }
+      }
+
+      rot_map <- .extract_rotulos_map(rotulos_dimensiones, valid_vars = names(datos_dim_ready))
+      lbl_idx_cfg <- .as_named_chr(cfg$labels_indices)
+      lbl_bloq_cfg <- .as_named_chr(cfg$labels_bloques)
+      lbl_ind_cfg <- .as_named_chr(cfg$labels_indicadores)
+
+      .var_attr_label <- function(v) {
+        if (!(v %in% names(datos_dim_ready))) return("")
+        lb <- attr(datos_dim_ready[[v]], "label", exact = TRUE)
+        lb <- as.character(lb %||% "")
+        lb <- gsub("\\s*\\[0-100\\]$", "", lb)
+        if (nzchar(trimws(lb))) trimws(lb) else ""
+      }
+
+      .label_idx <- function(v, key = NULL) {
+        kk <- as.character(key %||% .nm_get(idx_var_to_key, v) %||% "")
+        .first_nonempty(
+          .nm_get(lbl_idx_cfg, kk),
+          .nm_get(lbl_idx_cfg, v),
+          .nm_get(rot_map, v),
+          if (nzchar(kk)) .pretty_dim(kk) else "",
+          .var_attr_label(v),
+          .pretty_dim(v)
+        )
+      }
+
+      .label_bloq <- function(v, key = NULL) {
+        kk <- as.character(key %||% .nm_get(bloq_var_to_key, v) %||% "")
+        .first_nonempty(
+          .nm_get(lbl_bloq_cfg, kk),
+          .nm_get(lbl_bloq_cfg, v),
+          .nm_get(rot_map, v),
+          if (nzchar(kk)) .pretty_dim(kk) else "",
+          .var_attr_label(v),
+          .pretty_dim(v)
+        )
+      }
+
+      .label_ind <- function(v) {
+        src <- as.character(.nm_get(rec_out_to_src, v) %||% "")
+        .first_nonempty(
+          .nm_get(lbl_ind_cfg, v),
+          if (nzchar(src)) .nm_get(lbl_ind_cfg, src) else "",
+          .nm_get(rot_map, v),
+          .var_attr_label(v),
+          if (nzchar(src)) .pretty_dim(src) else "",
+          .pretty_dim(v)
+        )
+      }
+
+      catalog_general <- cfg$catalog_general %||% list()
+      catalog_indicadores <- cfg$catalog_indicadores %||% list()
+
+      if (!length(catalog_general)) {
+        for (nm in names(meta_indices)) {
+          it <- meta_indices[[nm]]
+          idx_var <- as.character(it$salida %||% NA_character_)[1]
+          if (is.na(idx_var) || !nzchar(idx_var) || !(idx_var %in% names(datos_dim_ready))) next
+
+          refs <- unique(c(
+            as.character(it$refs_resueltas %||% character(0)),
+            as.character(it$refs %||% character(0))
+          ))
+          axis_vars <- character(0)
+          for (r in refs) {
+            rv <- if (r %in% names(datos_dim_ready)) {
+              r
+            } else if (r %in% names(bloq_key_to_var)) {
+              as.character(bloq_key_to_var[[r]])
+            } else {
+              NA_character_
+            }
+            if (!is.na(rv) && nzchar(rv) && rv %in% names(datos_dim_ready) && !(rv %in% axis_vars)) {
+              axis_vars <- c(axis_vars, rv)
+            }
+          }
+          if (!length(axis_vars)) next
+          catalog_general[[idx_var]] <- list(
+            id = idx_var,
+            key = nm,
+            label = .label_idx(idx_var, nm),
+            axis_vars = axis_vars,
+            axis_labels = vapply(axis_vars, .label_bloq, character(1))
+          )
+        }
+      } else {
+        for (nm in names(catalog_general)) {
+          it <- catalog_general[[nm]]
+          idx_var <- as.character(it$id %||% nm)[1]
+          key <- as.character(it$key %||% .nm_get(idx_var_to_key, idx_var) %||% nm)[1]
+          axis_vars <- as.character(it$axis_vars %||% character(0))
+          axis_vars <- axis_vars[axis_vars %in% names(datos_dim_ready)]
+          if (!length(axis_vars) && key %in% names(meta_indices)) {
+            mt <- meta_indices[[key]]
+            refs <- unique(c(
+              as.character(mt$refs_resueltas %||% character(0)),
+              as.character(mt$refs %||% character(0))
+            ))
+            for (r in refs) {
+              rv <- if (r %in% names(datos_dim_ready)) {
+                r
+              } else if (r %in% names(bloq_key_to_var)) {
+                as.character(bloq_key_to_var[[r]])
+              } else {
+                NA_character_
+              }
+              if (!is.na(rv) && nzchar(rv) && rv %in% names(datos_dim_ready) && !(rv %in% axis_vars)) {
+                axis_vars <- c(axis_vars, rv)
+              }
+            }
+          }
+          if (!length(axis_vars) || !(idx_var %in% names(datos_dim_ready))) next
+          catalog_general[[nm]] <- list(
+            id = idx_var,
+            key = key,
+            label = .label_idx(idx_var, key),
+            axis_vars = axis_vars,
+            axis_labels = vapply(axis_vars, .label_bloq, character(1))
+          )
+        }
+        catalog_general <- catalog_general[lengths(catalog_general) > 0L]
+      }
+
+      if (!length(catalog_indicadores)) {
+        for (bk in names(meta_bloques)) {
+          bl <- meta_bloques[[bk]]
+          bvar <- as.character(bl$salida %||% NA_character_)[1]
+          vars <- unique(as.character(bl$vars %||% character(0)))
+          vars <- vars[vars %in% names(datos_dim_ready)]
+          if (!length(vars)) next
+          catalog_indicadores[[bk]] <- list(
+            id = bk,
+            key = bk,
+            label = .label_bloq(bvar, bk),
+            block_var = bvar,
+            axis_vars = vars,
+            axis_labels = vapply(vars, .label_ind, character(1))
+          )
+        }
+      } else {
+        for (nm in names(catalog_indicadores)) {
+          it <- catalog_indicadores[[nm]]
+          key <- as.character(it$key %||% it$id %||% nm)[1]
+          bvar <- as.character(it$block_var %||% .nm_get(bloq_key_to_var, key) %||% NA_character_)[1]
+          vars <- as.character(it$axis_vars %||% character(0))
+          vars <- vars[vars %in% names(datos_dim_ready)]
+          if (!length(vars) && key %in% names(meta_bloques)) {
+            vars <- unique(as.character(meta_bloques[[key]]$vars %||% character(0)))
+            vars <- vars[vars %in% names(datos_dim_ready)]
+          }
+          if (!length(vars)) next
+          catalog_indicadores[[nm]] <- list(
+            id = key,
+            key = key,
+            label = .label_bloq(bvar, key),
+            block_var = bvar,
+            axis_vars = vars,
+            axis_labels = vapply(vars, .label_ind, character(1))
+          )
+        }
+        catalog_indicadores <- catalog_indicadores[lengths(catalog_indicadores) > 0L]
+      }
+
+      lbl_idx_out <- lbl_idx_cfg
+      for (v in intersect(idx_vars, names(datos_dim_ready))) {
+        kk <- as.character(.nm_get(idx_var_to_key, v) %||% "")
+        lab <- .label_idx(v, kk)
+        lbl_idx_out[v] <- lab
+        if (nzchar(kk)) lbl_idx_out[kk] <- lab
+      }
+
+      lbl_bloq_out <- lbl_bloq_cfg
+      for (v in unique(c(names(bloq_var_to_key), unname(bloq_key_to_var)))) {
+        if (!nzchar(v)) next
+        kk <- as.character(.nm_get(bloq_var_to_key, v) %||% "")
+        lab <- .label_bloq(v, kk)
+        lbl_bloq_out[v] <- lab
+        if (nzchar(kk)) lbl_bloq_out[kk] <- lab
+      }
+
+      lbl_ind_out <- lbl_ind_cfg
+      ind_vars <- grep("^r100_", names(datos_dim_ready), value = TRUE)
+      for (v in ind_vars) {
+        lbl_ind_out[v] <- .label_ind(v)
+      }
+
+      cfg$catalog_general <- catalog_general
+      cfg$catalog_indicadores <- catalog_indicadores
+      cfg$labels_indices <- lbl_idx_out
+      cfg$labels_bloques <- lbl_bloq_out
+      cfg$labels_indicadores <- lbl_ind_out
+
+      sem_c <- suppressWarnings(as.numeric(cfg$semaforo$cortes %||% c(50, 75)))
+      sem_c <- sem_c[is.finite(sem_c)]
+      if (length(sem_c) < 2L) sem_c <- c(50, 75)
+      sem_c <- sort(unique(sem_c))[1:2]
+      sem_c <- pmax(0, pmin(100, sem_c))
+      if (length(sem_c) < 2L || sem_c[1] >= sem_c[2]) sem_c <- c(50, 75)
+
+      sem_cols <- as.character(cfg$semaforo$colores %||% character(0))
+      nms_sem <- names(sem_cols %||% character(0))
+      if (is.null(nms_sem)) nms_sem <- character(0)
+      cfg$semaforo <- list(
+        cortes = sem_c,
+        colores = c(
+          rojo = if ("rojo" %in% nms_sem) sem_cols[["rojo"]] else "#D84B55",
+          ambar = if ("ambar" %in% nms_sem) sem_cols[["ambar"]] else "#E0B44C",
+          verde = if ("verde" %in% nms_sem) sem_cols[["verde"]] else "#3A9A5B"
+        )
+      )
+
+      vis <- cfg$visual %||% list()
+      vis$radar_min_ejes <- as.integer(suppressWarnings(vis$radar_min_ejes)[1] %||% 3L)
+      if (!is.finite(vis$radar_min_ejes) || is.na(vis$radar_min_ejes) || vis$radar_min_ejes < 1L) vis$radar_min_ejes <- 3L
+
+      vis$max_categorias_principal <- as.integer(suppressWarnings(vis$max_categorias_principal)[1] %||% 8L)
+      if (!is.finite(vis$max_categorias_principal) || is.na(vis$max_categorias_principal) || vis$max_categorias_principal < 1L) {
+        vis$max_categorias_principal <- 8L
+      }
+
+      vis$max_niveles_iteracion <- as.integer(suppressWarnings(vis$max_niveles_iteracion)[1] %||% 12L)
+      if (!is.finite(vis$max_niveles_iteracion) || is.na(vis$max_niveles_iteracion) || vis$max_niveles_iteracion < 1L) {
+        vis$max_niveles_iteracion <- 12L
+      }
+
+      vis$incluir_total_default <- isTRUE(vis$incluir_total_default)
+      vis$iteracion_habilitada_default <- isTRUE(vis$iteracion_habilitada_default)
+      vis$paleta_radar <- as.character(vis$paleta_radar %||% "okabe_ito")[1]
+      if (!vis$paleta_radar %in% c("okabe_ito", "ipe")) vis$paleta_radar <- "okabe_ito"
+      cfg$visual <- vis
+
+      catalogo_dim <- catalogo_base
+      if (length(catalog_general)) {
+        cg_df <- data.frame(
+          variable = vapply(catalog_general, function(x) as.character(x$id %||% NA_character_)[1], character(1)),
+          etiqueta = vapply(catalog_general, function(x) as.character(x$label %||% x$id %||% ""), character(1)),
+          seccion = "Índices",
+          orden = seq_along(catalog_general),
+          stringsAsFactors = FALSE
+        )
+        cg_df <- cg_df[!is.na(cg_df$variable) & cg_df$variable %in% idx_vars, , drop = FALSE]
+        if (nrow(cg_df)) catalogo_dim <- cg_df
+      }
+
+      vars_filtro <- facet_vars[facet_vars %in% names(datos_dim_ready)]
+      if (!length(vars_filtro)) {
+        so_inst_dim <- survey$name[grepl("^select_one\\b", tolower(survey$type))]
+        vars_filtro <- intersect(so_inst_dim, names(datos_dim_ready))
+      }
+      filtro_choices_dim <- stats::setNames(vars_filtro, vapply(vars_filtro, function(v) {
+        .obtener_label_var(v, instrumento, datos_dim_ready)
+      }, character(1)))
+
+      weight_dim <- attr(datos_dim_ready, "var_peso", exact = TRUE)
+      if (is.null(weight_dim) || !nzchar(as.character(weight_dim)) || !(weight_dim %in% names(datos_dim_ready))) {
+        weight_dim <- if ("peso" %in% names(datos_dim_ready)) "peso" else NA_character_
+      }
+
+      dimensiones_ctx <- list(
+        habilitado = TRUE,
+        data = datos_dim_ready,
+        catalogo = catalogo_dim,
+        secciones = unique(as.character(catalogo_dim$seccion)),
+        filtro_choices = filtro_choices_dim,
+        segment_choices = filtro_choices_dim,
+        weight_col = weight_dim,
+        config = cfg
+      )
+      dimensiones_habilitado <- TRUE
+    }
+  }
+
   logo_src <- NULL
   if (!is.null(logo_png) && nzchar(logo_png)) {
     logo_src <- sub("^www/", "", logo_png)
@@ -1014,7 +1491,9 @@ reporte_interactivo <- function(
     kpi_vars = kpi_vars,
     so_vars   = so_vars,
     sm_madres = sm_disponibles,
-    theme_app = theme_app
+    theme_app = theme_app,
+    dimensiones = dimensiones_ctx,
+    dimensiones_habilitado = dimensiones_habilitado
   )
 
   tabs_registry <- .make_tabs_registry(ctx, tabs = tabs)
