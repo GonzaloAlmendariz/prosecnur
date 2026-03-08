@@ -660,14 +660,45 @@
     if (!ncol(df)) return(NULL)
 
     use_labels <- isTRUE(input$vista_etiquetas)
+    raw_df <- data_base_filtrada()
+    raw_cols <- names(raw_df)
 
     col_w <- if (use_labels) 240 else 130
+
+    .filter_options_col <- function(vcol, use_labels = TRUE) {
+      if (grepl("\\.", vcol)) return(NULL)
+      map <- .choice_map(vcol)
+      if (!length(map)) return(NULL)
+
+      vals <- if (isTRUE(use_labels)) {
+        as.character(unname(unlist(map, use.names = FALSE)))
+      } else {
+        as.character(names(map))
+      }
+      vals <- vals[!is.na(vals) & nzchar(trimws(vals))]
+      vals <- unique(vals)
+      if (!length(vals)) return(NULL)
+      vals
+    }
+
+    preset_opts <- list()
+    if (length(raw_cols)) {
+      for (ii in seq_along(raw_cols)) {
+        vv <- raw_cols[ii]
+        op <- .filter_options_col(vv, use_labels = use_labels)
+        if (!is.null(op) && length(op)) {
+          preset_opts[[as.character(ii - 1L)]] <- op
+        }
+      }
+    }
+    preset_opts_json <- jsonlite::toJSON(preset_opts, auto_unbox = TRUE, null = "null")
 
     cb_txt <- paste0(
       "function(settings) {
   var api = this.api();
   var thead = $(api.table().header());
   var container = $(api.table().container());
+  var presetOptions = ", preset_opts_json, ";
 
   function escapeRegex(s) {
     return s.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
@@ -744,12 +775,17 @@
       var col = this;
       var th  = $('<th>').appendTo(filterRow);
 
-      var uniq = col.data().unique().toArray()
-        .filter(function(x){ return x !== null && x !== undefined && x !== ''; });
+      var preset = presetOptions[String(col.index())] || null;
+      var uniq = (Array.isArray(preset) && preset.length)
+        ? preset.slice()
+        : col.data().unique().toArray()
+            .filter(function(x){ return x !== null && x !== undefined && x !== ''; });
 
-      uniq.sort();
+      if (!(Array.isArray(preset) && preset.length)) {
+        uniq.sort();
+      }
 
-      if (uniq.length <= 20) {
+      if ((Array.isArray(preset) && preset.length) || uniq.length <= 20) {
 
         var sel = $('<select multiple></select>')
           .css({

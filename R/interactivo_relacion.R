@@ -74,6 +74,37 @@ relacion_tab_ui <- function(id) {
               class = "sidebar-module-card rel-sidebar-card-gap",
               shiny::div(
                 class = "rel-iter-head",
+                shiny::div(class = "sidebar-subtitle rel-iter-head-title", "Filtros"),
+                shiny::tags$label(
+                  class = "switch rel-iter-head-switch",
+                  shiny::tags$input(id = ns("rel_filters_enabled"), type = "checkbox"),
+                  shiny::tags$span(class = "slider")
+                )
+              ),
+              shiny::conditionalPanel(
+                condition = sprintf("input['%s']", ns("rel_filters_enabled")),
+                shiny::uiOutput(ns("rel_filter_rows_ui")),
+                shiny::uiOutput(ns("rel_filter_active_ui")),
+                shiny::div(
+                  class = "sidebar-quick-actions",
+                  shiny::actionButton(
+                    inputId = ns("rel_filter_add"),
+                    label = "Agregar filtro",
+                    class = "sidebar-quick-btn"
+                  ),
+                  shiny::actionButton(
+                    inputId = ns("rel_filter_reset"),
+                    label = "Restablecer filtros",
+                    class = "sidebar-quick-btn"
+                  )
+                ),
+                shiny::uiOutput(ns("rel_filter_hint_ui"))
+              )
+            ),
+            shiny::div(
+              class = "sidebar-module-card rel-sidebar-card-gap",
+              shiny::div(
+                class = "rel-iter-head",
                 shiny::div(class = "sidebar-subtitle rel-iter-head-title", "Iterar"),
                 shiny::tags$label(
                   class = "switch rel-iter-head-switch",
@@ -96,7 +127,8 @@ relacion_tab_ui <- function(id) {
                   selected = "",
                   options = list(dropdownParent = "body")
                 ),
-                shiny::uiOutput(ns("iter_hidden_hint_ui"))
+                shiny::uiOutput(ns("iter_hidden_hint_ui")),
+                shiny::uiOutput(ns("rel_iter_btn_ui"))
               ),
               shiny::div(
                 class = "sidebar-module-help rel-sidebar-hint",
@@ -117,8 +149,7 @@ relacion_tab_ui <- function(id) {
               class = "cardbox",
               shiny::div(
                 class = "cardbox-header rel-plot-header",
-                shiny::div(class = "rel-plot-header-main", shiny::uiOutput(ns("rel_plot_header"))),
-                shiny::div(class = "rel-plot-header-actions", shiny::uiOutput(ns("rel_iter_btn_ui")))
+                shiny::div(class = "rel-plot-header-main", shiny::uiOutput(ns("rel_plot_header")))
               ),
               shiny::uiOutput(ns("rel_plot_ui")),
               shiny::uiOutput(ns("rel_so_legend"))
@@ -1251,6 +1282,359 @@ relacion_tab_server <- function(
     })
     secciones_limpias <- secciones_limpias[vapply(secciones_limpias, length, integer(1)) > 0]
 
+    .choice_label_col_rel <- function(ch) {
+      if (is.null(ch)) return(NULL)
+      if ("label" %in% names(ch)) return("label")
+      cand <- grep("^label(::|$)", names(ch), value = TRUE)
+      if (length(cand)) cand[1] else NULL
+    }
+
+    .choice_map_rel <- function(var) {
+      surv <- instrumento$survey %||% NULL
+      ch <- instrumento$choices %||% NULL
+      if (is.null(surv) || is.null(ch) ||
+          !all(c("name", "list_name") %in% names(surv)) ||
+          !all(c("list_name", "name") %in% names(ch))) {
+        return(stats::setNames(character(0), character(0)))
+      }
+
+      ln <- get_list_name(var, surv)
+      if (is.na(ln) || !nzchar(ln)) return(stats::setNames(character(0), character(0)))
+
+      col_lab <- .choice_label_col_rel(ch)
+      if (is.null(col_lab) || !(col_lab %in% names(ch))) return(stats::setNames(character(0), character(0)))
+
+      chv <- ch[ch$list_name == ln, , drop = FALSE]
+      if (!nrow(chv)) return(stats::setNames(character(0), character(0)))
+      stats::setNames(as.character(chv[[col_lab]]), as.character(chv$name))
+    }
+
+    .catalogo_categorias_rel <- function(var, df_base) {
+      if (!nzchar(var) || !(var %in% names(df_base))) {
+        return(data.frame(value = character(0), label = character(0), stringsAsFactors = FALSE))
+      }
+
+      map_choice <- .choice_map_rel(var)
+      out <- data.frame(value = character(0), label = character(0), stringsAsFactors = FALSE)
+      if (length(map_choice)) {
+        out <- data.frame(
+          value = as.character(names(map_choice)),
+          label = as.character(unname(map_choice)),
+          stringsAsFactors = FALSE
+        )
+      } else {
+        labs_attr <- attr(df_base[[var]], "labels", exact = TRUE)
+        if (!is.null(labs_attr) && length(labs_attr)) {
+          out <- data.frame(
+            value = as.character(names(labs_attr)),
+            label = as.character(unname(labs_attr)),
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+
+      vals_obs <- trimws(as.character(df_base[[var]]))
+      vals_obs <- vals_obs[!is.na(vals_obs) & nzchar(vals_obs) & vals_obs != "NA"]
+      vals_obs <- unique(vals_obs)
+
+      extra <- setdiff(vals_obs, out$value)
+      if (length(extra)) {
+        out <- rbind(out, data.frame(value = extra, label = extra, stringsAsFactors = FALSE))
+      }
+
+      if (nrow(out)) {
+        out$value <- as.character(out$value)
+        out$label <- as.character(out$label)
+        out$label[is.na(out$label) | !nzchar(trimws(out$label))] <- out$value[is.na(out$label) | !nzchar(trimws(out$label))]
+        out <- out[!duplicated(out$value), , drop = FALSE]
+      }
+      out
+    }
+
+    .var_filtrable_rel <- function(v) {
+      if (!(v %in% names(data))) return(FALSE)
+      surv <- instrumento$survey %||% NULL
+      if (!is.null(surv) && all(c("name", "type") %in% names(surv))) {
+        tipo <- tolower(as.character(surv$type[surv$name == v][1] %||% ""))
+        if (grepl("^select_one\\b", tipo) || grepl("^select_multiple\\b", tipo)) return(TRUE)
+      }
+      if (length(.choice_map_rel(v))) return(TRUE)
+      x <- trimws(as.character(data[[v]]))
+      x <- x[!is.na(x) & nzchar(x) & x != "NA"]
+      n_u <- length(unique(x))
+      is.finite(n_u) && n_u > 1L && n_u <= 60L
+    }
+
+    filtro_vars_por_seccion <- lapply(secciones_limpias, function(vs) {
+      vv <- unique(as.character(vs))
+      vv <- vv[vapply(vv, .var_filtrable_rel, logical(1))]
+      vv
+    })
+    filtro_vars_por_seccion <- filtro_vars_por_seccion[vapply(filtro_vars_por_seccion, length, integer(1)) > 0]
+    filtro_secs <- names(filtro_vars_por_seccion)
+    filtro_sec_default <- as.character(filtro_secs[1] %||% "")[1]
+
+    MAX_REL_FILTROS <- 6L
+    rel_filter_rows <- shiny::reactiveValues(ids = 1L, next_id = 2L, bound = integer(0))
+
+    .rf_sec_id <- function(id) paste0("rel_filter_seccion_", id)
+    .rf_var_id <- function(id) paste0("rel_filter_var_", id)
+    .rf_cat_id <- function(id) paste0("rel_filter_categorias_", id)
+    .rf_rm_id  <- function(id) paste0("rel_filter_quitar_", id)
+    .rf_chip_rm_id <- function(id) paste0("rel_filter_chip_quitar_", id)
+
+    .remove_rel_filter_row <- function(id) {
+      ids <- as.integer(rel_filter_rows$ids %||% integer(0))
+      ids <- setdiff(ids, as.integer(id))
+      if (!length(ids)) {
+        nid <- as.integer(rel_filter_rows$next_id %||% 2L)
+        rel_filter_rows$next_id <- nid + 1L
+        ids <- nid
+      }
+      rel_filter_rows$ids <- ids
+    }
+
+    .used_rel_filter_vars <- function(except_id = NA_integer_) {
+      ids <- as.integer(rel_filter_rows$ids %||% integer(0))
+      ids <- ids[ids != as.integer(except_id)]
+      out <- character(0)
+      for (rid in ids) {
+        vv <- as.character(input[[.rf_var_id(rid)]] %||% "")[1]
+        if (nzchar(vv)) out <- c(out, vv)
+      }
+      unique(out)
+    }
+
+    .register_rel_filter_row <- function(id) {
+      if (id %in% as.integer(rel_filter_rows$bound %||% integer(0))) return(invisible(NULL))
+      rel_filter_rows$bound <- c(as.integer(rel_filter_rows$bound %||% integer(0)), as.integer(id))
+
+      sec_id <- .rf_sec_id(id)
+      var_id <- .rf_var_id(id)
+      cat_id <- .rf_cat_id(id)
+      rm_id <- .rf_rm_id(id)
+      chip_rm_id <- .rf_chip_rm_id(id)
+
+      shiny::observe({
+        if (!(id %in% as.integer(rel_filter_rows$ids %||% integer(0)))) return()
+
+        if (!length(filtro_secs)) {
+          shiny::updateSelectizeInput(session, sec_id, choices = c(), selected = character(0), server = FALSE)
+          shiny::updateSelectizeInput(session, var_id, choices = c("Sin filtro" = ""), selected = "", server = FALSE)
+          shiny::updateSelectizeInput(session, cat_id, choices = c(), selected = character(0), server = FALSE)
+          return()
+        }
+
+        sec_cur <- as.character(input[[sec_id]] %||% filtro_sec_default)[1]
+        sec_sel <- if (sec_cur %in% filtro_secs) sec_cur else filtro_sec_default
+        shiny::updateSelectizeInput(
+          session,
+          inputId = sec_id,
+          choices = stats::setNames(filtro_secs, filtro_secs),
+          selected = sec_sel,
+          server = FALSE
+        )
+
+        vars_sec <- filtro_vars_por_seccion[[sec_sel]] %||% character(0)
+        used_other <- .used_rel_filter_vars(except_id = id)
+        vars_avail <- setdiff(vars_sec, used_other)
+
+        cur_var <- as.character(input[[var_id]] %||% "")[1]
+        if (nzchar(cur_var) && cur_var %in% vars_sec && !(cur_var %in% vars_avail)) {
+          vars_avail <- c(cur_var, vars_avail)
+        }
+        vars_avail <- unique(vars_avail)
+
+        var_labs <- vapply(vars_avail, function(v) .obtener_label_var(v, instrumento, data), character(1))
+        sel_var <- if (nzchar(cur_var) && cur_var %in% vars_avail) cur_var else ""
+        shiny::updateSelectizeInput(
+          session,
+          inputId = var_id,
+          choices = c("Sin filtro" = "", stats::setNames(vars_avail, var_labs)),
+          selected = sel_var,
+          server = FALSE
+        )
+      })
+
+      shiny::observeEvent(input[[var_id]], {
+        if (!(id %in% as.integer(rel_filter_rows$ids %||% integer(0)))) return()
+        v <- as.character(input[[var_id]] %||% "")[1]
+        if (!nzchar(v) || !(v %in% names(data))) {
+          shiny::updateSelectizeInput(session, cat_id, choices = c(), selected = character(0), server = FALSE)
+          return()
+        }
+
+        cat_df <- .catalogo_categorias_rel(v, data)
+        if (!nrow(cat_df)) {
+          shiny::updateSelectizeInput(session, cat_id, choices = c(), selected = character(0), server = FALSE)
+          return()
+        }
+
+        cat_choices <- stats::setNames(cat_df$value, cat_df$label)
+        prev_sel <- as.character(input[[cat_id]] %||% character(0))
+        sel <- if (length(prev_sel)) intersect(prev_sel, cat_df$value) else character(0)
+        if (!length(sel)) sel <- as.character(cat_df$value)
+
+        shiny::updateSelectizeInput(
+          session,
+          inputId = cat_id,
+          choices = cat_choices,
+          selected = sel,
+          server = FALSE
+        )
+      }, ignoreInit = FALSE)
+
+      shiny::observeEvent(input[[rm_id]], .remove_rel_filter_row(id), ignoreInit = TRUE)
+      shiny::observeEvent(input[[chip_rm_id]], .remove_rel_filter_row(id), ignoreInit = TRUE)
+
+      invisible(NULL)
+    }
+
+    output$rel_filter_rows_ui <- shiny::renderUI({
+      if (!length(filtro_secs)) {
+        return(shiny::p(class = "rel-sidebar-hint", "No hay variables categóricas disponibles para filtrar."))
+      }
+
+      ids <- as.integer(rel_filter_rows$ids %||% integer(0))
+      if (!length(ids)) return(NULL)
+      ns <- session$ns
+
+      shiny::tagList(
+        lapply(seq_along(ids), function(i) {
+          id <- ids[i]
+          shiny::div(
+            class = "sidebar-filter-row",
+            shiny::div(
+              class = "sidebar-filter-row-head",
+              shiny::div(class = "sidebar-filter-row-title", paste0("Filtro ", i)),
+              if (length(ids) > 1L) {
+                shiny::actionButton(
+                  inputId = ns(.rf_rm_id(id)),
+                  label = NULL,
+                  icon = shiny::icon("times"),
+                  class = "sidebar-filter-remove-btn",
+                  title = "Quitar filtro"
+                )
+              }
+            ),
+            shiny::selectizeInput(
+              inputId = ns(.rf_sec_id(id)),
+              label = "Sección",
+              choices = c(),
+              selected = "",
+              options = list(dropdownParent = "body")
+            ),
+            shiny::selectizeInput(
+              inputId = ns(.rf_var_id(id)),
+              label = "Variable",
+              choices = c("Sin filtro" = ""),
+              selected = "",
+              options = list(dropdownParent = "body")
+            ),
+            shiny::selectizeInput(
+              inputId = ns(.rf_cat_id(id)),
+              label = "Categorías",
+              choices = c(),
+              selected = character(0),
+              multiple = TRUE,
+              options = list(
+                plugins = list("remove_button"),
+                closeAfterSelect = FALSE,
+                placeholder = "Selecciona categorías",
+                dropdownParent = "body"
+              )
+            )
+          )
+        })
+      )
+    })
+
+    shiny::observe({
+      ids <- as.integer(rel_filter_rows$ids %||% integer(0))
+      for (id in ids) .register_rel_filter_row(id)
+    })
+
+    shiny::observeEvent(input$rel_filter_add, {
+      ids <- as.integer(rel_filter_rows$ids %||% integer(0))
+      if (length(ids) >= MAX_REL_FILTROS) return()
+      nid <- as.integer(rel_filter_rows$next_id %||% 2L)
+      rel_filter_rows$next_id <- nid + 1L
+      rel_filter_rows$ids <- c(ids, nid)
+    }, ignoreInit = TRUE)
+
+    shiny::observeEvent(input$rel_filter_reset, {
+      nid <- as.integer(rel_filter_rows$next_id %||% 2L)
+      rel_filter_rows$next_id <- nid + 1L
+      rel_filter_rows$ids <- nid
+    }, ignoreInit = TRUE)
+
+    .rel_filter_rows_state <- shiny::reactive({
+      ids <- as.integer(rel_filter_rows$ids %||% integer(0))
+      lapply(ids, function(id) {
+        sec <- as.character(input[[.rf_sec_id(id)]] %||% "")[1]
+        var <- as.character(input[[.rf_var_id(id)]] %||% "")[1]
+        cats <- as.character(input[[.rf_cat_id(id)]] %||% character(0))
+        cats <- cats[!is.na(cats) & nzchar(trimws(cats))]
+        list(id = id, sec = sec, var = var, cats = unique(cats))
+      })
+    })
+
+    rel_filters_activos <- shiny::reactive({
+      rows <- .rel_filter_rows_state()
+      Filter(function(r) nzchar(r$var) && length(r$cats) > 0L, rows)
+    })
+
+    output$rel_filter_active_ui <- shiny::renderUI({
+      rows <- rel_filters_activos()
+      if (!length(rows)) return(NULL)
+      ns <- session$ns
+
+      chips <- lapply(rows, function(r) {
+        sec_lab <- if (nzchar(r$sec)) r$sec else "Sección"
+        var_lab <- .obtener_label_var(r$var, instrumento, data)
+        txt <- paste0(sec_lab, " · ", var_lab, " · ", length(r$cats), " categorías")
+        shiny::div(
+          class = "sidebar-filter-chip",
+          shiny::span(class = "sidebar-filter-chip-text", txt),
+          shiny::actionButton(
+            inputId = ns(.rf_chip_rm_id(r$id)),
+            label = NULL,
+            icon = shiny::icon("times"),
+            class = "sidebar-filter-chip-remove",
+            title = "Quitar filtro"
+          )
+        )
+      })
+
+      shiny::div(
+        class = "sidebar-filter-active-wrap",
+        shiny::div(class = "sidebar-filter-active-title", "Filtros activos"),
+        shiny::div(class = "sidebar-filter-active-list", chips)
+      )
+    })
+
+    output$rel_filter_hint_ui <- shiny::renderUI({
+      ids <- as.integer(rel_filter_rows$ids %||% integer(0))
+      if (length(ids) < MAX_REL_FILTROS) return(NULL)
+      shiny::p(class = "rel-sidebar-hint", paste0("Máximo ", MAX_REL_FILTROS, " filtros."))
+    })
+
+    rel_data_filtrada <- shiny::reactive({
+      df <- data
+      if (!isTRUE(input$rel_filters_enabled)) return(df)
+
+      rows <- rel_filters_activos()
+      if (!length(rows)) return(df)
+
+      for (r in rows) {
+        if (!(r$var %in% names(df)) || !length(r$cats)) next
+        xv <- trimws(as.character(df[[r$var]]))
+        keep <- !is.na(xv) & xv %in% r$cats
+        df <- df[keep, , drop = FALSE]
+      }
+      df
+    })
+
     shiny::observe({
       secs <- names(secciones_limpias)
       if (!length(secs)) {
@@ -1378,7 +1762,7 @@ relacion_tab_server <- function(
         return(list(error = "No es posible cruzar con la selección actual."))
       }
 
-      df <- data
+      df <- rel_data_filtrada()
       if (var_cruce %in% names(df)) df <- df[!is.na(df[[var_cruce]]), , drop = FALSE]
       if (!nrow(df)) return(list(error = "Sin datos disponibles."))
 
@@ -1585,7 +1969,7 @@ relacion_tab_server <- function(
       base_txt <- format(round(as.numeric(pick$base_n %||% 0), 0), big.mark = ",")
 
       shiny::div(
-        class = "rel-iter-level-control",
+        class = "rel-iter-level-control rel-iter-level-control-center",
         shiny::actionButton(
           inputId = session$ns("iter_level_next"),
           label = NULL,
@@ -2026,6 +2410,12 @@ relacion_tab_server <- function(
         )
       }
 
+      keys <- vapply(entries, function(e) as.character(e$key), character(1))
+      cur <- as.character(iter_level_key() %||% "")[1]
+      idx <- which(keys == cur)[1]
+      if (is.na(idx)) idx <- 1L
+      pick <- entries[[idx]]
+
       shiny::tagList(
         if (payload$hidden_count > 0) shiny::div(
           class = "rel-iter-note",
@@ -2038,25 +2428,21 @@ relacion_tab_server <- function(
         ),
         shiny::div(
           class = "rel-iter-table-stack",
-          lapply(seq_along(entries), function(i) {
-            ent <- entries[[i]]
-            out_id <- paste0("rel_tabla_iter_", i)
+          shiny::div(
+            class = "rel-iter-table-block",
             shiny::div(
-              class = "rel-iter-table-block",
+              class = "rel-iter-table-head",
+              shiny::div(class = "rel-iter-table-title", paste0("Nivel: ", pick$label)),
               shiny::div(
-                class = "rel-iter-table-head",
-                shiny::div(class = "rel-iter-table-title", paste0("Nivel: ", ent$label)),
-                shiny::div(
-                  class = "rel-iter-table-subtitle",
-                  paste0(
-                    "Base: ",
-                    format(round(as.numeric(ent$base_n %||% 0), 0), big.mark = ",")
-                  )
+                class = "rel-iter-table-subtitle",
+                paste0(
+                  "Base: ",
+                  format(round(as.numeric(pick$base_n %||% 0), 0), big.mark = ",")
                 )
-              ),
-              DT::dataTableOutput(session$ns(out_id))
-            )
-          })
+              )
+            ),
+            DT::dataTableOutput(session$ns("rel_tabla_iter_activa"))
+          )
         )
       )
     })
@@ -2065,22 +2451,17 @@ relacion_tab_server <- function(
       .build_rel_dt_widget(rel_obj_base())
     })
 
-    shiny::observe({
+    output$rel_tabla_iter_activa <- DT::renderDataTable({
       payload <- rel_iter_payload()
-      if (!isTRUE(payload$active)) return()
+      shiny::req(isTRUE(payload$active))
       entries <- payload$visible_entries
-      if (!length(entries)) return()
+      shiny::req(length(entries) > 0)
 
-      for (i in seq_along(entries)) {
-        local({
-          ii <- i
-          ent <- entries[[ii]]
-          out_id <- paste0("rel_tabla_iter_", ii)
-          output[[out_id]] <- DT::renderDataTable({
-            .build_rel_dt_widget(ent$obj)
-          })
-        })
-      }
+      keys <- vapply(entries, function(e) as.character(e$key), character(1))
+      cur <- as.character(iter_level_key() %||% "")[1]
+      idx <- which(keys == cur)[1]
+      if (is.na(idx)) idx <- 1L
+      .build_rel_dt_widget(entries[[idx]]$obj)
     })
 
     invisible(NULL)

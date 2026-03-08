@@ -2,7 +2,7 @@
 # Tab 4: Dimensiones (UI + server)
 # - Vista General / Indicadores
 # - Motor visual automático (Radar -> Barras cuando no aplica)
-# - Heatmap semafórico + cruce principal + filtros categóricos
+# - Heatmap semafórico + cruce principal + iteración + filtros categóricos
 # =============================================================================
 #' @keywords internal
 #' @noRd
@@ -33,9 +33,11 @@
             shiny::div(class = "sidebar-subtitle", "Vista"),
             shiny::p(
               class = "rel-sidebar-hint",
-              shiny::HTML(
-                "<strong>General:</strong> resume el indicador por sus componentes. &nbsp;&nbsp; <strong>Indicadores:</strong> abre el detalle por preguntas."
-              )
+              shiny::HTML("<strong>General:</strong> resume el indicador por sus componentes.")
+            ),
+            shiny::p(
+              class = "rel-sidebar-hint",
+              shiny::HTML("<strong>Indicadores:</strong> abre el detalle por preguntas.")
             ),
             shiny::div(
               class = "toggle-row dim-vista-switch-row",
@@ -74,6 +76,38 @@
             ),
             shiny::div(
               class = "toggle-row",
+              shiny::span(class = "toggle-label", "Iterar por"),
+              shiny::tags$label(
+                class = "switch",
+                shiny::tags$input(id = "dim_iter_enabled", type = "checkbox"),
+                shiny::tags$span(class = "slider")
+              )
+            ),
+            shiny::p(
+              class = "rel-sidebar-hint",
+              "Activa esta opción para revisar el mismo resultado por niveles de otra variable."
+            ),
+            shiny::conditionalPanel(
+              condition = "input['dim_iter_enabled']",
+              shiny::selectizeInput(
+                inputId = "dim_iter_seccion",
+                label = "Sección",
+                choices = c(),
+                selected = "",
+                options = list(dropdownParent = "body")
+              ),
+              shiny::selectizeInput(
+                inputId = "dim_iter_var",
+                label = "Variable",
+                choices = c("Selecciona variable" = ""),
+                selected = "",
+                options = list(dropdownParent = "body")
+              ),
+              shiny::uiOutput("dim_iter_hidden_hint_ui"),
+              shiny::uiOutput("dim_iter_controls_ui")
+            ),
+            shiny::div(
+              class = "toggle-row",
               shiny::span(class = "toggle-label", "Incluir total"),
               shiny::tags$label(
                 class = "switch",
@@ -93,26 +127,33 @@
 
           shiny::div(
             class = "sidebar-module-card rel-sidebar-card-gap",
-            shiny::div(class = "sidebar-subtitle", "Filtrar datos"),
-            shiny::selectizeInput(
-              inputId = "dim_filtro_seccion",
-              label = "Sección",
-              choices = c(),
-              selected = "",
-              options = list(dropdownParent = "body")
+            shiny::div(
+              class = "rel-iter-head",
+              shiny::div(class = "sidebar-subtitle rel-iter-head-title", "Filtros"),
+              shiny::tags$label(
+                class = "switch rel-iter-head-switch",
+                shiny::tags$input(id = "dim_filters_enabled", type = "checkbox"),
+                shiny::tags$span(class = "slider")
+              )
             ),
-            shiny::selectizeInput(
-              inputId = "dim_filtro_var",
-              label = "Variable",
-              choices = c(),
-              selected = "",
-              options = list(dropdownParent = "body")
-            ),
-            shiny::uiOutput("dim_filtro_categorias_ui"),
-            shiny::actionButton(
-              inputId = "dim_limpiar_filtros",
-              label = "Limpiar filtros",
-              class = "sidebar-quick-btn"
+            shiny::conditionalPanel(
+              condition = "input['dim_filters_enabled']",
+              shiny::uiOutput("dim_filter_rows_ui"),
+              shiny::uiOutput("dim_filter_active_ui"),
+              shiny::div(
+                class = "sidebar-quick-actions",
+                shiny::actionButton(
+                  inputId = "dim_filter_add",
+                  label = "Agregar filtro",
+                  class = "sidebar-quick-btn"
+                ),
+                shiny::actionButton(
+                  inputId = "dim_limpiar_filtros",
+                  label = "Restablecer filtros",
+                  class = "sidebar-quick-btn"
+                )
+              ),
+              shiny::uiOutput("dim_filter_hint_ui")
             )
           )
         )
@@ -358,6 +399,10 @@
   max_categorias_principal <- suppressWarnings(as.integer(vis_cfg$max_categorias_principal %||% 8L)[1])
   if (!is.finite(max_categorias_principal) || is.na(max_categorias_principal) || max_categorias_principal < 1L) {
     max_categorias_principal <- 8L
+  }
+  max_niveles_iteracion <- suppressWarnings(as.integer(vis_cfg$max_niveles_iteracion %||% 12L)[1])
+  if (!is.finite(max_niveles_iteracion) || is.na(max_niveles_iteracion) || max_niveles_iteracion < 1L) {
+    max_niveles_iteracion <- 12L
   }
 
   paleta_radar <- as.character(vis_cfg$paleta_radar %||% "okabe_ito")[1]
@@ -641,16 +686,13 @@
   }
 
   sec_names <- names(section_var_map)
-  principal_sec_choices <- c("Todas las secciones" = "__all__", stats::setNames(sec_names, sec_names))
-  filtro_sec_choices <- c("Todas las secciones" = "__all__", stats::setNames(sec_names, sec_names))
+  sec_default <- as.character(sec_names[1] %||% "")[1]
+  principal_sec_choices <- stats::setNames(sec_names, sec_names)
+  iter_sec_choices <- stats::setNames(sec_names, sec_names)
 
   .vars_for_section <- function(sec) {
-    s <- as.character(sec %||% "__all__")[1]
-    if (identical(s, "__all__")) {
-      vv <- unique(unlist(section_var_map, use.names = FALSE))
-    } else {
-      vv <- section_var_map[[s]] %||% character(0)
-    }
+    s <- as.character(sec %||% sec_default %||% "")[1]
+    vv <- section_var_map[[s]] %||% character(0)
     vv <- vv[vv %in% names(data_dim)]
     labs <- vapply(vv, .label_var, character(1))
     list(vars = vv, labels = labs)
@@ -717,8 +759,8 @@
   })
 
   shiny::observe({
-    psec_cur <- as.character(input$dim_principal_seccion %||% "__all__")[1]
-    psec_sel <- if (psec_cur %in% c("__all__", sec_names)) psec_cur else "__all__"
+    psec_cur <- as.character(input$dim_principal_seccion %||% sec_default)[1]
+    psec_sel <- if (psec_cur %in% sec_names) psec_cur else sec_default
     shiny::updateSelectizeInput(
       session, "dim_principal_seccion",
       choices = principal_sec_choices,
@@ -736,74 +778,476 @@
       server = FALSE
     )
 
-    fsec_cur <- as.character(input$dim_filtro_seccion %||% "__all__")[1]
-    fsec_sel <- if (fsec_cur %in% c("__all__", sec_names)) fsec_cur else "__all__"
+    isec_cur <- as.character(input$dim_iter_seccion %||% psec_sel %||% sec_default)[1]
+    isec_sel <- if (isec_cur %in% sec_names) isec_cur else psec_sel
+    if (!(isec_sel %in% sec_names)) isec_sel <- sec_default
     shiny::updateSelectizeInput(
-      session, "dim_filtro_seccion",
-      choices = filtro_sec_choices,
-      selected = fsec_sel,
+      session, "dim_iter_seccion",
+      choices = iter_sec_choices,
+      selected = isec_sel,
       server = FALSE
     )
 
-    fvars <- .vars_for_section(fsec_sel)$vars
-    fcur <- as.character(input$dim_filtro_var %||% "")[1]
-    fsel <- if (fcur %in% c("", fvars)) fcur else ""
+    ivars <- .vars_for_section(isec_sel)$vars
+    ilabs <- .vars_for_section(isec_sel)$labels
+    pv_now <- as.character(input$dim_principal_var %||% "")[1]
+    keep_i <- !(ivars %in% c(pv_now))
+    ivars <- ivars[keep_i]
+    ilabs <- ilabs[keep_i]
+    ichoices <- c("Selecciona variable" = "", stats::setNames(ivars, ilabs))
+    icur <- as.character(input$dim_iter_var %||% "")[1]
+    isel <- if (icur %in% c("", ivars)) icur else ""
     shiny::updateSelectizeInput(
-      session, "dim_filtro_var",
-      choices = .choices_for_section(fsec_sel, empty_label = "Sin filtro"),
-      selected = fsel,
+      session, "dim_iter_var",
+      choices = ichoices,
+      selected = isel,
       server = FALSE
     )
   })
 
-  shiny::observeEvent(input$dim_filtro_var, {
-    fv <- as.character(input$dim_filtro_var %||% "")[1]
-    if (!nzchar(fv) || !(fv %in% names(data_dim))) {
-      shiny::updateCheckboxGroupInput(session, "dim_filtro_categorias", choices = character(0), selected = character(0))
-      return()
+  .var_filtrable_dim <- function(v) {
+    if (!(v %in% names(data_dim))) return(FALSE)
+
+    surv <- instrumento$survey %||% NULL
+    if (!is.null(surv) && all(c("name", "type") %in% names(surv))) {
+      tipo <- tolower(as.character(surv$type[surv$name == v][1] %||% ""))
+      if (grepl("^select_one\\b", tipo) || grepl("^select_multiple\\b", tipo)) return(TRUE)
     }
 
-    w0 <- .safe_weights(data_dim)
-    cats <- .categorias_var(data_dim, fv, w0, max_levels = 40L)
-    if (!nrow(cats$rows)) {
-      shiny::updateCheckboxGroupInput(session, "dim_filtro_categorias", choices = character(0), selected = character(0))
-      return()
+    if (length(.choice_map(v))) return(TRUE)
+
+    x <- trimws(as.character(data_dim[[v]]))
+    x <- x[!is.na(x) & nzchar(x) & x != "NA"]
+    n_u <- length(unique(x))
+    is.finite(n_u) && n_u > 1L && n_u <= 60L
+  }
+
+  filter_var_map <- lapply(section_var_map, function(vs) {
+    vv <- unique(as.character(vs))
+    vv <- vv[vapply(vv, .var_filtrable_dim, logical(1))]
+    vv
+  })
+  filter_var_map <- filter_var_map[vapply(filter_var_map, length, integer(1)) > 0]
+  filter_secs <- names(filter_var_map)
+  filter_sec_default <- as.character(filter_secs[1] %||% sec_default %||% "")[1]
+
+  .catalogo_categorias_dim <- function(var, df_base) {
+    if (!nzchar(var) || !(var %in% names(df_base))) {
+      return(data.frame(value = character(0), label = character(0), stringsAsFactors = FALSE))
     }
 
-    choices <- stats::setNames(cats$rows$value, cats$rows$label)
-    shiny::updateCheckboxGroupInput(session, "dim_filtro_categorias", choices = choices, selected = cats$rows$value)
-  }, ignoreInit = FALSE)
+    out <- data.frame(value = character(0), label = character(0), stringsAsFactors = FALSE)
 
-  output$dim_filtro_categorias_ui <- shiny::renderUI({
-    fv <- as.character(input$dim_filtro_var %||% "")[1]
-    if (!nzchar(fv) || !(fv %in% names(data_dim))) return(NULL)
-    shiny::checkboxGroupInput(
-      inputId = "dim_filtro_categorias",
-      label = "Categorías",
-      choices = character(0),
-      selected = character(0)
+    map_choice <- .choice_map(var)
+    if (length(map_choice)) {
+      out <- data.frame(
+        value = as.character(names(map_choice)),
+        label = as.character(unname(map_choice)),
+        stringsAsFactors = FALSE
+      )
+    } else {
+      labs_attr <- attr(df_base[[var]], "labels", exact = TRUE)
+      if (!is.null(labs_attr) && length(labs_attr)) {
+        out <- data.frame(
+          value = as.character(names(labs_attr)),
+          label = as.character(unname(labs_attr)),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+
+    vals_obs <- trimws(as.character(df_base[[var]]))
+    vals_obs <- vals_obs[!is.na(vals_obs) & nzchar(vals_obs) & vals_obs != "NA"]
+    vals_obs <- unique(vals_obs)
+
+    extra <- setdiff(vals_obs, out$value)
+    if (length(extra)) {
+      out <- rbind(out, data.frame(value = extra, label = extra, stringsAsFactors = FALSE))
+    }
+
+    if (nrow(out)) {
+      out$value <- as.character(out$value)
+      out$label <- as.character(out$label)
+      out$label[is.na(out$label) | !nzchar(trimws(out$label))] <- out$value[is.na(out$label) | !nzchar(trimws(out$label))]
+      out <- out[!duplicated(out$value), , drop = FALSE]
+    }
+    out
+  }
+
+  MAX_DIM_FILTROS <- 6L
+  dim_filter_rows <- shiny::reactiveValues(ids = 1L, next_id = 2L, bound = integer(0))
+
+  .df_sec_id <- function(id) paste0("dim_filter_seccion_", id)
+  .df_var_id <- function(id) paste0("dim_filter_var_", id)
+  .df_cat_id <- function(id) paste0("dim_filter_categorias_", id)
+  .df_rm_id  <- function(id) paste0("dim_filter_quitar_", id)
+  .df_chip_rm_id <- function(id) paste0("dim_filter_chip_quitar_", id)
+
+  .remove_dim_filter_row <- function(id) {
+    ids <- as.integer(dim_filter_rows$ids %||% integer(0))
+    ids <- setdiff(ids, as.integer(id))
+    if (!length(ids)) {
+      nid <- as.integer(dim_filter_rows$next_id %||% 2L)
+      dim_filter_rows$next_id <- nid + 1L
+      ids <- nid
+    }
+    dim_filter_rows$ids <- ids
+  }
+
+  .used_dim_filter_vars <- function(except_id = NA_integer_) {
+    ids <- as.integer(dim_filter_rows$ids %||% integer(0))
+    ids <- ids[ids != as.integer(except_id)]
+    out <- character(0)
+    for (rid in ids) {
+      vv <- as.character(input[[.df_var_id(rid)]] %||% "")[1]
+      if (nzchar(vv)) out <- c(out, vv)
+    }
+    unique(out)
+  }
+
+  .register_dim_filter_row <- function(id) {
+    if (id %in% as.integer(dim_filter_rows$bound %||% integer(0))) return(invisible(NULL))
+    dim_filter_rows$bound <- c(as.integer(dim_filter_rows$bound %||% integer(0)), as.integer(id))
+
+    sec_id <- .df_sec_id(id)
+    var_id <- .df_var_id(id)
+    cat_id <- .df_cat_id(id)
+    rm_id <- .df_rm_id(id)
+    chip_rm_id <- .df_chip_rm_id(id)
+
+    shiny::observe({
+      if (!(id %in% as.integer(dim_filter_rows$ids %||% integer(0)))) return()
+
+      if (!length(filter_secs)) {
+        shiny::updateSelectizeInput(session, sec_id, choices = c(), selected = character(0), server = FALSE)
+        shiny::updateSelectizeInput(session, var_id, choices = c("Sin filtro" = ""), selected = "", server = FALSE)
+        shiny::updateSelectizeInput(session, cat_id, choices = c(), selected = character(0), server = FALSE)
+        return()
+      }
+
+      sec_cur <- as.character(input[[sec_id]] %||% filter_sec_default)[1]
+      sec_sel <- if (sec_cur %in% filter_secs) sec_cur else filter_sec_default
+      shiny::updateSelectizeInput(
+        session,
+        inputId = sec_id,
+        choices = stats::setNames(filter_secs, filter_secs),
+        selected = sec_sel,
+        server = FALSE
+      )
+
+      vars_sec <- filter_var_map[[sec_sel]] %||% character(0)
+      used_other <- .used_dim_filter_vars(except_id = id)
+      vars_avail <- setdiff(vars_sec, used_other)
+
+      cur_var <- as.character(input[[var_id]] %||% "")[1]
+      if (nzchar(cur_var) && cur_var %in% vars_sec && !(cur_var %in% vars_avail)) {
+        vars_avail <- c(cur_var, vars_avail)
+      }
+      vars_avail <- unique(vars_avail)
+
+      var_labs <- vapply(vars_avail, .label_var, character(1))
+      sel_var <- if (nzchar(cur_var) && cur_var %in% vars_avail) cur_var else ""
+      shiny::updateSelectizeInput(
+        session,
+        inputId = var_id,
+        choices = c("Sin filtro" = "", stats::setNames(vars_avail, var_labs)),
+        selected = sel_var,
+        server = FALSE
+      )
+    })
+
+    shiny::observeEvent(input[[var_id]], {
+      if (!(id %in% as.integer(dim_filter_rows$ids %||% integer(0)))) return()
+      v <- as.character(input[[var_id]] %||% "")[1]
+      if (!nzchar(v) || !(v %in% names(data_dim))) {
+        shiny::updateSelectizeInput(session, cat_id, choices = c(), selected = character(0), server = FALSE)
+        return()
+      }
+
+      cat_df <- .catalogo_categorias_dim(v, data_dim)
+      if (!nrow(cat_df)) {
+        shiny::updateSelectizeInput(session, cat_id, choices = c(), selected = character(0), server = FALSE)
+        return()
+      }
+
+      cat_choices <- stats::setNames(cat_df$value, cat_df$label)
+      prev_sel <- as.character(input[[cat_id]] %||% character(0))
+      sel <- if (length(prev_sel)) intersect(prev_sel, cat_df$value) else character(0)
+      if (!length(sel)) sel <- as.character(cat_df$value)
+
+      shiny::updateSelectizeInput(
+        session,
+        inputId = cat_id,
+        choices = cat_choices,
+        selected = sel,
+        server = FALSE
+      )
+    }, ignoreInit = FALSE)
+
+    shiny::observeEvent(input[[rm_id]], .remove_dim_filter_row(id), ignoreInit = TRUE)
+    shiny::observeEvent(input[[chip_rm_id]], .remove_dim_filter_row(id), ignoreInit = TRUE)
+
+    invisible(NULL)
+  }
+
+  output$dim_filter_rows_ui <- shiny::renderUI({
+    if (!length(filter_secs)) {
+      return(shiny::p(class = "rel-sidebar-hint", "No hay variables categóricas disponibles para filtrar."))
+    }
+
+    ids <- as.integer(dim_filter_rows$ids %||% integer(0))
+    if (!length(ids)) return(NULL)
+
+    shiny::tagList(
+      lapply(seq_along(ids), function(i) {
+        id <- ids[i]
+        shiny::div(
+          class = "sidebar-filter-row",
+          shiny::div(
+            class = "sidebar-filter-row-head",
+            shiny::div(class = "sidebar-filter-row-title", paste0("Filtro ", i)),
+            if (length(ids) > 1L) {
+              shiny::actionButton(
+                inputId = .df_rm_id(id),
+                label = NULL,
+                icon = shiny::icon("times"),
+                class = "sidebar-filter-remove-btn",
+                title = "Quitar filtro"
+              )
+            }
+          ),
+          shiny::selectizeInput(
+            inputId = .df_sec_id(id),
+            label = "Sección",
+            choices = c(),
+            selected = "",
+            options = list(dropdownParent = "body")
+          ),
+          shiny::selectizeInput(
+            inputId = .df_var_id(id),
+            label = "Variable",
+            choices = c("Sin filtro" = ""),
+            selected = "",
+            options = list(dropdownParent = "body")
+          ),
+          shiny::selectizeInput(
+            inputId = .df_cat_id(id),
+            label = "Categorías",
+            choices = c(),
+            selected = character(0),
+            multiple = TRUE,
+            options = list(
+              plugins = list("remove_button"),
+              closeAfterSelect = FALSE,
+              placeholder = "Selecciona categorías",
+              dropdownParent = "body"
+            )
+          )
+        )
+      })
     )
   })
+
+  shiny::observe({
+    ids <- as.integer(dim_filter_rows$ids %||% integer(0))
+    for (id in ids) .register_dim_filter_row(id)
+  })
+
+  shiny::observeEvent(input$dim_filter_add, {
+    ids <- as.integer(dim_filter_rows$ids %||% integer(0))
+    if (length(ids) >= MAX_DIM_FILTROS) return()
+    nid <- as.integer(dim_filter_rows$next_id %||% 2L)
+    dim_filter_rows$next_id <- nid + 1L
+    dim_filter_rows$ids <- c(ids, nid)
+  }, ignoreInit = TRUE)
 
   shiny::observeEvent(input$dim_limpiar_filtros, {
-    shiny::updateSelectizeInput(session, "dim_filtro_seccion", selected = "__all__")
-    shiny::updateSelectizeInput(session, "dim_filtro_var", selected = "")
+    nid <- as.integer(dim_filter_rows$next_id %||% 2L)
+    dim_filter_rows$next_id <- nid + 1L
+    dim_filter_rows$ids <- nid
+  }, ignoreInit = TRUE)
+
+  .dim_filter_rows_state <- shiny::reactive({
+    ids <- as.integer(dim_filter_rows$ids %||% integer(0))
+    lapply(ids, function(id) {
+      sec <- as.character(input[[.df_sec_id(id)]] %||% "")[1]
+      var <- as.character(input[[.df_var_id(id)]] %||% "")[1]
+      cats <- as.character(input[[.df_cat_id(id)]] %||% character(0))
+      cats <- cats[!is.na(cats) & nzchar(trimws(cats))]
+      list(id = id, sec = sec, var = var, cats = unique(cats))
+    })
+  })
+
+  dim_filters_activos <- shiny::reactive({
+    rows <- .dim_filter_rows_state()
+    Filter(function(r) nzchar(r$var) && length(r$cats) > 0L, rows)
+  })
+
+  output$dim_filter_active_ui <- shiny::renderUI({
+    rows <- dim_filters_activos()
+    if (!length(rows)) return(NULL)
+
+    chips <- lapply(rows, function(r) {
+      sec_lab <- if (nzchar(r$sec)) r$sec else "Sección"
+      txt <- paste0(sec_lab, " · ", .label_var(r$var), " · ", length(r$cats), " categorías")
+      shiny::div(
+        class = "sidebar-filter-chip",
+        shiny::span(class = "sidebar-filter-chip-text", txt),
+        shiny::actionButton(
+          inputId = .df_chip_rm_id(r$id),
+          label = NULL,
+          icon = shiny::icon("times"),
+          class = "sidebar-filter-chip-remove",
+          title = "Quitar filtro"
+        )
+      )
+    })
+
+    shiny::div(
+      class = "sidebar-filter-active-wrap",
+      shiny::div(class = "sidebar-filter-active-title", "Filtros activos"),
+      shiny::div(class = "sidebar-filter-active-list", chips)
+    )
+  })
+
+  output$dim_filter_hint_ui <- shiny::renderUI({
+    ids <- as.integer(dim_filter_rows$ids %||% integer(0))
+    if (length(ids) < MAX_DIM_FILTROS) return(NULL)
+    shiny::p(class = "rel-sidebar-hint", paste0("Máximo ", MAX_DIM_FILTROS, " filtros."))
   })
 
   data_filtrada <- shiny::reactive({
     df <- data_dim
-    fv <- as.character(input$dim_filtro_var %||% "")[1]
-    if (nzchar(fv) && fv %in% names(df)) {
-      if (is.null(input$dim_filtro_categorias)) return(df)
+    if (!isTRUE(input$dim_filters_enabled)) return(df)
 
-      cats <- as.character(input$dim_filtro_categorias %||% character(0))
-      if (!length(cats)) return(df[0, , drop = FALSE])
+    rows <- dim_filters_activos()
+    if (!length(rows)) return(df)
 
-      xv <- trimws(as.character(df[[fv]]))
-      keep <- !is.na(xv) & xv %in% cats
+    for (r in rows) {
+      if (!(r$var %in% names(df)) || !length(r$cats)) next
+      xv <- trimws(as.character(df[[r$var]]))
+      keep <- !is.na(xv) & xv %in% r$cats
       df <- df[keep, , drop = FALSE]
     }
     df
+  })
+
+  iter_payload <- shiny::reactive({
+    df <- data_filtrada()
+    iter_on <- isTRUE(input$dim_iter_enabled)
+    iv <- as.character(input$dim_iter_var %||% "")[1]
+    if (!iter_on || !nrow(df) || !nzchar(iv) || !(iv %in% names(df))) {
+      return(list(
+        active = FALSE,
+        var = "",
+        var_label = "",
+        rows = data.frame(value = character(0), label = character(0), base = numeric(0), stringsAsFactors = FALSE),
+        hidden_levels = 0L
+      ))
+    }
+
+    w <- .safe_weights(df)
+    cats <- .categorias_var(df, iv, w, max_levels = max_niveles_iteracion)
+    if (!nrow(cats$rows)) {
+      return(list(
+        active = FALSE,
+        var = iv,
+        var_label = .label_var(iv),
+        rows = cats$rows,
+        hidden_levels = as.integer(cats$hidden_levels)
+      ))
+    }
+
+    list(
+      active = TRUE,
+      var = iv,
+      var_label = .label_var(iv),
+      rows = cats$rows,
+      hidden_levels = as.integer(cats$hidden_levels)
+    )
+  })
+
+  iter_level_key <- shiny::reactiveVal("")
+
+  shiny::observe({
+    it <- iter_payload()
+    if (!isTRUE(it$active)) {
+      iter_level_key("")
+      return()
+    }
+    keys <- as.character(it$rows$value)
+    cur <- as.character(iter_level_key() %||% "")[1]
+    if (!nzchar(cur) || !(cur %in% keys)) iter_level_key(keys[1])
+  })
+
+  shiny::observeEvent(input$dim_iter_next, {
+    it <- iter_payload()
+    if (!isTRUE(it$active) || !nrow(it$rows)) return()
+    keys <- as.character(it$rows$value)
+    cur <- as.character(iter_level_key() %||% "")[1]
+    idx <- which(keys == cur)[1]
+    if (is.na(idx)) idx <- 1L
+    nxt <- if (idx >= length(keys)) 1L else idx + 1L
+    iter_level_key(keys[nxt])
+  })
+
+  iter_pick <- shiny::reactive({
+    it <- iter_payload()
+    if (!isTRUE(it$active) || !nrow(it$rows)) return(NULL)
+    key <- as.character(iter_level_key() %||% "")[1]
+    if (!nzchar(key) || !(key %in% as.character(it$rows$value))) key <- as.character(it$rows$value[1])
+    row <- it$rows[match(key, as.character(it$rows$value)), , drop = FALSE]
+    if (!nrow(row)) return(NULL)
+    list(
+      key = as.character(row$value[1]),
+      label = as.character(row$label[1]),
+      base = as.numeric(row$base[1]),
+      var = as.character(it$var),
+      var_label = as.character(it$var_label),
+      hidden_levels = as.integer(it$hidden_levels)
+    )
+  })
+
+  output$dim_iter_hidden_hint_ui <- shiny::renderUI({
+    it <- iter_payload()
+    if (!isTRUE(it$active)) return(NULL)
+    h <- as.integer(it$hidden_levels %||% 0L)
+    if (h <= 0L) return(NULL)
+    shiny::p(
+      class = "rel-iter-hint",
+      paste0("Se muestran los niveles con mayor base. Hay ", h, " niveles adicionales no visibles.")
+    )
+  })
+
+  output$dim_iter_controls_ui <- shiny::renderUI({
+    pick <- iter_pick()
+    if (is.null(pick)) return(NULL)
+
+    base_txt <- format(.round_half_up(pick$base, 0), big.mark = ",", scientific = FALSE)
+    shiny::div(
+      class = "rel-iter-level-control rel-iter-level-control-center",
+      shiny::actionButton(
+        inputId = "dim_iter_next",
+        label = NULL,
+        icon = shiny::icon("repeat"),
+        class = "rel-iter-circle-btn",
+        title = "Siguiente nivel de iteración"
+      ),
+      shiny::div(
+        class = "rel-iter-level-chip",
+        shiny::div(class = "rel-iter-level-name", pick$label),
+        shiny::div(class = "rel-iter-level-meta", paste0("N ", base_txt))
+      )
+    )
+  })
+
+  data_iterada <- shiny::reactive({
+    df <- data_filtrada()
+    pick <- iter_pick()
+    if (is.null(pick) || !nzchar(pick$var) || !(pick$var %in% names(df))) return(df)
+    x <- trimws(as.character(df[[pick$var]]))
+    keep <- !is.na(x) & x == as.character(pick$key)
+    df[keep, , drop = FALSE]
   })
 
   objetivo_activo <- shiny::reactive({
@@ -817,8 +1261,9 @@
   })
 
   score_payload <- shiny::reactive({
-    df <- data_filtrada()
+    df <- data_iterada()
     obj <- objetivo_activo()
+    iter_now <- iter_pick()
 
     if (!nrow(df) || is.null(obj) || !length(obj$axis_vars)) {
       return(list(
@@ -830,7 +1275,11 @@
         objective = NA_character_,
         principal_label = "",
         principal_var = "",
-        principal_hidden = 0L
+        principal_hidden = 0L,
+        iter_active = FALSE,
+        iter_var_label = "",
+        iter_level_label = "",
+        iter_hidden_levels = 0L
       ))
     }
 
@@ -846,7 +1295,11 @@
         objective = as.character(obj$label %||% obj$id),
         principal_label = "",
         principal_var = "",
-        principal_hidden = 0L
+        principal_hidden = 0L,
+        iter_active = !is.null(iter_now),
+        iter_var_label = as.character(iter_now$var_label %||% ""),
+        iter_level_label = as.character(iter_now$label %||% ""),
+        iter_hidden_levels = as.integer(iter_now$hidden_levels %||% 0L)
       ))
     }
 
@@ -955,7 +1408,11 @@
       objective = as.character(obj$label %||% obj$id),
       principal_label = .label_var(pv),
       principal_var = pv,
-      principal_hidden = hidden_main
+      principal_hidden = hidden_main,
+      iter_active = !is.null(iter_now),
+      iter_var_label = as.character(iter_now$var_label %||% ""),
+      iter_level_label = as.character(iter_now$label %||% ""),
+      iter_hidden_levels = as.integer(iter_now$hidden_levels %||% 0L)
     )
   })
 
@@ -1076,6 +1533,11 @@
     } else {
       "Sin cruce. "
     }
+    iter_txt <- if (isTRUE(p$iter_active)) {
+      paste0("Iteración: ", p$iter_var_label, " = ", p$iter_level_label, ". ")
+    } else {
+      ""
+    }
 
     cuts_lab <- .range_labels(sem_cortes[1], sem_cortes[2])
 
@@ -1084,8 +1546,10 @@
       paste0(
         sec_mode, " | Objetivo: ", p$objective, " | ",
         principal_txt,
+        iter_txt,
         "Rangos: ", cuts_lab[1], ", ", cuts_lab[2], ", ", cuts_lab[3], ".",
-        if (isTRUE(p$principal_hidden > 0L)) paste0(" +", p$principal_hidden, " categorías no visibles por legibilidad.") else ""
+        if (isTRUE(p$principal_hidden > 0L)) paste0(" +", p$principal_hidden, " categorías no visibles por legibilidad.") else "",
+        if (isTRUE(p$iter_hidden_levels > 0L)) paste0(" +", p$iter_hidden_levels, " niveles de iteración adicionales no visibles.") else ""
       )
     )
   })
@@ -1101,7 +1565,8 @@
       paste0(
         if (identical(p$mode, "indicadores")) "Vista indicadores" else "Vista general",
         " | Objetivo: ", p$objective,
-        " | Total: ", if (isTRUE(input$dim_show_total)) "incluido" else "oculto"
+        " | Total: ", if (isTRUE(input$dim_show_total)) "incluido" else "oculto",
+        if (isTRUE(p$iter_active)) paste0(" | Iteración: ", p$iter_var_label, " = ", p$iter_level_label) else ""
       )
     )
   })
@@ -1335,7 +1800,7 @@
           theta = theta_poly,
           name = g,
           fill = "toself",
-          fillcolor = .add_alpha(col_line, if (is_total) 0.30 else 0.18),
+          fillcolor = .add_alpha(col_line, if (is_total) 0.18 else 0.10),
           line = list(width = if (is_total) 3 else 2, color = col_line),
           marker = list(size = if (is_total) 6.8 else 5.2, color = col_line),
           hovertemplate = paste0(

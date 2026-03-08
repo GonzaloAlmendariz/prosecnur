@@ -854,6 +854,8 @@ reporte_interactivo <- function(
     datos_dimensiones = NULL,
     rotulos_dimensiones = NULL,
     dimensiones_config = NULL,
+    dimensiones_semaforo_cortes = NULL,
+    dimensiones_semaforo_colores = NULL,
     fuente      = NULL,
     titulo      = "Explorador interactivo",
     colores_apiladas_por_listname = NULL,
@@ -883,6 +885,39 @@ reporte_interactivo <- function(
       call. = FALSE
     )
   }
+
+  .norm_dim_sem_cortes <- function(x) {
+    if (is.null(x)) return(NULL)
+    cts <- suppressWarnings(as.numeric(x))
+    cts <- cts[is.finite(cts)]
+    if (length(cts) < 2L) {
+      stop("`dimensiones_semaforo_cortes` debe tener al menos 2 valores numéricos.", call. = FALSE)
+    }
+    cts <- sort(unique(cts))[1:2]
+    cts <- pmax(0, pmin(100, cts))
+    if (length(cts) < 2L || cts[1] >= cts[2]) {
+      stop("`dimensiones_semaforo_cortes` debe definir dos cortes válidos y crecientes.", call. = FALSE)
+    }
+    cts
+  }
+
+  .norm_dim_sem_colores <- function(x) {
+    if (is.null(x)) return(NULL)
+    cols <- as.character(x)
+    nms <- names(cols %||% character(0))
+    if (is.null(nms)) nms <- character(0)
+    if (!all(c("rojo", "ambar", "verde") %in% nms)) {
+      stop("`dimensiones_semaforo_colores` debe incluir nombres: rojo, ambar y verde.", call. = FALSE)
+    }
+    c(
+      rojo = as.character(cols[["rojo"]]),
+      ambar = as.character(cols[["ambar"]]),
+      verde = as.character(cols[["verde"]])
+    )
+  }
+
+  dim_sem_cortes_override <- .norm_dim_sem_cortes(dimensiones_semaforo_cortes)
+  dim_sem_colores_override <- .norm_dim_sem_colores(dimensiones_semaforo_colores)
 
   tiene_labels <- any(vapply(names(data), function(v) {
     !is.null(attr(data[[v]], "label",  exact = TRUE)) ||
@@ -1165,6 +1200,8 @@ reporte_interactivo <- function(
       )
       cfg <- .deep_merge(.fallback_dim_cfg(), cfg_infer)
       cfg <- .deep_merge(cfg, dimensiones_config)
+      if (!is.null(dim_sem_cortes_override)) cfg$semaforo$cortes <- dim_sem_cortes_override
+      if (!is.null(dim_sem_colores_override)) cfg$semaforo$colores <- dim_sem_colores_override
 
       idx_meta <- attr(datos_dim_ready, "indices_meta", exact = TRUE)
       rec_meta <- attr(datos_dim_ready, "recodificacion_items_meta", exact = TRUE)

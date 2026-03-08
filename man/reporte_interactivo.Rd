@@ -11,6 +11,8 @@ reporte_interactivo(
   datos_dimensiones = NULL,
   rotulos_dimensiones = NULL,
   dimensiones_config = NULL,
+  dimensiones_semaforo_cortes = NULL,
+  dimensiones_semaforo_colores = NULL,
   fuente = NULL,
   titulo = "Explorador interactivo",
   colores_apiladas_por_listname = NULL,
