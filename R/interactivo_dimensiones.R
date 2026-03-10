@@ -1153,19 +1153,22 @@
         var = "",
         var_label = "",
         rows = data.frame(value = character(0), label = character(0), base = numeric(0), stringsAsFactors = FALSE),
+        rows_all = data.frame(value = character(0), label = character(0), base = numeric(0), stringsAsFactors = FALSE),
         hidden_levels = 0L
       ))
     }
 
     w <- .safe_weights(df)
-    cats <- .categorias_var(df, iv, w, max_levels = max_niveles_iteracion)
-    if (!nrow(cats$rows)) {
+    cats_all <- .categorias_var(df, iv, w, max_levels = Inf)
+    lim <- .interactivo_limit_levels(cats_all$rows, max_levels = max_niveles_iteracion)
+    if (!nrow(cats_all$rows)) {
       return(list(
         active = FALSE,
         var = iv,
         var_label = .label_var(iv),
-        rows = cats$rows,
-        hidden_levels = as.integer(cats$hidden_levels)
+        rows = lim$visible,
+        rows_all = lim$all,
+        hidden_levels = as.integer(lim$hidden_count)
       ))
     }
 
@@ -1173,8 +1176,9 @@
       active = TRUE,
       var = iv,
       var_label = .label_var(iv),
-      rows = cats$rows,
-      hidden_levels = as.integer(cats$hidden_levels)
+      rows = lim$visible,
+      rows_all = lim$all,
+      hidden_levels = as.integer(lim$hidden_count)
     )
   })
 
@@ -1186,28 +1190,25 @@
       iter_level_key("")
       return()
     }
-    keys <- as.character(it$rows$value)
+    keys <- as.character(it$rows_all$value)
     cur <- as.character(iter_level_key() %||% "")[1]
     if (!nzchar(cur) || !(cur %in% keys)) iter_level_key(keys[1])
   })
 
-  shiny::observeEvent(input$dim_iter_next, {
+  shiny::observeEvent(input$dim_iter_level_select, {
     it <- iter_payload()
-    if (!isTRUE(it$active) || !nrow(it$rows)) return()
-    keys <- as.character(it$rows$value)
-    cur <- as.character(iter_level_key() %||% "")[1]
-    idx <- which(keys == cur)[1]
-    if (is.na(idx)) idx <- 1L
-    nxt <- if (idx >= length(keys)) 1L else idx + 1L
-    iter_level_key(keys[nxt])
+    if (!isTRUE(it$active) || !nrow(it$rows_all)) return()
+    key <- as.character(input$dim_iter_level_select %||% "")[1]
+    keys <- as.character(it$rows_all$value)
+    if (nzchar(key) && key %in% keys) iter_level_key(key)
   })
 
   iter_pick <- shiny::reactive({
     it <- iter_payload()
-    if (!isTRUE(it$active) || !nrow(it$rows)) return(NULL)
+    if (!isTRUE(it$active) || !nrow(it$rows_all)) return(NULL)
     key <- as.character(iter_level_key() %||% "")[1]
-    if (!nzchar(key) || !(key %in% as.character(it$rows$value))) key <- as.character(it$rows$value[1])
-    row <- it$rows[match(key, as.character(it$rows$value)), , drop = FALSE]
+    if (!nzchar(key) || !(key %in% as.character(it$rows_all$value))) key <- as.character(it$rows_all$value[1])
+    row <- it$rows_all[match(key, as.character(it$rows_all$value)), , drop = FALSE]
     if (!nrow(row)) return(NULL)
     list(
       key = as.character(row$value[1]),
@@ -1226,7 +1227,7 @@
     if (h <= 0L) return(NULL)
     shiny::p(
       class = "rel-iter-hint",
-      paste0("Se muestran los niveles con mayor base. Hay ", h, " niveles adicionales no visibles.")
+      paste0("La vista rápida prioriza los niveles con mayor base. El selector permite buscar los ", nrow(it$rows_all), " niveles disponibles.")
     )
   })
 
@@ -1235,20 +1236,26 @@
     if (is.null(pick)) return(NULL)
 
     base_txt <- format(.round_half_up(pick$base, 0), big.mark = ",", scientific = FALSE)
-    shiny::div(
-      class = "rel-iter-level-control rel-iter-level-control-center",
-      shiny::actionButton(
-        inputId = "dim_iter_next",
-        label = NULL,
-        icon = shiny::icon("repeat"),
-        class = "rel-iter-circle-btn",
-        title = "Siguiente nivel de iteración"
-      ),
-      shiny::div(
-        class = "rel-iter-level-chip",
-        shiny::div(class = "rel-iter-level-name", pick$label),
-        shiny::div(class = "rel-iter-level-meta", paste0("N ", base_txt))
+    it <- iter_payload()
+    items <- lapply(seq_len(nrow(it$rows_all)), function(i) {
+      list(
+        value = as.character(it$rows_all$value[i]),
+        label = as.character(it$rows_all$label[i]),
+        meta = paste0(
+          "N ",
+          format(.round_half_up(as.numeric(it$rows_all$base[i]), 0), big.mark = ",", scientific = FALSE)
+        )
       )
+    })
+
+    .interactivo_iter_popover_ui(
+      select_id = "dim_iter_level_select",
+      current_label = pick$label,
+      current_meta = paste0("N ", base_txt),
+      items = items,
+      selected = pick$key,
+      title = "Seleccionar nivel",
+      note = paste0("Disponible: ", nrow(it$rows_all), " niveles")
     )
   })
 

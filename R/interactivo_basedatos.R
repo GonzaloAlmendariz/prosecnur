@@ -70,7 +70,11 @@
               ),
               shiny::div(
                 class = "sidebar-download-action",
-                shiny::uiOutput("data_descarga_boton_ui")
+                shiny::downloadButton(
+                  outputId = "data_descargar",
+                  label = "Descargar datos",
+                  class = "btn sidebar-download-btn"
+                )
               )
             ),
             shiny::uiOutput("data_descarga_resumen_ui")
@@ -946,25 +950,9 @@
     )
   })
 
-  output$data_descarga_boton_ui <- shiny::renderUI({
+  shiny::observe({
     df <- data_exportable()
-
-    if (!ncol(df)) {
-      return(
-        shiny::tags$button(
-          type = "button",
-          class = "btn sidebar-download-btn",
-          disabled = "disabled",
-          "Descargar datos"
-        )
-      )
-    }
-
-    shiny::downloadButton(
-      outputId = "data_descargar",
-      label = "Descargar datos",
-      class = "btn sidebar-download-btn"
-    )
+    .interactivo_set_download_state(session, "data_descargar", enabled = ncol(df) > 0L)
   })
 
   output$data_descargar <- shiny::downloadHandler(
@@ -985,13 +973,7 @@
       if (fmt == "csv") {
         utils::write.csv(df, file = file, row.names = FALSE, fileEncoding = "UTF-8", na = "")
       } else {
-        openxlsx::write.xlsx(
-          x = df,
-          file = file,
-          asTable = TRUE,
-          rowNames = FALSE,
-          overwrite = TRUE
-        )
+        .interactivo_write_simple_xlsx(path = file, data = df, sheet_name = "Base de datos")
       }
     }
   )

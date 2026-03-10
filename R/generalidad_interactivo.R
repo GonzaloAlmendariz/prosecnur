@@ -11,6 +11,410 @@
 # Helpers internos
 # -----------------------------------------------------------------------------
 
+.interactivo_limit_levels <- function(x, max_levels = 12L) {
+  n <- if (is.data.frame(x)) {
+    nrow(x)
+  } else if (is.list(x)) {
+    length(x)
+  } else {
+    length(x)
+  }
+
+  if (!is.finite(max_levels) || is.na(max_levels) || max_levels < 1L) {
+    max_levels <- n
+  }
+  max_levels <- as.integer(max_levels)
+
+  visible_n <- min(n, max_levels)
+  visible <- if (n <= 0L) {
+    if (is.data.frame(x)) x[0, , drop = FALSE] else x[0]
+  } else if (is.data.frame(x)) {
+    x[seq_len(visible_n), , drop = FALSE]
+  } else if (is.list(x)) {
+    x[seq_len(visible_n)]
+  } else {
+    x[seq_len(visible_n)]
+  }
+
+  list(
+    all = x,
+    visible = visible,
+    total = as.integer(n),
+    hidden_count = max(0L, as.integer(n - visible_n))
+  )
+}
+
+.interactivo_resolve_filter_selection <- function(
+    selected = character(0),
+    valid_values = character(0),
+    last_valid = character(0),
+    fallback = c("all", "first", "none")
+) {
+  fallback <- match.arg(fallback)
+
+  clean_chr <- function(x) {
+    x <- as.character(x %||% character(0))
+    x <- x[!is.na(x) & nzchar(trimws(x))]
+    unique(x)
+  }
+
+  valid <- clean_chr(valid_values)
+  if (!length(valid)) return(character(0))
+
+  selected_clean <- intersect(clean_chr(selected), valid)
+  if (length(selected_clean)) return(selected_clean)
+
+  last_valid_clean <- intersect(clean_chr(last_valid), valid)
+  if (length(last_valid_clean)) return(last_valid_clean)
+
+  switch(
+    fallback,
+    all = valid,
+    first = valid[1],
+    none = character(0)
+  )
+}
+
+.interactivo_has_cases_so <- function(df, var) {
+  if (!is.data.frame(df) || !nrow(df) || !(var %in% names(df))) return(FALSE)
+
+  x <- as.character(df[[var]])
+  any(!is.na(x) & nzchar(trimws(x)) & x != "NA")
+}
+
+.interactivo_has_cases_dummy <- function(df, col_dummy) {
+  if (!is.data.frame(df) || !nrow(df) || !(col_dummy %in% names(df))) return(FALSE)
+
+  x <- df[[col_dummy]]
+  x2 <- suppressWarnings(as.numeric(as.character(x)))
+  if (all(is.na(x2)) && is.logical(x)) x2 <- as.numeric(x)
+
+  any(!is.na(x2) & x2 %in% c(0, 1))
+}
+
+.interactivo_text_default <- function(x, default = "") {
+  if (is.null(x) || is.function(x)) return(as.character(default)[1])
+
+  x_chr <- as.character(x)
+  if (!length(x_chr)) return(as.character(default)[1])
+
+  val <- x_chr[1]
+  if (is.na(val) || !nzchar(trimws(val))) return(as.character(default)[1])
+  val
+}
+
+.interactivo_empty_hint_ui <- function(
+    title = "Sin datos que mostrar",
+    subtitle = NULL,
+    extra_class = NULL
+) {
+  classes <- c("table-empty-hint", extra_class)
+  classes <- classes[!is.na(classes) & nzchar(trimws(classes))]
+  title_txt <- .interactivo_text_default(title, "Sin datos que mostrar")
+  subtitle_txt <- .interactivo_text_default(subtitle, "")
+
+  shiny::div(
+    class = paste(classes, collapse = " "),
+    shiny::div(class = "table-empty-title", title_txt),
+    if (nzchar(subtitle_txt)) {
+      shiny::div(class = "table-empty-subtitle", subtitle_txt)
+    }
+  )
+}
+
+.interactivo_empty_plotly <- function(
+    title = "Sin datos para mostrar",
+    subtitle = NULL,
+    height = 84L
+) {
+  title_txt <- .interactivo_text_default(title, "Sin datos para mostrar")
+  subtitle_txt <- .interactivo_text_default(subtitle, "")
+  annotations <- list(
+    list(
+      x = 0.5,
+      y = 0.60,
+      xref = "paper",
+      yref = "paper",
+      text = paste0("<b>", title_txt, "</b>"),
+      showarrow = FALSE,
+      xanchor = "center",
+      yanchor = "middle",
+      align = "center",
+      font = list(size = 12, color = "#002457")
+    )
+  )
+
+  if (nzchar(subtitle_txt)) {
+    annotations[[length(annotations) + 1L]] <- list(
+      x = 0.5,
+      y = 0.34,
+      xref = "paper",
+      yref = "paper",
+      text = subtitle_txt,
+      showarrow = FALSE,
+      xanchor = "center",
+      yanchor = "middle",
+      align = "center",
+      font = list(size = 10.5, color = "#5f6f8f")
+    )
+  }
+
+  plotly::plot_ly(
+    x = 0,
+    y = 0,
+    type = "scatter",
+    mode = "markers",
+    marker = list(size = 1, opacity = 0),
+    hoverinfo = "skip",
+    showlegend = FALSE,
+    height = as.integer(height)
+  ) |>
+    plotly::layout(
+      xaxis = list(visible = FALSE, fixedrange = TRUE),
+      yaxis = list(visible = FALSE, fixedrange = TRUE),
+      margin = list(l = 2, r = 2, t = 2, b = 2),
+      paper_bgcolor = "rgba(255,255,255,0)",
+      plot_bgcolor = "rgba(255,255,255,0)",
+      shapes = list(
+        list(
+          type = "rect",
+          xref = "paper",
+          yref = "paper",
+          x0 = 0.02,
+          x1 = 0.98,
+          y0 = 0.12,
+          y1 = 0.88,
+          line = list(color = "rgba(217,224,238,0.95)", width = 1, dash = "dot"),
+          fillcolor = "rgba(247,250,255,0.98)",
+          layer = "below"
+        )
+      ),
+      annotations = annotations
+    ) |>
+    plotly::config(displayModeBar = FALSE, responsive = TRUE, staticPlot = TRUE)
+}
+
+.interactivo_has_var_or_dummies <- function(df, var) {
+  if (!is.data.frame(df)) return(FALSE)
+  if (var %in% names(df)) return(TRUE)
+  var_esc <- gsub("([\\W])", "\\\\\\1", as.character(var)[1])
+  any(grepl(paste0("^", var_esc, "[/\\.]"), names(df)))
+}
+
+.interactivo_tipo_pregunta <- function(var, survey = NULL, sm_vars_force = NULL, df = NULL) {
+  var <- as.character(var)[1]
+  if (is.na(var) || !nzchar(trimws(var))) return("so")
+
+  if (!is.null(sm_vars_force) && var %in% sm_vars_force) return("sm")
+
+  if (!is.null(survey) &&
+      "name" %in% names(survey) &&
+      "type" %in% names(survey) &&
+      any(survey$name == var, na.rm = TRUE)) {
+
+    mask <- !is.na(survey$name) & as.character(survey$name) == var
+    tipos <- unique(na.omit(survey$type[mask]))
+    tipos <- tolower(as.character(tipos))
+    if (any(grepl("^select_multiple(\\s|$)", tipos))) return("sm")
+    if (any(grepl("^select_one(\\s|$)", tipos))) return("so")
+  }
+
+  if (!is.null(df) && .interactivo_has_var_or_dummies(df, var) && !(var %in% names(df))) {
+    return("sm")
+  }
+
+  "so"
+}
+
+.interactivo_resumen_build_rows <- function(
+    sec,
+    secciones_limpias,
+    instrumento,
+    data,
+    sm_madres = NULL,
+    max_so_rows = 16L,
+    label_var = NULL,
+    resolver_var_spec_fn = NULL
+) {
+  vars_sec <- secciones_limpias[[sec]] %||% character(0)
+  if (!length(vars_sec)) return(list(section = sec, rows = list()))
+
+  surv <- instrumento$survey %||% NULL
+  if (!is.function(label_var)) {
+    label_var <- function(var) .obtener_label_var(var, instrumento, data)
+  }
+
+  vars_so <- vars_sec[vapply(
+    vars_sec,
+    function(v) .interactivo_tipo_pregunta(v, survey = surv, sm_vars_force = sm_madres, df = data) == "so",
+    logical(1)
+  )]
+  vars_sm <- vars_sec[vapply(
+    vars_sec,
+    function(v) .interactivo_tipo_pregunta(v, survey = surv, sm_vars_force = sm_madres, df = data) == "sm",
+    logical(1)
+  )]
+
+  if (length(vars_so) > max_so_rows) vars_so <- vars_so[seq_len(max_so_rows)]
+  vars_show <- c(vars_so, vars_sm)
+  if (!length(vars_show)) return(list(section = sec, rows = list()))
+
+  rows <- lapply(seq_along(vars_show), function(i) {
+    var <- vars_show[i]
+    tipo <- .interactivo_tipo_pregunta(var, survey = surv, sm_vars_force = sm_madres, df = data)
+    row <- list(
+      type = tipo,
+      var = var,
+      label = as.character(label_var(var)),
+      slot_id = paste0("sum_plot_", i),
+      options = list()
+    )
+
+    if (!identical(tipo, "sm")) return(row)
+    if (!is.function(resolver_var_spec_fn)) return(row)
+
+    spec <- resolver_var_spec_fn(var)
+    cols <- as.character(spec$cols %||% character(0))
+    if (!length(cols)) return(row)
+
+    map_code_to_label <- spec$map_code_to_label %||% list()
+    row$options <- lapply(seq_along(cols), function(j) {
+      code <- sub(paste0("^", var, "\\."), "", cols[j])
+      list(
+        code = code,
+        label = as.character(map_code_to_label[[code]] %||% code),
+        col_dummy = cols[j],
+        slot_id = paste0("sum_plot_", i, "_", j)
+      )
+    })
+
+    row
+  })
+
+  list(section = sec, rows = rows)
+}
+
+.interactivo_iter_popover_ui <- function(
+    ns = identity,
+    select_id,
+    current_label,
+    current_meta = NULL,
+    items = list(),
+    selected = NULL,
+    title = "Seleccionar nivel",
+    note = NULL
+) {
+  selected_val <- as.character(selected %||% "")[1]
+
+  if (!length(items)) {
+    return(
+      shiny::div(
+        class = "rel-iter-level-control rel-iter-level-control-center",
+        shiny::div(
+          class = "rel-iter-level-chip",
+          shiny::div(class = "rel-iter-level-name", current_label %||% "Sin niveles disponibles"),
+          if (!is.null(current_meta) && nzchar(as.character(current_meta)[1])) {
+            shiny::div(class = "rel-iter-level-meta", current_meta)
+          }
+        )
+      )
+    )
+  }
+
+  shiny::div(
+    class = "rel-iter-level-control rel-iter-level-control-center iter-popover-wrap",
+    shiny::tags$button(
+      type = "button",
+      class = "btn rel-iter-circle-btn iter-popover-toggle",
+      title = title,
+      `aria-expanded` = "false",
+      `aria-haspopup` = "dialog",
+      shiny::icon("list-ul")
+    ),
+    shiny::div(
+      class = "rel-iter-level-chip",
+      shiny::div(class = "rel-iter-level-name", current_label),
+      if (!is.null(current_meta) && nzchar(as.character(current_meta)[1])) {
+        shiny::div(class = "rel-iter-level-meta", current_meta)
+      }
+    ),
+    shiny::div(
+      class = "iter-level-popover",
+      shiny::div(
+        class = "iter-level-popover-header",
+        shiny::div(class = "iter-level-popover-title", title),
+        shiny::tags$button(
+          type = "button",
+          class = "iter-popover-close",
+          `aria-label` = "Cerrar selector",
+          "\u00d7"
+        )
+      ),
+      shiny::div(
+        class = "iter-level-popover-body",
+        shiny::div(
+          class = "iter-level-option-list",
+          lapply(items, function(item) {
+            value <- as.character(item$value %||% "")[1]
+            label <- as.character(item$label %||% value)[1]
+            meta <- as.character(item$meta %||% "")[1]
+            item_classes <- c("iter-level-option")
+            if (nzchar(selected_val) && identical(value, selected_val)) {
+              item_classes <- c(item_classes, "is-active")
+            }
+
+            shiny::tags$button(
+              type = "button",
+              class = paste(item_classes, collapse = " "),
+              `data-target-input` = ns(select_id),
+              `data-value` = value,
+              shiny::span(
+                class = "iter-level-option-main",
+                shiny::span(class = "iter-level-option-label", label),
+                if (nzchar(meta)) shiny::span(class = "iter-level-option-meta", meta)
+              )
+            )
+          })
+        ),
+        if (!is.null(note) && nzchar(as.character(note)[1])) {
+          shiny::div(class = "iter-level-popover-note", note)
+        }
+      )
+    )
+  )
+}
+
+.interactivo_write_simple_xlsx <- function(path, data, sheet_name = "Datos") {
+  if (!requireNamespace("openxlsx", quietly = TRUE)) {
+    stop("Se requiere el paquete 'openxlsx' para exportar Excel.", call. = FALSE)
+  }
+  if (!is.data.frame(data)) {
+    stop("`data` debe ser un data.frame para exportar Excel.", call. = FALSE)
+  }
+
+  wb <- openxlsx::createWorkbook()
+  openxlsx::addWorksheet(wb, sheetName = as.character(sheet_name)[1])
+  openxlsx::writeData(wb, sheet = as.character(sheet_name)[1], x = data, withFilter = TRUE)
+  if (ncol(data) > 0L) {
+    openxlsx::setColWidths(wb, sheet = as.character(sheet_name)[1], cols = seq_len(ncol(data)), widths = "auto")
+  }
+  openxlsx::saveWorkbook(wb, file = path, overwrite = TRUE)
+  invisible(path)
+}
+
+.interactivo_set_download_state <- function(session, output_id, enabled = TRUE) {
+  ns <- session$ns
+  if (!is.function(ns)) ns <- identity
+  session$sendCustomMessage(
+    type = "toggleDownloadDisabled",
+    message = list(
+      id = ns(output_id),
+      disabled = !isTRUE(enabled)
+    )
+  )
+  invisible(enabled)
+}
+
 .get_label_col_safe <- function(df) {
   if (is.null(df)) return(NULL)
   if ("label" %in% names(df)) return("label")

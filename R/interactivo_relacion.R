@@ -173,7 +173,11 @@ relacion_tab_ui <- function(id) {
                 ),
                 shiny::div(
                   class = "rel-table-header-actions",
-                  shiny::uiOutput(ns("rel_descarga_btn_ui"))
+                  shiny::downloadButton(
+                    outputId = ns("rel_tabla_descargar"),
+                    label = "Excel",
+                    class = "btn-sm rel-download-btn"
+                  )
                 )
               ),
               shiny::uiOutput(ns("rel_tabla_panel_ui"))
@@ -1917,9 +1921,9 @@ relacion_tab_server <- function(
       shiny::div(
         class = "rel-iter-hint",
         paste0(
-          "Se muestran 12 de ",
+          "La vista rápida prioriza 12 de ",
           length(payload$all_entries),
-          " niveles (Top 12 por base)."
+          " niveles. El selector permite buscar todos."
         )
       )
     })
@@ -1928,7 +1932,7 @@ relacion_tab_server <- function(
 
     shiny::observe({
       payload <- rel_iter_payload()
-      entries <- payload$visible_entries
+      entries <- payload$all_entries
       if (!isTRUE(payload$active) || !length(entries)) {
         iter_level_key("")
         return()
@@ -1941,24 +1945,23 @@ relacion_tab_server <- function(
       }
     })
 
-    shiny::observeEvent(input$iter_level_next, {
+    shiny::observeEvent(input$iter_level_select, {
       payload <- rel_iter_payload()
-      entries <- payload$visible_entries
-      if (!isTRUE(payload$active) || length(entries) <= 1) return()
+      entries <- payload$all_entries
+      if (!isTRUE(payload$active) || !length(entries)) return()
 
+      key <- as.character(input$iter_level_select %||% "")[1]
       keys <- vapply(entries, function(e) as.character(e$key), character(1))
-      cur <- as.character(iter_level_key() %||% "")[1]
-      idx <- which(keys == cur)[1]
-      if (is.na(idx)) idx <- 1L
-      nxt <- if (idx >= length(keys)) 1L else idx + 1L
-      iter_level_key(keys[nxt])
-    }, ignoreInit = TRUE)
+      if (nzchar(key) && key %in% keys) {
+        iter_level_key(key)
+      }
+    })
 
     output$rel_iter_btn_ui <- shiny::renderUI({
       payload <- rel_iter_payload()
       if (!isTRUE(payload$active)) return(NULL)
 
-      entries <- payload$visible_entries
+      entries <- payload$all_entries
       if (!length(entries)) return(NULL)
 
       keys <- vapply(entries, function(e) as.character(e$key), character(1))
@@ -1966,23 +1969,23 @@ relacion_tab_server <- function(
       idx <- which(keys == cur)[1]
       if (is.na(idx)) idx <- 1L
       pick <- entries[[idx]]
-      base_txt <- format(round(as.numeric(pick$base_n %||% 0), 0), big.mark = ",")
-
-      shiny::div(
-        class = "rel-iter-level-control rel-iter-level-control-center",
-        shiny::actionButton(
-          inputId = session$ns("iter_level_next"),
-          label = NULL,
-          icon = shiny::icon("random"),
-          class = "btn rel-iter-circle-btn",
-          title = "Cambiar nivel",
-          `aria-label` = "Cambiar nivel"
-        ),
-        shiny::div(
-          class = "rel-iter-level-chip",
-          shiny::div(class = "rel-iter-level-name", as.character(pick$label)),
-          shiny::div(class = "rel-iter-level-meta", paste0("N ", base_txt))
+      items <- lapply(entries, function(e) {
+        list(
+          value = as.character(e$key %||% ""),
+          label = as.character(e$label %||% ""),
+          meta = paste0("N ", format(round(as.numeric(e$base_n %||% 0), 0), big.mark = ","))
         )
+      })
+
+      .interactivo_iter_popover_ui(
+        ns = session$ns,
+        select_id = "iter_level_select",
+        current_label = as.character(pick$label),
+        current_meta = paste0("N ", format(round(as.numeric(pick$base_n %||% 0), 0), big.mark = ",")),
+        items = items,
+        selected = as.character(pick$key),
+        title = "Seleccionar nivel",
+        note = paste0("Disponible: ", length(entries), " niveles")
       )
     })
 
@@ -1994,7 +1997,7 @@ relacion_tab_server <- function(
         return(base_obj)
       }
 
-      entries <- payload$visible_entries
+      entries <- payload$all_entries
       if (!length(entries)) {
         return(list(error = "Sin niveles válidos para iterar con la selección actual."))
       }
@@ -2264,32 +2267,15 @@ relacion_tab_server <- function(
       }
     })
 
-    output$rel_descarga_btn_ui <- shiny::renderUI({
+    shiny::observe({
       base_obj <- rel_obj_base()
       payload <- rel_iter_payload()
-      can_download <- if (isTRUE(payload$active)) {
+      enabled <- if (isTRUE(payload$active)) {
         length(payload$all_entries) > 0
       } else {
         is.null(base_obj$error) && is.data.frame(base_obj$cuerpo) && nrow(base_obj$cuerpo) > 0
       }
-
-      if (!can_download) {
-        return(
-          shiny::tags$button(
-            type = "button",
-            class = "btn btn-default btn-sm rel-download-btn",
-            disabled = "disabled",
-            shiny::icon("download"),
-            " Excel"
-          )
-        )
-      }
-
-      shiny::downloadButton(
-        outputId = session$ns("rel_tabla_descargar"),
-        label = "Excel",
-        class = "btn-sm rel-download-btn"
-      )
+      .interactivo_set_download_state(session, "rel_tabla_descargar", enabled = enabled)
     })
 
     output$rel_tabla_descargar <- shiny::downloadHandler(

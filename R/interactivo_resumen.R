@@ -598,17 +598,65 @@
   filtro_secs <- names(filtro_vars_por_seccion)
   filtro_sec_default <- as.character(filtro_secs[1] %||% "")[1]
   MAX_FILTROS <- 6L
-  filtro_rows <- shiny::reactiveValues(ids = 1L, next_id = 2L, bound = integer(0))
+  filtro_rows <- shiny::reactiveValues(
+    ids = 1L,
+    next_id = 2L,
+    bound = integer(0),
+    last_valid = list()
+  )
 
   .f_sec_id <- function(id) paste0("filtro_seccion_", id)
   .f_var_id <- function(id) paste0("filtro_var_", id)
   .f_cat_id <- function(id) paste0("filtro_categorias_", id)
   .f_rm_id  <- function(id) paste0("filtro_quitar_", id)
   .f_chip_rm_id <- function(id) paste0("filtro_chip_quitar_", id)
+  .f_state_key <- function(id) paste0("filtro_", as.integer(id))
+
+  .get_last_valid_cats <- function(id, var = NULL) {
+    state <- filtro_rows$last_valid %||% list()
+    entry <- state[[.f_state_key(id)]]
+    if (is.null(entry)) return(character(0))
+
+    if (!is.null(var)) {
+      var_req <- as.character(var %||% "")[1]
+      var_cur <- as.character(entry$var %||% "")[1]
+      if (!identical(var_cur, var_req)) return(character(0))
+    }
+
+    cats <- as.character(entry$cats %||% character(0))
+    cats[!is.na(cats) & nzchar(trimws(cats))]
+  }
+
+  .set_last_valid_cats <- function(id, var, cats) {
+    state <- filtro_rows$last_valid %||% list()
+    key <- .f_state_key(id)
+    var <- as.character(var %||% "")[1]
+    cats <- as.character(cats %||% character(0))
+    cats <- cats[!is.na(cats) & nzchar(trimws(cats))]
+    cats <- unique(cats)
+
+    if (!nzchar(var) || !length(cats)) {
+      state[[key]] <- NULL
+      filtro_rows$last_valid <- state
+      return(invisible(NULL))
+    }
+
+    state[[key]] <- list(var = var, cats = cats)
+    filtro_rows$last_valid <- state
+    invisible(cats)
+  }
+
+  .clear_last_valid_cats <- function(id) {
+    state <- filtro_rows$last_valid %||% list()
+    state[[.f_state_key(id)]] <- NULL
+    filtro_rows$last_valid <- state
+    invisible(NULL)
+  }
 
   .remove_filter_row <- function(id) {
     ids <- as.integer(filtro_rows$ids %||% integer(0))
     ids <- setdiff(ids, as.integer(id))
+    .clear_last_valid_cats(id)
     if (!length(ids)) {
       nid <- as.integer(filtro_rows$next_id %||% 2L)
       filtro_rows$next_id <- nid + 1L
@@ -684,20 +732,27 @@
       if (!(id %in% as.integer(filtro_rows$ids %||% integer(0)))) return()
       v <- as.character(input[[var_id]] %||% "")[1]
       if (!nzchar(v) || !(v %in% names(data))) {
+        .clear_last_valid_cats(id)
         shiny::updateSelectizeInput(session, cat_id, choices = c(), selected = character(0), server = FALSE)
         return()
       }
 
       cat_df <- .catalogo_categorias_filtro(v, data)
       if (!nrow(cat_df)) {
+        .clear_last_valid_cats(id)
         shiny::updateSelectizeInput(session, cat_id, choices = c(), selected = character(0), server = FALSE)
         return()
       }
 
       cat_choices <- stats::setNames(cat_df$value, cat_df$label)
       prev_sel <- as.character(input[[cat_id]] %||% character(0))
-      sel <- if (length(prev_sel)) intersect(prev_sel, cat_df$value) else character(0)
-      if (!length(sel)) sel <- as.character(cat_df$value)
+      sel <- .interactivo_resolve_filter_selection(
+        selected = prev_sel,
+        valid_values = cat_df$value,
+        last_valid = .get_last_valid_cats(id, var = v),
+        fallback = "all"
+      )
+      .set_last_valid_cats(id, v, sel)
 
       shiny::updateSelectizeInput(
         session,
@@ -707,6 +762,47 @@
         server = FALSE
       )
     }, ignoreInit = FALSE)
+
+    shiny::observeEvent(input[[cat_id]], {
+      if (!(id %in% as.integer(filtro_rows$ids %||% integer(0)))) return()
+
+      v <- as.character(input[[var_id]] %||% "")[1]
+      if (!nzchar(v) || !(v %in% names(data))) {
+        .clear_last_valid_cats(id)
+        return()
+      }
+
+      cat_df <- .catalogo_categorias_filtro(v, data)
+      if (!nrow(cat_df)) {
+        .clear_last_valid_cats(id)
+        return()
+      }
+
+      cur_sel <- .interactivo_resolve_filter_selection(
+        selected = input[[cat_id]],
+        valid_values = cat_df$value,
+        last_valid = .get_last_valid_cats(id, var = v),
+        fallback = "all"
+      )
+      prev_sel <- .get_last_valid_cats(id, var = v)
+
+      .set_last_valid_cats(id, v, cur_sel)
+      if (!identical(cur_sel, prev_sel) && length(as.character(input[[cat_id]] %||% character(0)))) {
+        return()
+      }
+
+      raw_sel <- as.character(input[[cat_id]] %||% character(0))
+      raw_sel <- raw_sel[!is.na(raw_sel) & nzchar(trimws(raw_sel))]
+      if (identical(raw_sel, cur_sel)) return()
+
+      shiny::updateSelectizeInput(
+        session,
+        inputId = cat_id,
+        choices = stats::setNames(cat_df$value, cat_df$label),
+        selected = cur_sel,
+        server = FALSE
+      )
+    }, ignoreInit = TRUE)
 
     shiny::observeEvent(input[[rm_id]], .remove_filter_row(id), ignoreInit = TRUE)
     shiny::observeEvent(input[[chip_rm_id]], .remove_filter_row(id), ignoreInit = TRUE)
@@ -798,6 +894,15 @@
       var <- as.character(input[[.f_var_id(id)]] %||% "")[1]
       cats <- as.character(input[[.f_cat_id(id)]] %||% character(0))
       cats <- cats[!is.na(cats) & nzchar(trimws(cats))]
+      if (nzchar(var) && var %in% names(data)) {
+        valid_values <- as.character(.catalogo_categorias_filtro(var, data)$value %||% character(0))
+        cats <- .interactivo_resolve_filter_selection(
+          selected = cats,
+          valid_values = valid_values,
+          last_valid = .get_last_valid_cats(id, var = var),
+          fallback = "all"
+        )
+      }
       list(id = id, sec = sec, var = var, cats = unique(cats))
     })
   })
@@ -856,34 +961,34 @@
     }
     df
   })
+  data_filtrada_debounced <- shiny::debounce(data_filtrada, millis = 150)
+
+  section_spec <- shiny::reactive({
+    shiny::req(input$seccion)
+    .interactivo_resumen_build_rows(
+      sec = input$seccion,
+      secciones_limpias = ctx$secciones_limpias,
+      instrumento = instrumento,
+      data = data,
+      sm_madres = ctx$sm_madres %||% NULL,
+      max_so_rows = MAX_SO_ROWS,
+      label_var = ctx$label_var,
+      resolver_var_spec_fn = function(var_madre) {
+        .resolver_var_spec_safe(var_madre = var_madre, ctx = ctx, df = data)
+      }
+    )
+  })
 
   # ---------------------------------------------------------------------------
   # Helpers tipo / detección de SM
   # ---------------------------------------------------------------------------
-  .has_var_or_dummies <- function(df, var) {
-    if (!is.data.frame(df)) return(FALSE)
-    if (var %in% names(df)) return(TRUE)
-    var_esc <- gsub("([\\W])", "\\\\\\1", var)
-    any(grepl(paste0("^", var_esc, "[/\\.]"), names(df)))
-  }
-
   tipo_pregunta <- function(var, survey = NULL, sm_vars_force = NULL, df = NULL) {
-    var <- as.character(var)[1]
-    if (is.na(var) || !nzchar(trimws(var))) return("so")
-
-    if (!is.null(sm_vars_force) && var %in% sm_vars_force) return("sm")
-
-    if (!is.null(survey) && "name" %in% names(survey) && "type" %in% names(survey) &&
-        any(survey$name == var, na.rm = TRUE)) {
-
-      mask <- !is.na(survey$name) & as.character(survey$name) == var
-      tipos <- unique(na.omit(survey$type[mask]))
-      tipos <- tolower(as.character(tipos))
-      if (any(grepl("^select_multiple(\\s|$)", tipos))) return("sm")
-      if (any(grepl("^select_one(\\s|$)", tipos))) return("so")
-    }
-    if (!is.null(df) && .has_var_or_dummies(df, var) && !(var %in% names(df))) return("sm")
-    "so"
+    .interactivo_tipo_pregunta(
+      var = var,
+      survey = survey,
+      sm_vars_force = sm_vars_force,
+      df = df
+    )
   }
 
   get_categorias <- function(var, df, survey = NULL, orders_list = NULL, opciones_excluir = NULL) {
@@ -935,21 +1040,21 @@
   .plot_so_total <- function(df, var, paleta_colores) {
 
     if (!var %in% names(df)) {
-      return(
-        plotly::plot_ly(height = BAR_HEIGHT) |>
-          plotly::layout(annotations = list(list(text = "Sin variable.", showarrow = FALSE))) |>
-          plotly::config(displayModeBar = FALSE, responsive = TRUE)
-      )
+      return(.interactivo_empty_plotly(
+        title = "Sin variable disponible",
+        subtitle = "La pregunta no está disponible con la selección actual.",
+        height = BAR_HEIGHT
+      ))
     }
 
     x <- as.character(df[[var]])
     x <- x[!is.na(x) & nzchar(x) & x != "NA"]
     if (!length(x)) {
-      return(
-        plotly::plot_ly(height = BAR_HEIGHT) |>
-          plotly::layout(annotations = list(list(text = "Sin datos.", showarrow = FALSE))) |>
-          plotly::config(displayModeBar = FALSE, responsive = TRUE)
-      )
+      return(.interactivo_empty_plotly(
+        title = "Sin casos por mostrar",
+        subtitle = "Ajusta los filtros para ver información en este gráfico.",
+        height = BAR_HEIGHT
+      ))
     }
 
     tab <- as.data.frame(table(x), stringsAsFactors = FALSE)
@@ -1046,16 +1151,11 @@
 
     if (!col_dummy %in% names(df)) {
       .log_resumen("SM plot FAIL -> dummy no existe: ", col_dummy)
-      return(
-        plotly::plot_ly(height = BAR_HEIGHT) |>
-          plotly::layout(
-            annotations = list(list(text = "Sin dummy.", showarrow = FALSE)),
-            xaxis = list(visible = FALSE),
-            yaxis = list(visible = FALSE),
-            margin = list(l = 10, r = 10, t = 0, b = 0)
-          ) |>
-          plotly::config(displayModeBar = FALSE, responsive = TRUE)
-      )
+      return(.interactivo_empty_plotly(
+        title = "Sin variable disponible",
+        subtitle = "La pregunta no está disponible con la selección actual.",
+        height = BAR_HEIGHT
+      ))
     }
 
     x <- df[[col_dummy]]
@@ -1068,16 +1168,11 @@
 
     if (!length(x2)) {
       .log_resumen("SM plot FAIL -> sin datos válidos en ", col_dummy)
-      return(
-        plotly::plot_ly(height = BAR_HEIGHT) |>
-          plotly::layout(
-            annotations = list(list(text = "Sin datos.", showarrow = FALSE)),
-            xaxis = list(visible = FALSE),
-            yaxis = list(visible = FALSE),
-            margin = list(l = 10, r = 10, t = 0, b = 0)
-          ) |>
-          plotly::config(displayModeBar = FALSE, responsive = TRUE)
-      )
+      return(.interactivo_empty_plotly(
+        title = "Sin casos por mostrar",
+        subtitle = "Ajusta los filtros para ver información en este gráfico.",
+        height = BAR_HEIGHT
+      ))
     }
 
     N     <- length(x2)
@@ -1243,71 +1338,39 @@
   # UI: resumen de sección
   # ---------------------------------------------------------------------------
   output$section_summary_ui <- shiny::renderUI({
-
-    shiny::req(input$seccion)
-    df <- data_filtrada()
-    if (!nrow(df)) {
-      return(shiny::div(style = paste0("font-size:12px;color:", MSG_COLOR, ";"), "Sin datos."))
-    }
-
-    sec <- input$seccion
-    vars_sec <- ctx$secciones_limpias[[sec]] %||% character(0)
-    if (!length(vars_sec)) {
+    spec <- section_spec()
+    rows <- spec$rows %||% list()
+    if (!length(rows)) {
       return(shiny::div(style = paste0("font-size:12px;color:", MSG_COLOR, ";"), "Sin variables disponibles."))
-    }
-
-    surv <- instrumento$survey %||% NULL
-
-    vars_so <- vars_sec[vapply(vars_sec, function(v)
-      tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "so",
-      logical(1)
-    )]
-
-    vars_sm <- vars_sec[vapply(vars_sec, function(v)
-      tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "sm",
-      logical(1)
-    )]
-
-    if (length(vars_so) > MAX_SO_ROWS) vars_so <- vars_so[seq_len(MAX_SO_ROWS)]
-    vars_show <- c(vars_so, vars_sm)
-
-    if (!length(vars_show)) {
-      return(shiny::div(style = paste0("font-size:12px;color:", MSG_COLOR, ";"), "Sin variables resumibles."))
     }
 
     shiny::div(
       class = "section-summary",
-      lapply(seq_along(vars_show), function(i) {
+      lapply(rows, function(row) {
+        lab_html <- .wrap_titulo_html(row$label %||% row$var %||% "", width = 120)
 
-        v <- vars_show[i]
-        tp <- tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df)
-
-        lab <- .obtener_label_var(v, instrumento, data)
-        lab_html <- .wrap_titulo_html(lab, width = 120)
-
-        if (tp == "so") {
-          out_id <- paste0("sum_plot_", i)
+        if (identical(row$type, "so")) {
           return(
             shiny::div(
               class = "summary-row",
               shiny::div(class = "summary-row-title", shiny::HTML(lab_html)),
               shiny::div(
                 class = "summary-row-plot",
-                plotly::plotlyOutput(out_id, height = paste0(BAR_HEIGHT, "px"))
+                shiny::uiOutput(row$slot_id)
               )
             )
           )
         }
-
-        spec <- .resolver_var_spec_safe(var_madre = v, ctx = ctx, df = df)
-        cols <- spec$cols %||% character(0)
-
-        if (!length(cols)) {
+        if (!length(row$options %||% list())) {
           return(
             shiny::div(
               class = "summary-row",
               shiny::div(class = "summary-row-title", shiny::HTML(lab_html)),
-              shiny::div(style = paste0("font-size:12px;color:", MSG_COLOR, ";"), "SM sin dummies disponibles.")
+              .interactivo_empty_hint_ui(
+                title = "Sin datos para mostrar",
+                subtitle = "Esta pregunta no tiene niveles disponibles con la configuración actual.",
+                extra_class = "summary-empty-hint"
+              )
             )
           )
         }
@@ -1321,14 +1384,7 @@
             shiny::div(
               class = "sm-card-inner",
               style = "display:flex; flex-direction:column; gap:12px; height:auto; overflow:visible;",
-              lapply(seq_along(cols), function(j) {
-                colj <- cols[j]
-
-                code <- sub(paste0("^", v, "\\."), "", colj)
-                opt_label <- spec$map_code_to_label[[code]] %||% code
-
-                out_id <- paste0("sum_plot_", i, "_", j)
-
+              lapply(row$options, function(opt) {
                 shiny::div(
                   class = "sm-option-block",
                   style = "height:auto; overflow:visible;",
@@ -1340,9 +1396,9 @@
                       "font-weight:400;",
                       "margin:0 0 6px 0;"
                     ),
-                    opt_label
+                    opt$label
                   ),
-                  plotly::plotlyOutput(out_id, height = paste0(BAR_HEIGHT, "px"))
+                  shiny::uiOutput(opt$slot_id)
                 )
               })
             )
@@ -1355,46 +1411,47 @@
   # ---------------------------------------------------------------------------
   # Render dinámico de plots del resumen
   # ---------------------------------------------------------------------------
-  shiny::observe({
-    shiny::req(input$seccion)
-
-    df <- data_filtrada()
-    sec <- input$seccion
-    vars_sec <- ctx$secciones_limpias[[sec]] %||% character(0)
-    if (!length(vars_sec)) return()
+  shiny::observeEvent(section_spec(), {
+    spec <- section_spec()
+    rows <- spec$rows %||% list()
+    if (!length(rows)) return()
 
     surv <- instrumento$survey %||% NULL
 
-    vars_so <- vars_sec[vapply(vars_sec, function(v)
-      tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "so",
-      logical(1)
-    )]
+    .log_resumen(
+      "Resumen sección=", spec$section %||% "",
+      " | vars_show=", .safe_chr(vapply(rows, function(r) as.character(r$var %||% ""), character(1)))
+    )
 
-    vars_sm <- vars_sec[vapply(vars_sec, function(v)
-      tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df) == "sm",
-      logical(1)
-    )]
-
-    if (length(vars_so) > MAX_SO_ROWS) vars_so <- vars_so[seq_len(MAX_SO_ROWS)]
-    vars_show <- c(vars_so, vars_sm)
-
-    .log_resumen("Resumen sección=", sec, " | vars_show=", .safe_chr(vars_show))
-
-    for (i in seq_along(vars_show)) {
+    for (i in seq_along(rows)) {
       local({
         ii <- i
-        v  <- vars_show[ii]
+        row <- rows[[ii]]
+        v  <- row$var
+        out_so <- row$slot_id
+        plot_out_so <- paste0(out_so, "__plot")
 
-        out_so <- paste0("sum_plot_", ii)
+        output[[out_so]] <- shiny::renderUI({
+          df2 <- data_filtrada_debounced()
+          if (!nrow(df2) || !.interactivo_has_cases_so(df2, v)) {
+            return(.interactivo_empty_hint_ui(
+              title = "Sin casos por mostrar",
+              subtitle = "Ajusta los filtros para ver información en este gráfico.",
+              extra_class = "summary-empty-hint"
+            ))
+          }
 
-        output[[out_so]] <- plotly::renderPlotly({
-          df2 <- data_filtrada()
+          plotly::plotlyOutput(plot_out_so, height = paste0(BAR_HEIGHT, "px"))
+        })
+
+        output[[plot_out_so]] <- plotly::renderPlotly({
+          df2 <- data_filtrada_debounced()
           if (!nrow(df2)) {
-            return(
-              plotly::plot_ly(height = BAR_HEIGHT) |>
-                plotly::layout(annotations = list(list(text = "Sin datos.", showarrow = FALSE))) |>
-                plotly::config(displayModeBar = FALSE, responsive = TRUE)
-            )
+            return(.interactivo_empty_plotly(
+              title = "Sin casos por mostrar",
+              subtitle = "Ajusta los filtros para ver información en este gráfico.",
+              height = BAR_HEIGHT
+            ))
           }
 
           tp <- tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df2)
@@ -1412,29 +1469,42 @@
           .plot_so_total(df2, v, paleta_colores = pal)
         })
 
-        tp0 <- tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = df)
+        tp0 <- row$type %||% tipo_pregunta(v, survey = surv, sm_vars_force = ctx$sm_madres %||% NULL, df = data)
         if (tp0 == "sm") {
-
-          spec0 <- .resolver_var_spec_safe(var_madre = v, ctx = ctx, df = df)
-          cols0 <- spec0$cols %||% character(0)
+          opts0 <- row$options %||% list()
+          cols0 <- vapply(opts0, function(opt) as.character(opt$col_dummy %||% ""), character(1))
           if (!length(cols0)) return()
 
           .log_resumen("SM madre=", v, " | dummies=", .safe_chr(cols0))
 
-          for (j in seq_along(cols0)) {
+          for (j in seq_along(opts0)) {
             local({
               jj   <- j
-              colj <- cols0[jj]
-              out_id <- paste0("sum_plot_", ii, "_", jj)
+              colj <- as.character(opts0[[jj]]$col_dummy %||% "")
+              out_id <- as.character(opts0[[jj]]$slot_id %||% "")
+              plot_out_id <- paste0(out_id, "__plot")
 
-              output[[out_id]] <- plotly::renderPlotly({
-                df2 <- data_filtrada()
+              output[[out_id]] <- shiny::renderUI({
+                df2 <- data_filtrada_debounced()
+                if (!nrow(df2) || !.interactivo_has_cases_dummy(df2, colj)) {
+                  return(.interactivo_empty_hint_ui(
+                    title = "Sin casos por mostrar",
+                    subtitle = "Ajusta los filtros para ver información en este gráfico.",
+                    extra_class = "summary-empty-hint"
+                  ))
+                }
+
+                plotly::plotlyOutput(plot_out_id, height = paste0(BAR_HEIGHT, "px"))
+              })
+
+              output[[plot_out_id]] <- plotly::renderPlotly({
+                df2 <- data_filtrada_debounced()
                 if (!nrow(df2)) {
-                  return(
-                    plotly::plot_ly(height = BAR_HEIGHT) |>
-                      plotly::layout(annotations = list(list(text = "Sin datos.", showarrow = FALSE))) |>
-                      plotly::config(displayModeBar = FALSE, responsive = TRUE)
-                  )
+                  return(.interactivo_empty_plotly(
+                    title = "Sin casos por mostrar",
+                    subtitle = "Ajusta los filtros para ver información en este gráfico.",
+                    height = BAR_HEIGHT
+                  ))
                 }
 
                 .plot_sm_dummy_fill(
@@ -1451,14 +1521,20 @@
         }
       })
     }
-  })
+  }, ignoreInit = FALSE)
 
   # ---------------------------------------------------------------------------
   # KPI STATE
   # ---------------------------------------------------------------------------
   kpi_state <- shiny::reactive({
-    df <- data_filtrada()
-    if (!nrow(df)) return(list(ok = FALSE, msg = "Sin datos."))
+    df <- data_filtrada_debounced()
+    if (!nrow(df)) {
+      return(list(
+        ok = FALSE,
+        msg_title = "Sin datos para mostrar",
+        msg_subtitle = "Ajusta los filtros para volver a mostrar indicadores."
+      ))
+    }
 
     .log_resumen("KPI state -> ctx$kpi_vars raw=", .safe_chr(ctx$kpi_vars))
     .log_resumen("KPI state -> names(df) ejemplo=", .safe_chr(names(df), max_n = 40))
@@ -1561,9 +1637,10 @@
 
     st <- kpi_state()
     if (!isTRUE(st$ok)) {
-      return(shiny::div(
-        style = paste0("font-size:12px;color:", MSG_COLOR, ";padding:10px;text-align:center;"),
-        st$msg %||% ""
+      return(.interactivo_empty_hint_ui(
+        title = st$msg_title %||% "Sin datos para mostrar",
+        subtitle = st$msg_subtitle %||% "Ajusta los filtros para volver a mostrar indicadores.",
+        extra_class = "kpi-empty-hint"
       ))
     }
 
@@ -1589,23 +1666,10 @@
         legend_html(st$kpi_obj_2$legend)
       ) else NULL,
 
-      if (is.null(st$kpi_obj_1) && is.null(st$kpi_obj_2)) shiny::div(
-        style = paste0("font-size:12px;color:", MSG_COLOR, ";padding:10px;text-align:center;"),
-        shiny::HTML(
-          paste0(
-            "No se pudieron construir KPIs.",
-            if (!is.null(st$kpi_vars) && length(st$kpi_vars)) {
-              paste0("<br><span style='font-size:11px;'>Variables filtradas: ", paste(st$kpi_vars, collapse = ", "), "</span>")
-            } else {
-              "<br><span style='font-size:11px;'>Variables filtradas: ninguna</span>"
-            },
-            if (!is.null(ctx$kpi_vars) && length(ctx$kpi_vars)) {
-              paste0("<br><span style='font-size:11px;'>ctx$kpi_vars raw: ", paste(ctx$kpi_vars, collapse = ", "), "</span>")
-            } else {
-              "<br><span style='font-size:11px;'>ctx$kpi_vars raw: vacío</span>"
-            }
-          )
-        )
+      if (is.null(st$kpi_obj_1) && is.null(st$kpi_obj_2)) .interactivo_empty_hint_ui(
+        title = "Sin indicadores para mostrar",
+        subtitle = "No hay suficientes casos válidos para construir KPIs con la selección actual.",
+        extra_class = "kpi-empty-hint"
       ) else NULL
     )
   })
