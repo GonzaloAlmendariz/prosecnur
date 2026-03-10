@@ -16,7 +16,8 @@ reporte_dimensiones_config(
   iteracion_habilitada_default = FALSE,
   max_categorias_principal = 8L,
   max_niveles_iteracion = 12L,
-  paleta_radar = c("okabe_ito", "ipe")
+  paleta_radar = c("okabe_ito", "ipe"),
+  paletas_cruce = NULL
 )
 }
 \arguments{

@@ -17,8 +17,12 @@ p_radar_tabla(
   sm_omit_labels = NULL,
   sm_omit_na = TRUE,
   overrides = list(),
-  base = list()
+  base = list(),
+  filtros = list()
 )
+}
+\arguments{
+\item{filtros}{Lista nombrada de filtros por igualdad/inclusión.}
 }
 \description{
 Radar + tabla derecha (SM o Top/Bottom 2 Box)

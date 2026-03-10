@@ -4,8 +4,14 @@
 \alias{p_pie}
 \title{Pie (torta)}
 \usage{
-p_pie(var, titulo = NULL, overrides = list(), base = list())
+p_pie(var, titulo = NULL, overrides = list(), base = list(), filtros = list())
+}
+\arguments{
+\item{filtros}{Lista nombrada de filtros por igualdad/inclusión.}
 }
 \description{
 Pie (torta)
+}
+\examples{
+p_pie("p108", filtros = list(sexo = "Mujer", edad_grupo = c("60-69", "70+")))
 }

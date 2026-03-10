@@ -9,9 +9,17 @@ p_barras_agrupadas(
   titulo = NULL,
   cruces = NULL,
   overrides = list(),
-  base = list()
+  base = list(),
+  filtros = list()
 )
+}
+\arguments{
+\item{filtros}{Lista nombrada de filtros por igualdad/inclusión,
+por ejemplo \code{list(region = "Lima", sexo = c("Mujer", "Otro"))}.}
 }
 \description{
 Barras agrupadas (1 variable)
+}
+\examples{
+p_barras_agrupadas("p102", filtros = list(region = "Lima"))
 }

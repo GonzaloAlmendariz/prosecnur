@@ -166,7 +166,7 @@
   .get_list_name <- function(var) {
     surv <- instrumento$survey %||% NULL
     if (is.null(surv) || !all(c("name","list_name") %in% names(surv))) return(NA_character_)
-    ln <- as.character(surv$list_name[surv$name == var][1])
+    ln <- get_list_name(var, surv)
     if (is.na(ln) || !nzchar(ln)) NA_character_ else ln
   }
 

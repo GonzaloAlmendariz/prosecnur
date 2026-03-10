@@ -4,7 +4,16 @@
 \alias{p_donut}
 \title{Donut}
 \usage{
-p_donut(var, titulo = NULL, overrides = list(), base = list())
+p_donut(
+  var,
+  titulo = NULL,
+  overrides = list(),
+  base = list(),
+  filtros = list()
+)
+}
+\arguments{
+\item{filtros}{Lista nombrada de filtros por igualdad/inclusión.}
 }
 \description{
 Donut

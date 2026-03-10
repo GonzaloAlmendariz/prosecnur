@@ -570,7 +570,7 @@ relacion_tab_server <- function(
 
       ln <- NA_character_
       if (!is.null(surv) && all(c("name","list_name") %in% names(surv)) && var_madre %in% surv$name) {
-        ln <- as.character(surv$list_name[surv$name == var_madre][1])
+        ln <- get_list_name(var_madre, surv)
       }
 
       map_code_to_label <- list()

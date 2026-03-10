@@ -460,7 +460,8 @@ reporte_dimensiones_config <- function(
     iteracion_habilitada_default = FALSE,
     max_categorias_principal = 8L,
     max_niveles_iteracion = 12L,
-    paleta_radar = c("okabe_ito", "ipe")
+    paleta_radar = c("okabe_ito", "ipe"),
+    paletas_cruce = NULL
 ) {
   `%||%` <- function(x, y) if (!is.null(x)) x else y
 
@@ -477,6 +478,23 @@ reporte_dimensiones_config <- function(
     if (is.null(n)) return(stats::setNames(character(0), character(0)))
     ok <- !is.na(n) & nzchar(trimws(n)) & !is.na(v) & nzchar(trimws(v))
     stats::setNames(v[ok], n[ok])
+  }
+
+  .as_palette_list <- function(x) {
+    if (is.null(x)) return(list())
+    if (!is.list(x)) stop("`paletas_cruce` debe ser una lista nombrada.", call. = FALSE)
+
+    nms <- names(x)
+    if (is.null(nms) || any(is.na(nms)) || any(!nzchar(trimws(nms)))) {
+      stop("`paletas_cruce` debe ser una lista nombrada por variable de cruce.", call. = FALSE)
+    }
+
+    out <- list()
+    for (nm in trimws(nms)) {
+      pal <- .as_named_chr(x[[nm]])
+      if (length(pal)) out[[nm]] <- pal
+    }
+    out
   }
 
   .pretty <- function(x) {
@@ -501,6 +519,7 @@ reporte_dimensiones_config <- function(
   labels_indices <- .as_named_chr(labels_indices)
   labels_bloques <- .as_named_chr(labels_bloques)
   labels_indicadores <- .as_named_chr(labels_indicadores)
+  paletas_cruce <- .as_palette_list(paletas_cruce)
 
   .nm_get <- function(x, key) {
     key <- as.character(key %||% "")[1]
@@ -659,6 +678,7 @@ reporte_dimensiones_config <- function(
     labels_indices = labels_indices,
     labels_bloques = labels_bloques,
     labels_indicadores = labels_indicadores,
+    paletas_cruce = paletas_cruce,
     semaforo = list(
       cortes = as.numeric(semaforo_cortes),
       colores = c(rojo = col_rojo, ambar = col_amb, verde = col_ver)

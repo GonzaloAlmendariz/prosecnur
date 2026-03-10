@@ -202,8 +202,7 @@ reporte_data <- function(data,
     so_vars <- intersect(so_vars, names(data))
 
     for (v in so_vars) {
-      idx <- which(!is.na(survey$name) & survey$name == v)
-      ln  <- if (length(idx)) survey$list_name[idx[1]] else NA_character_
+      ln  <- get_list_name(v, survey)
       if (is.na(ln) || !ln %in% names(dicc_label_to_code)) next
 
       map_lab_to_code <- dicc_label_to_code[[ln]]   # labels -> codes (char)
@@ -242,8 +241,7 @@ reporte_data <- function(data,
 
     for (v in sm_vars) {
 
-      idx <- which(!is.na(survey$name) & survey$name == v)
-      ln  <- if (length(idx)) survey$list_name[idx[1]] else NA_character_
+      ln  <- get_list_name(v, survey)
 
       dict_code_to_lab <- NULL
       if (!is.na(ln) &&
@@ -396,8 +394,7 @@ reporte_data <- function(data,
     so_comunes <- intersect(so_vars, names(data))
 
     for (v in so_comunes) {
-      idx <- which(!is.na(survey$name) & survey$name == v)
-      ln  <- if (length(idx)) survey$list_name[idx[1]] else NA_character_
+      ln  <- get_list_name(v, survey)
       if (is.na(ln) || is.null(ln)) next
       if (is.null(dicc_code_to_label) || !ln %in% names(dicc_code_to_label)) next
 

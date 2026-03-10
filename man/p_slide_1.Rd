@@ -11,7 +11,7 @@ p_slide_1(title = NULL, plot, base = NULL, footer = NULL, meta = list())
 
 \item{plot}{Elemento \verb{p_*()} principal (requerido).}
 
-\item{base}{Elemento opcional (p.ej. \code{p_base()} o \code{p_text()} o \code{character(1)}).}
+\item{base}{Elemento opcional (p.ej. \code{p_text()} o \code{character(1)}).}
 
 \item{footer}{Elemento opcional (p.ej. \code{p_text()} o \code{character(1)}).}
 

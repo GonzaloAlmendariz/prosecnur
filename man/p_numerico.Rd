@@ -10,7 +10,8 @@ p_numerico(
   cruce = NULL,
   titulo = NULL,
   formato = NULL,
-  overrides = list()
+  overrides = list(),
+  filtros = list()
 )
 }
 \arguments{
@@ -25,10 +26,16 @@ p_numerico(
 \item{formato}{Formato de salida (p.ej. \code{"\%.0f\%\%"}).}
 
 \item{overrides}{Lista de overrides (p.ej. \code{fn}, \code{denom}, \code{na_rm}).}
+
+\item{filtros}{Lista nombrada de filtros por igualdad/inclusión.}
 }
 \value{
 Objeto \code{"ppt_element"}.
 }
 \description{
 KPI numérico
+}
+\examples{
+p_numerico("p118_tbc_a", cruce = "region", filtros = list(sexo = "Mujer"))
+
 }

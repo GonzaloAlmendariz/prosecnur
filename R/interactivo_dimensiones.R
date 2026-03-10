@@ -483,7 +483,7 @@
       return(stats::setNames(character(0), character(0)))
     }
 
-    ln <- as.character(surv$list_name[surv$name == var][1])
+    ln <- get_list_name(var, surv)
     if (is.na(ln) || !nzchar(ln)) return(stats::setNames(character(0), character(0)))
 
     col_lab <- .choices_label_col(ch)
@@ -830,6 +830,17 @@
   filter_var_map <- filter_var_map[vapply(filter_var_map, length, integer(1)) > 0]
   filter_secs <- names(filter_var_map)
   filter_sec_default <- as.character(filter_secs[1] %||% sec_default %||% "")[1]
+
+  dim_shared_ctx <- shiny::reactive({
+    .dim_build_context(
+      data_dim,
+      instrumento = instrumento,
+      config = cfg,
+      secciones_limpias = ctx$secciones_limpias,
+      theme_color = ctx$theme_app$color_primario %||% "#0E3B74",
+      weight_col = dim_ctx$weight_col %||% NULL
+    )
+  })
 
   .catalogo_categorias_dim <- function(var, df_base) {
     if (!nzchar(var) || !(var %in% names(df_base))) {
@@ -1261,158 +1272,31 @@
   })
 
   score_payload <- shiny::reactive({
-    df <- data_iterada()
+    mode <- mode_activo()
     obj <- objetivo_activo()
-    iter_now <- iter_pick()
-
-    if (!nrow(df) || is.null(obj) || !length(obj$axis_vars)) {
-      return(list(
-        score_plot = data.frame(),
-        score_heat = data.frame(),
-        axis_order_plot = character(0),
-        axis_order_heat = character(0),
-        mode = NA_character_,
-        objective = NA_character_,
-        principal_label = "",
-        principal_var = "",
-        principal_hidden = 0L,
-        iter_active = FALSE,
-        iter_var_label = "",
-        iter_level_label = "",
-        iter_hidden_levels = 0L
-      ))
+    if (is.null(obj)) {
+      return(.dim_empty_payload(dim_shared_ctx(), mode = mode, objective = NA_character_))
     }
 
-    axis_vars <- as.character(obj$axis_vars)
-    axis_vars <- axis_vars[axis_vars %in% names(df)]
-    if (!length(axis_vars)) {
-      return(list(
-        score_plot = data.frame(),
-        score_heat = data.frame(),
-        axis_order_plot = character(0),
-        axis_order_heat = character(0),
-        mode = as.character(obj$mode %||% ""),
-        objective = as.character(obj$label %||% obj$id),
-        principal_label = "",
-        principal_var = "",
-        principal_hidden = 0L,
-        iter_active = !is.null(iter_now),
-        iter_var_label = as.character(iter_now$var_label %||% ""),
-        iter_level_label = as.character(iter_now$label %||% ""),
-        iter_hidden_levels = as.integer(iter_now$hidden_levels %||% 0L)
-      ))
-    }
-
-    axis_labels <- as.character(obj$axis_labels %||% axis_vars)
-    axis_labels <- axis_labels[match(axis_vars, as.character(obj$axis_vars))]
-
-    w <- .safe_weights(df)
-    pv <- as.character(input$dim_principal_var %||% "")[1]
-    include_total <- isTRUE(input$dim_show_total)
-
-    groups <- list()
-    hidden_main <- 0L
-
-    if (include_total) {
-      groups[[length(groups) + 1L]] <- list(
-        label = "Total",
-        mask = rep(TRUE, nrow(df)),
-        base = sum(w, na.rm = TRUE)
+    filtros_rows <- dim_filters_activos()
+    filtros_list <- list()
+    if (length(filtros_rows)) {
+      filtros_list <- stats::setNames(
+        lapply(filtros_rows, function(r) as.character(r$cats)),
+        vapply(filtros_rows, function(r) as.character(r$var), character(1))
       )
     }
 
-    if (nzchar(pv) && pv %in% names(df)) {
-      cats <- .categorias_var(df, pv, w, max_levels = max_categorias_principal)
-      hidden_main <- as.integer(cats$hidden_levels)
-      xv <- trimws(as.character(df[[pv]]))
-
-      for (i in seq_len(nrow(cats$rows))) {
-        val <- as.character(cats$rows$value[i])
-        groups[[length(groups) + 1L]] <- list(
-          label = as.character(cats$rows$label[i]),
-          mask = !is.na(xv) & xv == val,
-          base = as.numeric(cats$rows$base[i])
-        )
-      }
-    }
-
-    if (!length(groups)) {
-      groups[[1]] <- list(
-        label = "Total",
-        mask = rep(TRUE, nrow(df)),
-        base = sum(w, na.rm = TRUE)
-      )
-    }
-
-    obj_mode <- as.character(obj$mode %||% "")
-    obj_summary_var <- if (identical(obj_mode, "general")) {
-      as.character(obj$id %||% "")
-    } else {
-      as.character(obj$block_var %||% "")
-    }
-    if (!nzchar(obj_summary_var) || !(obj_summary_var %in% names(df))) {
-      obj_summary_var <- ""
-    }
-
-    out_axis <- list()
-    out_total <- list()
-    for (g in groups) {
-      gw <- w * as.numeric(g$mask)
-      for (j in seq_along(axis_vars)) {
-        v <- axis_vars[j]
-        mu <- .weighted_mean(df[[v]], gw)
-        out_axis[[length(out_axis) + 1L]] <- data.frame(
-          axis_var = v,
-          axis_label = as.character(axis_labels[j]),
-          grupo = as.character(g$label),
-          tipo = "apertura",
-          score_raw = as.numeric(mu),
-          base = as.numeric(g$base),
-          stringsAsFactors = FALSE
-        )
-      }
-
-      mu_total <- if (nzchar(obj_summary_var)) {
-        .weighted_mean(df[[obj_summary_var]], gw)
-      } else {
-        X <- as.data.frame(df[, axis_vars, drop = FALSE])
-        X[] <- lapply(X, function(z) suppressWarnings(as.numeric(z)))
-        row_mu <- rowMeans(X, na.rm = TRUE)
-        row_mu[!is.finite(row_mu)] <- NA_real_
-        .weighted_mean(row_mu, gw)
-      }
-
-      out_total[[length(out_total) + 1L]] <- data.frame(
-        axis_var = "__total_cruce__",
-        axis_label = "Total cruce",
-        grupo = as.character(g$label),
-        tipo = "total_cruce",
-        score_raw = as.numeric(mu_total),
-        base = as.numeric(g$base),
-        stringsAsFactors = FALSE
-      )
-    }
-
-    sc_plot <- dplyr::bind_rows(out_axis)
-    sc_total <- dplyr::bind_rows(out_total)
-    sc_plot$score_round <- .round_half_up(sc_plot$score_raw, 0)
-    sc_total$score_round <- .round_half_up(sc_total$score_raw, 0)
-    sc_heat <- dplyr::bind_rows(sc_total, sc_plot)
-
-    list(
-      score_plot = sc_plot,
-      score_heat = sc_heat,
-      axis_order_plot = as.character(axis_labels),
-      axis_order_heat = c("Total cruce", as.character(axis_labels)),
-      mode = as.character(obj$mode %||% ""),
-      objective = as.character(obj$label %||% obj$id),
-      principal_label = .label_var(pv),
-      principal_var = pv,
-      principal_hidden = hidden_main,
-      iter_active = !is.null(iter_now),
-      iter_var_label = as.character(iter_now$var_label %||% ""),
-      iter_level_label = as.character(iter_now$label %||% ""),
-      iter_hidden_levels = as.integer(iter_now$hidden_levels %||% 0L)
+    iter_sel <- iter_pick()
+    .dim_build_payload(
+      dim_shared_ctx(),
+      modo = mode,
+      objetivo = if (identical(mode, "indicadores")) obj$key %||% obj$id else obj$id %||% obj$key,
+      cruce = as.character(input$dim_principal_var %||% "")[1],
+      incluir_total = isTRUE(input$dim_show_total),
+      filtros = filtros_list,
+      iter_var = if (!is.null(iter_sel)) as.character(iter_sel$var %||% "")[1] else as.character(input$dim_iter_var %||% "")[1],
+      iter_level = if (!is.null(iter_sel)) as.character(iter_sel$key %||% "")[1] else NULL
     )
   })
 
@@ -1433,8 +1317,7 @@
 
   visual_mode_resolved <- shiny::reactive({
     p <- score_payload()
-    n_ejes <- length(unique(as.character(p$axis_order_plot %||% character(0))))
-    if (n_ejes >= radar_min_ejes) "radar" else "barras"
+    as.character(p$visual_mode %||% "barras")[1]
   })
 
   group_levels <- shiny::reactive({

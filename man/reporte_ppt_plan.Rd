@@ -26,9 +26,11 @@ reporte_ppt_plan(
 
 \item{path_ppt}{Ruta del \code{.pptx} de salida.}
 
-\item{presets}{Objeto creado con \code{p_presets()}. Contiene estilos base por tipo de gráfico
-(barras_agrupadas, barras_apiladas, multi_apiladas, pie, donut, numerico, texto/base, etc.)
-y configuración de layouts/placeholders.}
+\item{presets}{Lista de presets por tipo de gráfico. El contrato esperado es
+\code{base$args}, \code{barras_apiladas$args}, \code{multi_apiladas$args},
+\code{barras_agrupadas$args}, \code{barras_numericas$args}, \code{pie$args},
+\code{donut$args}, \code{radar_tabla$args}, \code{dim_heatmap$args}, \code{dim_radar$args}
+y \code{dim_radar_tabla$args}. También puede construirse con \code{p_presets()}.}
 
 \item{plan}{Lista de slides ya construidos con \code{p_plan()} o \code{list(diapo_001=..., ...)}.
 Si es \code{NULL}, se recolectan objetos \code{diapo_###} desde \code{env_diapos}.}
@@ -51,7 +53,7 @@ interna del paquete y, si no existe, la plantilla por defecto de PowerPoint.}
 \value{
 Invisiblemente una lista con:
 \describe{
-\item{doc}{Objeto \code{officer::pptx} (solo si \code{solo_lista = TRUE} o para depuración).}
+\item{doc}{Objeto \code{officer::pptx} cuando se exporta; \code{NULL} si \code{solo_lista = TRUE}.}
 \item{plan}{Plan normalizado de slides (lista).}
 \item{log}{Tabla con decisiones/alertas por slide y por elemento.}
 }
@@ -66,7 +68,7 @@ Genera un archivo \strong{.pptx} a partir de un \strong{plan de diapositivas} co
 
 El flujo recomendado es:
 \enumerate{
-\item Definir un objeto de presets con \code{p_presets()} en un chunk previo.
+\item Definir un objeto \code{presets <- list(...)} (o usar \code{p_presets()}) en un chunk previo.
 \item Definir \code{diapo_001 <- p_slide_*(...)}, \code{diapo_002 <- ...} (uno o varios chunks).
 \item Llamar a \code{reporte_ppt_plan(presets = presets, ...)} para recolectar y exportar.
 }

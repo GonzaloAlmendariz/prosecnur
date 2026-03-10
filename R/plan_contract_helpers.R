@@ -594,11 +594,15 @@
 .list_name_of_var_local <- function(v, survey) {
   if (!is.data.frame(survey)) return(NA_character_)
   if ("list_name" %in% names(survey)) {
-    x <- survey$list_name[survey$name == v]
+    idx <- !is.na(survey$name) & survey$name == v
+    x <- survey$list_name[idx]
+    x <- x[!is.na(x) & nzchar(x)]
     if (length(x)) return(x[1])
   }
   if ("list_norm" %in% names(survey)) {
-    x <- survey$list_norm[survey$name == v]
+    idx <- !is.na(survey$name) & survey$name == v
+    x <- survey$list_norm[idx]
+    x <- x[!is.na(x) & nzchar(x)]
     if (length(x)) return(x[1])
   }
   NA_character_

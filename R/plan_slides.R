@@ -160,7 +160,7 @@ p_slide_title <- function(
 #'
 #' @param title Título del slide (opcional).
 #' @param plot Elemento `p_*()` principal (requerido).
-#' @param base Elemento opcional (p.ej. `p_base()` o `p_text()` o `character(1)`).
+#' @param base Elemento opcional (p.ej. `p_text()` o `character(1)`).
 #' @param footer Elemento opcional (p.ej. `p_text()` o `character(1)`).
 #' @param meta Lista libre para notas internas.
 #'
@@ -200,8 +200,8 @@ p_slide_1 <- function(title = NULL, plot, base = NULL, footer = NULL, meta = lis
 #' @param title Título del slide (opcional).
 #' @param left Elemento `p_*()` izquierda (requerido).
 #' @param right Elemento `p_*()` derecha (requerido).
-#' @param base Elemento opcional (p.ej. `p_base()` / `p_text()` / `character(1)`).
-#' @param footer Elemento opcional (p.ej. `p_text()` / `character(1)`).
+#' @param base Elemento opcional (p.ej. `p_text()` / `character(1)`).
+#' @param footer Texto o elemento opcional para la caja derecha del layout.
 #' @param meta Lista libre.
 #'
 #' @return Objeto con clase `"ppt_slide"`.
@@ -227,119 +227,18 @@ p_slide_2 <- function(title = NULL, left, right, base = NULL, footer = NULL, met
     .slide_type = "slide_2",
     title       = title,
     slots       = list(
-      title  = title,
-      left   = left,
-      right  = right,
-      base   = base,
-      footer = footer
-    ),
-    meta = meta
-  ))
-}
-
-# =============================================================================
-# SLIDES — 1 gráfico + texto (lado libre)
-# =============================================================================
-
-#' @title Slide 1 gráfico izquierda + columna derecha libre
-#'
-#' @param title Título del slide (opcional).
-#' @param plot Elemento `p_*()` (requerido).
-#' @param right Elemento opcional para la columna derecha (p.ej. `p_text()`).
-#' @param tag Texto opcional tipo etiqueta lateral (si el layout lo soporta).
-#' @param base Elemento opcional.
-#' @param footer Elemento opcional.
-#' @param meta Lista libre.
-#'
-#' @return Objeto `"ppt_slide"`.
-#' @export
-p_slide_1_left <- function(
-    title = NULL,
-    plot,
-    right = NULL,
-    tag = NULL,
-    base = NULL,
-    footer = NULL,
-    meta = list()
-) {
-  .ppt_chk_element(plot, "plot")
-  if (!is.null(right)) .ppt_chk_element(right, "right")
-  .ppt_chk_meta(meta)
-
-  title <- .ppt_norm_text1(title, blank = NULL)
-
-  if (!is.null(base)) {
-    .ppt_chk_element_or_text(base, "base")
-    if (is.character(base)) base <- .ppt_norm_text1(base, blank = NULL)
-  }
-
-  if (!is.null(footer)) {
-    .ppt_chk_element_or_text(footer, "footer")
-    if (is.character(footer)) footer <- .ppt_norm_text1(footer, blank = NULL)
-  }
-
-  .ppt_as_slide(list(
-    .slide_type = "slide_1_left",
-    title       = title,
-    slots       = list(
-      title  = title,
-      plot   = plot,
-      right  = right,
-      tag    = .ppt_norm_text1(tag, blank = NULL),
-      base   = base,
-      footer = footer
-    ),
-    meta = meta
-  ))
-}
-
-#' @title Slide 1 gráfico derecha + columna izquierda libre
-#'
-#' @param title Título del slide (opcional).
-#' @param plot Elemento `p_*()` (requerido).
-#' @param left Elemento opcional para la columna izquierda (p.ej. `p_text()`).
-#' @param tag Texto opcional tipo etiqueta lateral (si el layout lo soporta).
-#' @param base Elemento opcional.
-#' @param footer Elemento opcional.
-#' @param meta Lista libre.
-#'
-#' @return Objeto `"ppt_slide"`.
-#' @export
-p_slide_1_right <- function(
-    title = NULL,
-    plot,
-    left = NULL,
-    tag = NULL,
-    base = NULL,
-    footer = NULL,
-    meta = list()
-) {
-  .ppt_chk_element(plot, "plot")
-  if (!is.null(left)) .ppt_chk_element(left, "left")
-  .ppt_chk_meta(meta)
-
-  title <- .ppt_norm_text1(title, blank = NULL)
-
-  if (!is.null(base)) {
-    .ppt_chk_element_or_text(base, "base")
-    if (is.character(base)) base <- .ppt_norm_text1(base, blank = NULL)
-  }
-
-  if (!is.null(footer)) {
-    .ppt_chk_element_or_text(footer, "footer")
-    if (is.character(footer)) footer <- .ppt_norm_text1(footer, blank = NULL)
-  }
-
-  .ppt_as_slide(list(
-    .slide_type = "slide_1_right",
-    title       = title,
-    slots       = list(
-      title  = title,
-      plot   = plot,
-      left   = left,
-      tag    = .ppt_norm_text1(tag, blank = NULL),
-      base   = base,
-      footer = footer
+      title      = title,
+      left       = left,
+      right      = right,
+      base       = base,
+      footer     = footer,
+      right_text = if (inherits(footer, "ppt_element_text")) {
+        footer$text %||% NULL
+      } else if (is.character(footer)) {
+        footer
+      } else {
+        NULL
+      }
     ),
     meta = meta
   ))
@@ -512,9 +411,8 @@ p_slide_text_l2 <- function(
 }
 
 # =============================================================================
-# SLIDES — POBLACIÓN (UNIFICADAS; SIN DUPLICADOS)
-# - p_slide_poblacion_2 / _4 / _5 / _6 son el “contrato” único.
-# - Se dejan wrappers con nombres viejos para compatibilidad.
+# SLIDES — POBLACIÓN (CONTRATO CANÓNICO)
+# - p_slide_poblacion_2 / _4 / _5 / _6 son el estándar público.
 # =============================================================================
 
 #' @export
@@ -694,98 +592,36 @@ p_slide_poblacion_6 <- function(
   ))
 }
 
-# ---- Wrappers (compatibilidad hacia atrás) -----------------------------------
-
-#' @export
-p_slide_2_poblacion <- function(title = NULL, left, right, tag = NULL, center_note = "", base = NULL, meta = list()) {
-  p_slide_poblacion_2(title = title, left = left, right = right, tag = tag, center_note = center_note, base = base, meta = meta)
-}
-
-#' @export
-p_slide_4 <- function(title = NULL, up_left, up_right, bottom_left, bottom_right, tag = NULL, center_note = "", base = NULL, meta = list()) {
-  p_slide_poblacion_4(title = title, up_left = up_left, up_right = up_right, bottom_left = bottom_left, bottom_right = bottom_right,
-                      tag = tag, center_note = center_note, base = base, meta = meta)
-}
-
-#' @export
-p_slide_5 <- function(title = NULL, up_left, up_right, mid, bottom_left, bottom_right, tag = NULL, center_note = "", base = NULL, meta = list()) {
-  p_slide_poblacion_5(title = title, up_left = up_left, up_right = up_right, mid = mid, bottom_left = bottom_left, bottom_right = bottom_right,
-                      tag = tag, center_note = center_note, base = base, meta = meta)
-}
-
-#' @export
-p_slide_6 <- function(title = NULL, up_left, up_mid, up_right, bottom_left, bottom_mid, bottom_right, tag = NULL, center_note = "", base = NULL, meta = list()) {
-  p_slide_poblacion_6(title = title, up_left = up_left, up_mid = up_mid, up_right = up_right,
-                      bottom_left = bottom_left, bottom_mid = bottom_mid, bottom_right = bottom_right,
-                      tag = tag, center_note = center_note, base = base, meta = meta)
-}
-
-# (estos eran los duplicados “pop”; ahora apuntan al contrato único)
-#' @export
-p_slide_2pop <- function(title = NULL, tag = NULL, left = NULL, right = NULL, meta = list()) {
-  p_slide_poblacion_2(title = title, left = left, right = right, tag = tag, meta = meta)
-}
-#' @export
-p_slide_5pop <- function(
-    title = NULL, tag = NULL, icon = NULL, footer = NULL,
-    pic1 = NULL, pic2 = NULL, pic3 = NULL, pic4 = NULL, pic5 = NULL,
-    meta = list()
-) {
-
-  # normalización de textos
-  title <- .ppt_norm_text1(title, blank = NULL)
-  tag   <- .ppt_norm_text1(tag,   blank = NULL)
-
-  footer_txt <- paste(
-    c(.ppt_norm_text1(icon, blank = NULL), .ppt_norm_text1(footer, blank = NULL)),
-    collapse = "\n"
-  )
-  if (!nzchar(trimws(footer_txt))) footer_txt <- NULL
-
-  structure(
-    list(
-      .slide_type = "poblacion_5",
-      title       = title,
-      slots       = list(
-        title  = title,
-        tag    = tag,
-        icon   = NULL,
-        footer = footer_txt,
-
-        pic1 = pic1,
-        pic2 = pic2,
-        pic3 = pic3,
-        pic4 = pic4,
-        pic5 = pic5
-      ),
-      meta = meta
-    ),
-    class = c("ppt_slide", "list")
-  )
-}
-#' @export
-p_slide_6pop <- function(
-    title = NULL, tag = NULL, icon = NULL, footer = NULL,
-    pic1 = NULL, pic2 = NULL, pic3 = NULL, pic4 = NULL, pic5 = NULL, pic6 = NULL,
-    meta = list()
-) {
-  p_slide_poblacion_6(
-    title = title,
-    pic1 = pic1, pic2 = pic2, pic3 = pic3, pic4 = pic4, pic5 = pic5, pic6 = pic6,
-    tag = tag,
-    icon = icon,
-    footer = footer,
-    meta = meta
-  )
-}
-
 # =============================================================================
 # ELEMENTOS p_* (objetos declarativos)
 # =============================================================================
 
+#' @keywords internal
+.ppt_norm_filters <- function(filtros) {
+  if (is.null(filtros)) return(list())
+  if (!is.list(filtros)) stop("`filtros` debe ser lista.", call. = FALSE)
+
+  nms <- names(filtros)
+  if (length(filtros) && is.null(nms)) {
+    stop("`filtros` debe ser una lista nombrada por variable.", call. = FALSE)
+  }
+  if (!is.null(nms)) {
+    if (any(!nzchar(trimws(nms)))) {
+      stop("`filtros` debe ser una lista nombrada por variable.", call. = FALSE)
+    }
+    names(filtros) <- trimws(nms)
+  }
+
+  filtros
+}
+
 #' @title Barras agrupadas (1 variable)
+#' @param filtros Lista nombrada de filtros por igualdad/inclusión,
+#'   por ejemplo `list(region = "Lima", sexo = c("Mujer", "Otro"))`.
+#' @examples
+#' p_barras_agrupadas("p102", filtros = list(region = "Lima"))
 #' @export
-p_barras_agrupadas <- function(var, titulo = NULL, cruces = NULL, overrides = list(), base = list()) {
+p_barras_agrupadas <- function(var, titulo = NULL, cruces = NULL, overrides = list(), base = list(), filtros = list()) {
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
     stop("`var` debe ser character(1) no vacío.", call. = FALSE)
   }
@@ -802,6 +638,7 @@ p_barras_agrupadas <- function(var, titulo = NULL, cruces = NULL, overrides = li
 
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+  filtros <- .ppt_norm_filters(filtros)
 
   el <- list(
     .element_type = "barras_agrupadas",
@@ -809,15 +646,20 @@ p_barras_agrupadas <- function(var, titulo = NULL, cruces = NULL, overrides = li
     title_slide   = titulo,
     cruces        = cruces,
     overrides     = overrides,
-    base          = base
+    base          = base,
+    filtros       = filtros
   )
   class(el) <- c("ppt_element", "list")
   el
 }
 
 #' @title Barras apiladas (1 variable)
+#' @param filtros Lista nombrada de filtros por igualdad/inclusión,
+#'   por ejemplo `list(region = "Lima", sexo = c("Mujer", "Otro"))`.
+#' @examples
+#' p_barras_apiladas("p102", filtros = list(region = "Lima"))
 #' @export
-p_barras_apiladas <- function(var, titulo = NULL, cruces = NULL, overrides = list(), base = list()) {
+p_barras_apiladas <- function(var, titulo = NULL, cruces = NULL, overrides = list(), base = list(), filtros = list()) {
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
     stop("`var` debe ser character(1) no vacío.", call. = FALSE)
   }
@@ -834,6 +676,7 @@ p_barras_apiladas <- function(var, titulo = NULL, cruces = NULL, overrides = lis
 
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+  filtros <- .ppt_norm_filters(filtros)
 
   el <- list(
     .element_type = "barras_apiladas",
@@ -841,13 +684,22 @@ p_barras_apiladas <- function(var, titulo = NULL, cruces = NULL, overrides = lis
     title_slide   = titulo,
     cruces        = cruces,
     overrides     = overrides,
-    base          = base
+    base          = base,
+    filtros       = filtros
   )
   class(el) <- c("ppt_element", "list")
   el
 }
 
 #' @title Barras multi-apiladas (varias variables o 1 variable cruzada)
+#' @param filtros Lista nombrada de filtros por igualdad/inclusión.
+#' @examples
+#' p_barras_multiapiladas(
+#'   modo = "cruce",
+#'   var = "p102",
+#'   cruces = "region",
+#'   filtros = list(sexo = "Mujer")
+#' )
 #' @export
 p_barras_multiapiladas <- function(
     modo = c("var", "cruce"),
@@ -860,7 +712,8 @@ p_barras_multiapiladas <- function(
     top2box_codes  = NULL,
     top2box_labels = NULL,
     overrides = list(),
-    base = list()
+    base = list(),
+    filtros = list()
 ) {
   modo <- match.arg(modo)
   titulo <- .ppt_norm_text1(titulo, blank = NULL)
@@ -891,6 +744,7 @@ p_barras_multiapiladas <- function(
 
   if (!is.list(overrides)) stop("`overrides` debe ser una lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser una lista.", call. = FALSE)
+  filtros <- .ppt_norm_filters(filtros)
 
   if (identical(modo, "var")) {
     if (is.null(vars)) stop("modo='var': `vars` no puede ser NULL.", call. = FALSE)
@@ -911,7 +765,8 @@ p_barras_multiapiladas <- function(
       top2box_codes  = top2box_codes,
       top2box_labels = top2box_labels,
       overrides      = overrides,
-      base           = base
+      base           = base,
+      filtros        = filtros
     )
     class(el) <- c("ppt_element", "list")
     return(el)
@@ -937,7 +792,8 @@ p_barras_multiapiladas <- function(
     top2box_codes  = top2box_codes,
     top2box_labels = top2box_labels,
     overrides      = overrides,
-    base           = base
+    base           = base,
+    filtros        = filtros
   )
   class(el) <- c("ppt_element", "list")
   el
@@ -946,8 +802,11 @@ p_barras_multiapiladas <- function(
 
 
 #' @title Pie (torta)
+#' @param filtros Lista nombrada de filtros por igualdad/inclusión.
+#' @examples
+#' p_pie("p108", filtros = list(sexo = "Mujer", edad_grupo = c("60-69", "70+")))
 #' @export
-p_pie <- function(var, titulo = NULL, overrides = list(), base = list()) {
+p_pie <- function(var, titulo = NULL, overrides = list(), base = list(), filtros = list()) {
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
     stop("`var` debe ser character(1) no vacío.", call. = FALSE)
   }
@@ -957,21 +816,24 @@ p_pie <- function(var, titulo = NULL, overrides = list(), base = list()) {
 
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+  filtros <- .ppt_norm_filters(filtros)
 
   el <- list(
     .element_type = "pie",
     var           = var,
     title_slide   = titulo,
     overrides     = overrides,
-    base          = base
+    base          = base,
+    filtros       = filtros
   )
   class(el) <- c("ppt_element", "list")
   el
 }
 
 #' @title Donut
+#' @param filtros Lista nombrada de filtros por igualdad/inclusión.
 #' @export
-p_donut <- function(var, titulo = NULL, overrides = list(), base = list()) {
+p_donut <- function(var, titulo = NULL, overrides = list(), base = list(), filtros = list()) {
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
     stop("`var` debe ser character(1) no vacío.", call. = FALSE)
   }
@@ -981,13 +843,15 @@ p_donut <- function(var, titulo = NULL, overrides = list(), base = list()) {
 
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+  filtros <- .ppt_norm_filters(filtros)
 
   el <- list(
     .element_type = "donut",
     var           = var,
     title_slide   = titulo,
     overrides     = overrides,
-    base          = base
+    base          = base,
+    filtros       = filtros
   )
   class(el) <- c("ppt_element", "list")
   el
@@ -1001,6 +865,9 @@ p_donut <- function(var, titulo = NULL, overrides = list(), base = list()) {
 #' @param titulo Título opcional.
 #' @param formato Formato de salida (p.ej. `"%.0f%%"`).
 #' @param overrides Lista de overrides (p.ej. `fn`, `denom`, `na_rm`).
+#' @param filtros Lista nombrada de filtros por igualdad/inclusión.
+#' @examples
+#' p_numerico("p118_tbc_a", cruce = "region", filtros = list(sexo = "Mujer"))
 #'
 #' @return Objeto `"ppt_element"`.
 #' @export
@@ -1010,7 +877,8 @@ p_numerico <- function(
     cruce = NULL,
     titulo = NULL,
     formato = NULL,
-    overrides = list()
+    overrides = list(),
+    filtros = list()
 ) {
   metrica <- match.arg(metrica)
 
@@ -1032,6 +900,7 @@ p_numerico <- function(
   formato <- .ppt_norm_text1(formato, blank = NULL)
 
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
+  filtros <- .ppt_norm_filters(filtros)
 
   el <- list(
     .element_type = "numerico",
@@ -1040,13 +909,15 @@ p_numerico <- function(
     cruce         = cruce,
     title_slide   = titulo,
     formato       = formato,
-    overrides     = overrides
+    overrides     = overrides,
+    filtros       = filtros
   )
   class(el) <- c("ppt_element", "list")
   el
 }
 
 #' @title Radar + tabla derecha (SM o Top/Bottom 2 Box)
+#' @param filtros Lista nombrada de filtros por igualdad/inclusión.
 #' @export
 p_radar_tabla <- function(
     modo = c("sm", "box"),
@@ -1061,7 +932,8 @@ p_radar_tabla <- function(
     sm_omit_labels = NULL,
     sm_omit_na     = TRUE,
     overrides = list(),
-    base = list()
+    base = list(),
+    filtros = list()
 ) {
   modo <- match.arg(modo)
 
@@ -1106,6 +978,7 @@ p_radar_tabla <- function(
 
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+  filtros <- .ppt_norm_filters(filtros)
 
   if (is.null(titulo_tabla) || !nzchar(trimws(as.character(titulo_tabla)))) {
     titulo_tabla <- if (identical(modo, "sm")) "Opciones" else "Top 2 Box"
@@ -1125,7 +998,221 @@ p_radar_tabla <- function(
     title_slide     = titulo,
     top_n           = top_n,
     overrides       = overrides,
-    base            = base
+    base            = base,
+    filtros         = filtros
+  )
+  class(el) <- c("ppt_element", "list")
+  el
+}
+
+#' @title Heatmap de dimensiones
+#' @export
+p_dim_heatmap <- function(
+    modo = c("general", "indicadores"),
+    objetivo,
+    cruce = NULL,
+    incluir_total = NULL,
+    filtros = list(),
+    iter_var = NULL,
+    iter_level = NULL,
+    titulo = NULL,
+    overrides = list(),
+    base = list()
+) {
+  modo <- match.arg(modo)
+
+  if (!is.character(objetivo) || length(objetivo) != 1L || !nzchar(trimws(objetivo))) {
+    stop("`objetivo` debe ser character(1) no vacío.", call. = FALSE)
+  }
+  objetivo <- trimws(objetivo)
+
+  if (!is.null(cruce)) {
+    if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
+      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    cruce <- trimws(cruce)
+  }
+
+  if (!is.null(iter_var)) {
+    if (!is.character(iter_var) || length(iter_var) != 1L || !nzchar(trimws(iter_var))) {
+      stop("`iter_var` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    iter_var <- trimws(iter_var)
+  }
+
+  if (!is.null(iter_level)) {
+    if (!is.character(iter_level) || length(iter_level) != 1L || !nzchar(trimws(iter_level))) {
+      stop("`iter_level` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    iter_level <- trimws(iter_level)
+  }
+
+  if (!is.null(incluir_total)) {
+    if (!is.logical(incluir_total) || length(incluir_total) != 1L || is.na(incluir_total)) {
+      stop("`incluir_total` debe ser NULL o logical(1).", call. = FALSE)
+    }
+  }
+
+  filtros <- .ppt_norm_filters(filtros)
+  if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
+  if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+
+  el <- list(
+    .element_type = "dim_heatmap",
+    modo = modo,
+    objetivo = objetivo,
+    cruce = cruce,
+    incluir_total = incluir_total,
+    filtros = filtros,
+    iter_var = iter_var,
+    iter_level = iter_level,
+    title_slide = .ppt_norm_text1(titulo, blank = NULL),
+    overrides = overrides,
+    base = base
+  )
+  class(el) <- c("ppt_element", "list")
+  el
+}
+
+#' @title Radar de dimensiones con fallback automático a barras
+#' @export
+p_dim_radar <- function(
+    modo = c("general", "indicadores"),
+    objetivo,
+    cruce = NULL,
+    incluir_total = NULL,
+    filtros = list(),
+    iter_var = NULL,
+    iter_level = NULL,
+    titulo = NULL,
+    overrides = list(),
+    base = list()
+) {
+  modo <- match.arg(modo)
+
+  if (!is.character(objetivo) || length(objetivo) != 1L || !nzchar(trimws(objetivo))) {
+    stop("`objetivo` debe ser character(1) no vacío.", call. = FALSE)
+  }
+  objetivo <- trimws(objetivo)
+
+  if (!is.null(cruce)) {
+    if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
+      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    cruce <- trimws(cruce)
+  }
+
+  if (!is.null(iter_var)) {
+    if (!is.character(iter_var) || length(iter_var) != 1L || !nzchar(trimws(iter_var))) {
+      stop("`iter_var` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    iter_var <- trimws(iter_var)
+  }
+
+  if (!is.null(iter_level)) {
+    if (!is.character(iter_level) || length(iter_level) != 1L || !nzchar(trimws(iter_level))) {
+      stop("`iter_level` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    iter_level <- trimws(iter_level)
+  }
+
+  if (!is.null(incluir_total)) {
+    if (!is.logical(incluir_total) || length(incluir_total) != 1L || is.na(incluir_total)) {
+      stop("`incluir_total` debe ser NULL o logical(1).", call. = FALSE)
+    }
+  }
+
+  filtros <- .ppt_norm_filters(filtros)
+  if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
+  if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+
+  el <- list(
+    .element_type = "dim_radar",
+    modo = modo,
+    objetivo = objetivo,
+    cruce = cruce,
+    incluir_total = incluir_total,
+    filtros = filtros,
+    iter_var = iter_var,
+    iter_level = iter_level,
+    title_slide = .ppt_norm_text1(titulo, blank = NULL),
+    overrides = overrides,
+    base = base
+  )
+  class(el) <- c("ppt_element", "list")
+  el
+}
+
+#' @title Radar + tabla de dimensiones
+#' @export
+p_dim_radar_tabla <- function(
+    modo = c("general", "indicadores"),
+    objetivo,
+    cruce = NULL,
+    incluir_total = NULL,
+    filtros = list(),
+    iter_var = NULL,
+    iter_level = NULL,
+    titulo = NULL,
+    titulo_tabla = NULL,
+    overrides = list(),
+    base = list()
+) {
+  modo <- match.arg(modo)
+
+  if (!is.character(objetivo) || length(objetivo) != 1L || !nzchar(trimws(objetivo))) {
+    stop("`objetivo` debe ser character(1) no vacío.", call. = FALSE)
+  }
+  objetivo <- trimws(objetivo)
+
+  if (!is.null(cruce)) {
+    if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
+      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    cruce <- trimws(cruce)
+  }
+
+  if (!is.null(iter_var)) {
+    if (!is.character(iter_var) || length(iter_var) != 1L || !nzchar(trimws(iter_var))) {
+      stop("`iter_var` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    iter_var <- trimws(iter_var)
+  }
+
+  if (!is.null(iter_level)) {
+    if (!is.character(iter_level) || length(iter_level) != 1L || !nzchar(trimws(iter_level))) {
+      stop("`iter_level` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    iter_level <- trimws(iter_level)
+  }
+
+  if (!is.null(incluir_total)) {
+    if (!is.logical(incluir_total) || length(incluir_total) != 1L || is.na(incluir_total)) {
+      stop("`incluir_total` debe ser NULL o logical(1).", call. = FALSE)
+    }
+  }
+
+  if (!is.null(titulo_tabla)) {
+    titulo_tabla <- .ppt_norm_text1(titulo_tabla, blank = NULL)
+  }
+
+  filtros <- .ppt_norm_filters(filtros)
+  if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
+  if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+
+  el <- list(
+    .element_type = "dim_radar_tabla",
+    modo = modo,
+    objetivo = objetivo,
+    cruce = cruce,
+    incluir_total = incluir_total,
+    filtros = filtros,
+    iter_var = iter_var,
+    iter_level = iter_level,
+    titulo_tabla = titulo_tabla,
+    title_slide = .ppt_norm_text1(titulo, blank = NULL),
+    overrides = overrides,
+    base = base
   )
   class(el) <- c("ppt_element", "list")
   el

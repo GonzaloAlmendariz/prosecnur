@@ -13,9 +13,9 @@ p_slide_2(title = NULL, left, right, base = NULL, footer = NULL, meta = list())
 
 \item{right}{Elemento \verb{p_*()} derecha (requerido).}
 
-\item{base}{Elemento opcional (p.ej. \code{p_base()} / \code{p_text()} / \code{character(1)}).}
+\item{base}{Elemento opcional (p.ej. \code{p_text()} / \code{character(1)}).}
 
-\item{footer}{Elemento opcional (p.ej. \code{p_text()} / \code{character(1)}).}
+\item{footer}{Texto o elemento opcional para la caja derecha del layout.}
 
 \item{meta}{Lista libre.}
 }

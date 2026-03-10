@@ -2,50 +2,56 @@
 % Please edit documentation in R/plan_ppt.R
 \name{p_presets}
 \alias{p_presets}
-\title{Definir presets por tipo de elemento y por layout}
+\title{Definir presets por tipo de elemento}
 \usage{
 p_presets(
-  barras_agrupadas = list(),
+  base = list(),
   barras_apiladas = list(),
   multi_apiladas = list(),
+  barras_agrupadas = list(),
+  barras_numericas = list(),
   pie = list(),
   donut = list(),
-  numerico = list(),
-  texto = list(),
-  base = list(),
-  layouts = NULL,
-  debug = list()
+  radar_tabla = list(),
+  dim_heatmap = list(),
+  dim_radar = list(),
+  dim_radar_tabla = list(),
+  numerico = NULL,
+  debug = list(),
+  ...
 )
 }
 \arguments{
-\item{barras_agrupadas}{Lista de parámetros por defecto para \code{graficar_barras_agrupadas()}.}
+\item{base}{Lista de parámetros por defecto para texto de base automático.}
 
 \item{barras_apiladas}{Lista de parámetros por defecto para \code{graficar_barras_apiladas()}.}
 
 \item{multi_apiladas}{Lista de parámetros por defecto para \code{graficar_barras_apiladas()} en modo bloque.}
 
+\item{barras_agrupadas}{Lista de parámetros por defecto para \code{graficar_barras_agrupadas()}.}
+
+\item{barras_numericas}{Lista de parámetros por defecto para \code{graficar_barras_numericas()}.}
+
 \item{pie}{Lista de parámetros por defecto para \code{graficar_pie(tipo_pie="pie")}.}
 
 \item{donut}{Lista de parámetros por defecto para \code{graficar_pie(tipo_pie="donut")}.}
 
-\item{numerico}{Lista de parámetros por defecto para elementos KPI numéricos.}
+\item{radar_tabla}{Lista de parámetros por defecto para \code{graficar_radar()}.}
 
-\item{texto}{Lista de parámetros por defecto para \code{p_text()} (tipografía, color, etc.).}
+\item{numerico}{Alias legado de \code{barras_numericas}. Se mantiene por compatibilidad.}
 
-\item{base}{Lista de parámetros por defecto para \code{p_base()} (formato, prefijos, etc.).}
+\item{debug}{Lista opcional de parámetros de depuración.}
 
-\item{layouts}{Lista opcional con mapeos de layout -> slots -> placeholders
-(type/type_idx o loc). Si es \code{NULL}, se usan defaults internos.}
-
-\item{debug}{Lista opcional de parámetros de depuración (p.ej. bordes canvas).}
+\item{...}{Argumentos extra heredados de versiones previas. Se ignoran.}
 }
 \value{
 Objeto con clase \code{"ppt_presets"}.
 }
 \description{
 Construye un objeto de presets que centraliza configuraciones por tipo:
-\code{barras_agrupadas}, \code{barras_apiladas}, \code{multi_apiladas}, \code{pie}, \code{donut},
-\code{numerico}, \code{texto}, \code{base}, y también configuración de layouts/slots.
+\code{base}, \code{barras_apiladas}, \code{multi_apiladas}, \code{barras_agrupadas},
+\code{barras_numericas}, \code{pie}, \code{donut} y \code{radar_tabla}.
 
-Los presets se definen en un chunk previo y se pasan a \code{reporte_ppt_plan(presets=...)}.
+Este helper refleja el contrato real que consume \code{reporte_ppt_plan()}, equivalente
+a pasar manualmente una lista con sublistas \code{args}.
 }

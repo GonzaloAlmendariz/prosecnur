@@ -15,9 +15,21 @@ p_barras_multiapiladas(
   top2box_codes = NULL,
   top2box_labels = NULL,
   overrides = list(),
-  base = list()
+  base = list(),
+  filtros = list()
 )
+}
+\arguments{
+\item{filtros}{Lista nombrada de filtros por igualdad/inclusión.}
 }
 \description{
 Barras multi-apiladas (varias variables o 1 variable cruzada)
+}
+\examples{
+p_barras_multiapiladas(
+  modo = "cruce",
+  var = "p102",
+  cruces = "region",
+  filtros = list(sexo = "Mujer")
+)
 }
