@@ -7,6 +7,7 @@
 graficar_barras_apiladas(
   data,
   var_categoria,
+  var_etiqueta_categoria = NULL,
   var_n,
   cols_porcentaje,
   etiquetas_grupos,
@@ -43,6 +44,8 @@ graficar_barras_apiladas(
   size_titulo_extra = 3,
   color_ejes = "#000000",
   size_ejes = 9,
+  color_titulos_grupo = NULL,
+  size_titulos_grupo = NULL,
   color_fondo = NA,
   grosor_barras = 0.7,
   extra_derecha_rel = 0.1,
@@ -57,6 +60,11 @@ graficar_barras_apiladas(
   top3box_labels = NULL,
   bottom2box_labels = NULL,
   usar_canvas = FALSE,
+  var_grupo_id = NULL,
+  var_grupo_titulo = NULL,
+  canvas_w_grupo = 0,
+  canvas_w_buf_grupo_etq = 0,
+  canvas_gap_grupos = 0,
   canvas_w_etiquetas = 0.38,
   canvas_w_buf_etq_bars = 0,
   canvas_w_buf_bars_extra = 0,
@@ -94,6 +102,8 @@ graficar_barras_apiladas(
 \item{data}{\code{data.frame} o \code{tibble} en formato ancho con columnas de categorías, base y porcentajes.}
 
 \item{var_categoria}{Nombre de la columna categórica (eje Y).}
+
+\item{var_etiqueta_categoria}{Columna opcional con la etiqueta visible de cada categoría.}
 
 \item{var_n}{Nombre de la columna base (por ejemplo, N por categoría).}
 
@@ -143,6 +153,8 @@ Sus \code{names()} deben coincidir con \code{cols_porcentaje}.}
 
 \item{color_ejes, size_ejes}{Estilos de las etiquetas de categorías (dibujadas en canvas).}
 
+\item{color_titulos_grupo, size_titulos_grupo}{Estilos para títulos de bloque izquierdo en canvas.}
+
 \item{color_fondo}{Color de fondo (útil en exportación).}
 
 \item{grosor_barras}{Grosor manual de barras en \code{geom_col()}.}
@@ -162,9 +174,17 @@ Sus \code{names()} deben coincidir con \code{cols_porcentaje}.}
 \item{invertir_segmentos}{Si \code{TRUE}, invierte el orden del stack (segmentos).}
 
 \item{textos_negrita}{Vector con tokens para forzar negrita por componente (por ejemplo,
-\code{"titulo"}, \code{"leyenda"}, \code{"porcentajes"}, \code{"eje_y"}, \code{"barra_extra"}).}
+\code{"titulo"}, \code{"leyenda"}, \code{"porcentajes"}/\code{"valores"}, \code{"eje_y"}, \code{"barra_extra"}).}
 
 \item{usar_canvas}{Si \code{TRUE}, arma el gráfico con \code{cowplot} en placeholders internos.}
+
+\item{var_grupo_id, var_grupo_titulo}{Columnas opcionales para agrupar categorías en bloques
+y dibujar un título por bloque en el canvas.}
+
+\item{canvas_w_grupo, canvas_w_buf_grupo_etq}{Ancho relativo de la columna de bloque y su
+separación respecto a las etiquetas del cruce.}
+
+\item{canvas_gap_grupos}{Separación vertical adicional entre bloques, expresada en “altos de fila”.}
 
 \item{canvas_w_etiquetas, canvas_w_buf_etq_bars, canvas_w_buf_bars_extra, canvas_w_bars, canvas_w_extra}{Anchos relativos de columnas del canvas (etiquetas, buffers, panel, extra).}
 

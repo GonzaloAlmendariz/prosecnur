@@ -159,6 +159,7 @@ p_slide_title <- function(
 #' @title Slide con 1 gráfico a pantalla completa
 #'
 #' @param title Título del slide (opcional).
+#' @param subtitle Subtítulo opcional alineado bajo el título.
 #' @param plot Elemento `p_*()` principal (requerido).
 #' @param base Elemento opcional (p.ej. `p_text()` o `character(1)`).
 #' @param footer Elemento opcional (p.ej. `p_text()` o `character(1)`).
@@ -166,11 +167,12 @@ p_slide_title <- function(
 #'
 #' @return Objeto con clase `"ppt_slide"`.
 #' @export
-p_slide_1 <- function(title = NULL, plot, base = NULL, footer = NULL, meta = list()) {
+p_slide_1 <- function(title = NULL, subtitle = NULL, plot, base = NULL, footer = NULL, meta = list()) {
   .ppt_chk_element(plot, "plot")
   .ppt_chk_meta(meta)
 
   title <- .ppt_norm_text1(title, blank = NULL)
+  subtitle <- .ppt_norm_text1(subtitle, blank = NULL)
 
   if (!is.null(base)) {
     .ppt_chk_element_or_text(base, "base")
@@ -186,10 +188,11 @@ p_slide_1 <- function(title = NULL, plot, base = NULL, footer = NULL, meta = lis
     .slide_type = "slide_1",
     title       = title,
     slots       = list(
-      title  = title,
-      plot   = plot,
-      base   = base,
-      footer = footer
+      title    = title,
+      subtitle = subtitle,
+      plot     = plot,
+      base     = base,
+      footer   = footer
     ),
     meta        = meta
   ))
@@ -693,6 +696,11 @@ p_barras_apiladas <- function(var, titulo = NULL, cruces = NULL, overrides = lis
 
 #' @title Barras multi-apiladas (varias variables o 1 variable cruzada)
 #' @param filtros Lista nombrada de filtros por igualdad/inclusión.
+#' @param bloques En `modo = "multilista"`, lista de bloques. Cada bloque debe
+#'   ser una lista con al menos `modo` (`"var"`, `"cruce"` o `"var_cruce"`),
+#'   y los argumentos necesarios para ese submodo (`vars`, `var`, `cruces`,
+#'   `titulos_grupo`, etc.). Cada bloque puede incluir opcionalmente
+#'   `altura_rel`, `overrides`, `base` y `filtros`.
 #' @examples
 #' p_barras_multiapiladas(
 #'   modo = "cruce",
@@ -700,10 +708,18 @@ p_barras_apiladas <- function(var, titulo = NULL, cruces = NULL, overrides = lis
 #'   cruces = "region",
 #'   filtros = list(sexo = "Mujer")
 #' )
+#'
+#' En `modo = "var_cruce"`, `vars` también puede ser una lista nombrada de
+#' bloques. Cada bloque debe contener referencias `fuente$variable` cuando se
+#' comparan varias bases en un mismo gráfico.
+#'
+#' En `modo = "multilista"`, se pueden apilar varios bloques con distintas
+#' escalas dentro de una sola composición vertical.
 #' @export
 p_barras_multiapiladas <- function(
-    modo = c("var", "cruce"),
+    modo = c("var", "cruce", "var_cruce", "multilista"),
     vars = NULL,
+    bloques = NULL,
     var  = NULL,
     titulo = NULL,
     cruces = NULL,
@@ -711,6 +727,7 @@ p_barras_multiapiladas <- function(
     top2box        = FALSE,
     top2box_codes  = NULL,
     top2box_labels = NULL,
+    titulos_grupo  = NULL,
     overrides = list(),
     base = list(),
     filtros = list()
@@ -741,10 +758,103 @@ p_barras_multiapiladas <- function(
     top2box_labels <- top2box_labels[nzchar(top2box_labels)]
     if (!length(top2box_labels)) top2box_labels <- NULL
   }
+  if (!is.null(titulos_grupo)) {
+    if (!is.character(titulos_grupo) || !length(titulos_grupo)) {
+      stop("`titulos_grupo` debe ser NULL o character() no vacío.", call. = FALSE)
+    }
+    titulos_grupo <- trimws(titulos_grupo)
+    titulos_grupo <- titulos_grupo[nzchar(titulos_grupo)]
+    if (!length(titulos_grupo)) {
+      titulos_grupo <- NULL
+    } else if (is.null(names(titulos_grupo)) || any(!nzchar(trimws(names(titulos_grupo))))) {
+      stop("`titulos_grupo` debe ser un vector nombrado por variable.", call. = FALSE)
+    } else {
+      names(titulos_grupo) <- trimws(names(titulos_grupo))
+      titulos_grupo <- titulos_grupo[nzchar(names(titulos_grupo))]
+      if (!length(titulos_grupo)) titulos_grupo <- NULL
+    }
+  }
 
   if (!is.list(overrides)) stop("`overrides` debe ser una lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser una lista.", call. = FALSE)
   filtros <- .ppt_norm_filters(filtros)
+
+  if (identical(modo, "multilista")) {
+    if (!is.list(bloques) || !length(bloques)) {
+      stop("modo='multilista': `bloques` debe ser una lista no vacía.", call. = FALSE)
+    }
+
+    bloques_norm <- lapply(seq_along(bloques), function(i) {
+      block <- bloques[[i]]
+      if (!is.list(block)) {
+        stop("modo='multilista': cada bloque debe ser una lista.", call. = FALSE)
+      }
+
+      modo_block <- block[["modo", exact = TRUE]] %||% NULL
+      if (!is.character(modo_block) || length(modo_block) != 1L || !nzchar(trimws(modo_block))) {
+        stop("modo='multilista': cada bloque debe definir `modo`.", call. = FALSE)
+      }
+      modo_block <- trimws(modo_block)
+      if (identical(modo_block, "multilista")) {
+        stop("modo='multilista': no se permiten bloques anidados de tipo `multilista`.", call. = FALSE)
+      }
+
+      filtros_block <- utils::modifyList(filtros, .ppt_norm_filters(block[["filtros", exact = TRUE]] %||% list()))
+      base_block <- utils::modifyList(base, block[["base", exact = TRUE]] %||% list())
+      overrides_block <- utils::modifyList(overrides, block[["overrides", exact = TRUE]] %||% list())
+
+      titulo_block <- .ppt_norm_text1(block[["titulo", exact = TRUE]] %||% NULL, blank = NULL)
+      subtitulo_block <- .ppt_norm_text1(block[["subtitulo", exact = TRUE]] %||% NULL, blank = NULL)
+
+      # En multilista, por defecto los subbloques NO deben heredar títulos
+      # automáticos ni desde presets ni desde otros overrides. Solo se muestran
+      # si el usuario los define explícitamente en el bloque.
+      overrides_block$titulo <- titulo_block %||% ""
+      overrides_block$subtitulo <- subtitulo_block %||% ""
+
+      child <- p_barras_multiapiladas(
+        modo = modo_block,
+        vars = block[["vars", exact = TRUE]] %||% NULL,
+        bloques = NULL,
+        var = block[["var", exact = TRUE]] %||% NULL,
+        titulo = titulo_block,
+        cruces = block[["cruces", exact = TRUE]] %||% NULL,
+        wrap_y = block[["wrap_y", exact = TRUE]] %||% wrap_y,
+        top2box = block[["top2box", exact = TRUE]] %||% FALSE,
+        top2box_codes = block[["top2box_codes", exact = TRUE]] %||% NULL,
+        top2box_labels = block[["top2box_labels", exact = TRUE]] %||% NULL,
+        titulos_grupo = block[["titulos_grupo", exact = TRUE]] %||% NULL,
+        overrides = overrides_block,
+        base = base_block,
+        filtros = filtros_block
+      )
+      child$title_slide <- NULL
+      child$.multilista_block_title <- titulo_block
+      child$.multilista_block_subtitle <- subtitulo_block
+      child$altura_rel <- block[["altura_rel", exact = TRUE]] %||% NULL
+      child
+    })
+
+    el <- list(
+      .element_type  = "barras_multiapiladas",
+      modo           = "multilista",
+      bloques        = bloques_norm,
+      vars           = NULL,
+      var            = NULL,
+      cruce          = NULL,
+      title_slide    = titulo,
+      wrap_y         = wrap_y,
+      top2box        = FALSE,
+      top2box_codes  = NULL,
+      top2box_labels = NULL,
+      titulos_grupo  = NULL,
+      overrides      = overrides,
+      base           = base,
+      filtros        = filtros
+    )
+    class(el) <- c("ppt_element", "list")
+    return(el)
+  }
 
   if (identical(modo, "var")) {
     if (is.null(vars)) stop("modo='var': `vars` no puede ser NULL.", call. = FALSE)
@@ -764,6 +874,60 @@ p_barras_multiapiladas <- function(
       top2box        = isTRUE(top2box),
       top2box_codes  = top2box_codes,
       top2box_labels = top2box_labels,
+      titulos_grupo  = NULL,
+      overrides      = overrides,
+      base           = base,
+      filtros        = filtros
+    )
+    class(el) <- c("ppt_element", "list")
+    return(el)
+  }
+
+  if (identical(modo, "var_cruce")) {
+    if (is.null(vars)) stop("modo='var_cruce': `vars` no puede ser NULL.", call. = FALSE)
+    if (is.character(vars)) {
+      if (length(vars) < 1L) stop("modo='var_cruce': `vars` debe ser character() con >= 1 variable.", call. = FALSE)
+      vars <- trimws(vars)
+      vars <- vars[nzchar(vars)]
+      if (!length(vars)) stop("modo='var_cruce': `vars` quedó vacío luego de limpiar.", call. = FALSE)
+
+      if (is.null(cruces)) stop("modo='var_cruce': `cruces` es obligatorio (character(1)).", call. = FALSE)
+    } else if (is.list(vars)) {
+      if (!length(vars)) stop("modo='var_cruce': `vars` no puede ser una lista vacía.", call. = FALSE)
+      if (is.null(names(vars)) || any(!nzchar(trimws(names(vars))))) {
+        stop("modo='var_cruce': cuando `vars` es lista, debe ser una lista nombrada.", call. = FALSE)
+      }
+      names(vars) <- trimws(names(vars))
+      vars <- vars[nzchar(names(vars))]
+      if (!length(vars)) stop("modo='var_cruce': `vars` quedó vacío luego de limpiar.", call. = FALSE)
+
+      vars <- lapply(vars, function(x) {
+        if (!is.character(x) || !length(x)) {
+          stop("modo='var_cruce': cada bloque de `vars` debe ser character() no vacío.", call. = FALSE)
+        }
+        x <- trimws(x)
+        x <- x[nzchar(x)]
+        if (!length(x)) {
+          stop("modo='var_cruce': un bloque de `vars` quedó vacío luego de limpiar.", call. = FALSE)
+        }
+        x
+      })
+    } else {
+      stop("modo='var_cruce': `vars` debe ser character() o lista nombrada.", call. = FALSE)
+    }
+
+    el <- list(
+      .element_type  = "barras_multiapiladas",
+      modo           = "var_cruce",
+      vars           = vars,
+      var            = NULL,
+      cruce          = cruces,
+      title_slide    = titulo,
+      wrap_y         = wrap_y,
+      top2box        = isTRUE(top2box),
+      top2box_codes  = top2box_codes,
+      top2box_labels = top2box_labels,
+      titulos_grupo  = titulos_grupo,
       overrides      = overrides,
       base           = base,
       filtros        = filtros
@@ -791,6 +955,7 @@ p_barras_multiapiladas <- function(
     top2box        = isTRUE(top2box),
     top2box_codes  = top2box_codes,
     top2box_labels = top2box_labels,
+    titulos_grupo  = NULL,
     overrides      = overrides,
     base           = base,
     filtros        = filtros
@@ -926,6 +1091,7 @@ p_radar_tabla <- function(
     cruce = NULL,
     box_labels = NULL,
     titulo_tabla = NULL,
+    colores_series = NULL,
     titulo = NULL,
     top_n = NULL,
     sm_omit_codes  = NULL,
@@ -946,11 +1112,37 @@ p_radar_tabla <- function(
   }
 
   if (identical(modo, "box")) {
-    if (!is.character(vars) || length(vars) < 1L) {
-      stop("p_radar_tabla(modo='box'): `vars` debe ser character() con >=1 variable.", call. = FALSE)
+    if (is.character(vars)) {
+      if (length(vars) < 1L) {
+        stop("p_radar_tabla(modo='box'): `vars` debe ser character() con >=1 variable.", call. = FALSE)
+      }
+      vars <- trimws(vars); vars <- vars[nzchar(vars)]
+      if (!length(vars)) stop("p_radar_tabla(modo='box'): `vars` quedó vacío.", call. = FALSE)
+    } else if (is.list(vars)) {
+      if (!length(vars)) {
+        stop("p_radar_tabla(modo='box'): `vars` no puede ser una lista vacía.", call. = FALSE)
+      }
+      if (is.null(names(vars)) || any(!nzchar(trimws(names(vars))))) {
+        stop("p_radar_tabla(modo='box'): cuando `vars` es lista, debe ser una lista nombrada.", call. = FALSE)
+      }
+      names(vars) <- trimws(names(vars))
+      vars <- vars[nzchar(names(vars))]
+      if (!length(vars)) stop("p_radar_tabla(modo='box'): `vars` quedó vacío luego de limpiar.", call. = FALSE)
+
+      vars <- lapply(vars, function(x) {
+        if (!is.character(x) || !length(x)) {
+          stop("p_radar_tabla(modo='box'): cada bloque de `vars` debe ser character() no vacío.", call. = FALSE)
+        }
+        x <- trimws(x)
+        x <- x[nzchar(x)]
+        if (!length(x)) {
+          stop("p_radar_tabla(modo='box'): un bloque de `vars` quedó vacío luego de limpiar.", call. = FALSE)
+        }
+        x
+      })
+    } else {
+      stop("p_radar_tabla(modo='box'): `vars` debe ser character() o lista nombrada.", call. = FALSE)
     }
-    vars <- trimws(vars); vars <- vars[nzchar(vars)]
-    if (!length(vars)) stop("p_radar_tabla(modo='box'): `vars` quedó vacío.", call. = FALSE)
 
     if (!is.null(var)) stop("p_radar_tabla(modo='box'): no usar `var`.", call. = FALSE)
 
@@ -978,6 +1170,11 @@ p_radar_tabla <- function(
 
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+  if (!is.null(colores_series)) {
+    if (!is.atomic(colores_series) || is.null(names(colores_series))) {
+      stop("`colores_series` debe ser NULL o un vector nombrado.", call. = FALSE)
+    }
+  }
   filtros <- .ppt_norm_filters(filtros)
 
   if (is.null(titulo_tabla) || !nzchar(trimws(as.character(titulo_tabla)))) {
@@ -991,6 +1188,7 @@ p_radar_tabla <- function(
     vars            = vars,
     cruce           = cruce,
     box_labels      = box_labels,
+    colores_series  = colores_series,
     sm_omit_codes   = sm_omit_codes,
     sm_omit_labels  = sm_omit_labels,
     sm_omit_na      = sm_omit_na,

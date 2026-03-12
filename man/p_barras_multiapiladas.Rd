@@ -5,8 +5,9 @@
 \title{Barras multi-apiladas (varias variables o 1 variable cruzada)}
 \usage{
 p_barras_multiapiladas(
-  modo = c("var", "cruce"),
+  modo = c("var", "cruce", "var_cruce", "multilista"),
   vars = NULL,
+  bloques = NULL,
   var = NULL,
   titulo = NULL,
   cruces = NULL,
@@ -14,12 +15,19 @@ p_barras_multiapiladas(
   top2box = FALSE,
   top2box_codes = NULL,
   top2box_labels = NULL,
+  titulos_grupo = NULL,
   overrides = list(),
   base = list(),
   filtros = list()
 )
 }
 \arguments{
+\item{bloques}{En \code{modo = "multilista"}, lista de bloques. Cada bloque debe
+ser una lista con al menos \code{modo} (\code{"var"}, \code{"cruce"} o \code{"var_cruce"}),
+y los argumentos necesarios para ese submodo (\code{vars}, \code{var}, \code{cruces},
+\code{titulos_grupo}, etc.). Cada bloque puede incluir opcionalmente
+\code{altura_rel}, \code{overrides}, \code{base} y \code{filtros}.}
+
 \item{filtros}{Lista nombrada de filtros por igualdad/inclusión.}
 }
 \description{
@@ -32,4 +40,11 @@ p_barras_multiapiladas(
   cruces = "region",
   filtros = list(sexo = "Mujer")
 )
+
+En `modo = "var_cruce"`, `vars` también puede ser una lista nombrada de
+bloques. Cada bloque debe contener referencias `fuente$variable` cuando se
+comparan varias bases en un mismo gráfico.
+
+En `modo = "multilista"`, se pueden apilar varios bloques con distintas
+escalas dentro de una sola composición vertical.
 }

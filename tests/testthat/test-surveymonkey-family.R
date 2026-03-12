@@ -25,6 +25,7 @@ test_that("familia surveymonkey_ genera XLSForm de referencia y data compatible"
       "10/29/2025 09:15:55 PM"
     ),
     email_address = c("a@pucp.edu.pe", "b@pucp.edu.pe", "c@pucp.edu.pe"),
+    Sexo = c("Femenino", "Masculino", "Femenino"),
     P1 = haven::labelled(c(1, 2, 1), c("Sí" = 1, "No" = 2)),
     P4_1 = haven::labelled(c(1, 2, 4), likert_labs),
     P4_2 = haven::labelled(c(2, 3, 99), likert_labs),
@@ -40,6 +41,7 @@ test_that("familia surveymonkey_ genera XLSForm de referencia y data compatible"
   )
 
   attr(df$P1, "label") <- "¿Desea continuar?"
+  attr(df$Sexo, "label") <- "Sexo"
   attr(df$P4_1, "label") <- "La misión está claramente definida"
   attr(df$P4_2, "label") <- "Los canales de difusión son adecuados"
   attr(df$P5_1, "label") <- "¿A través de qué medios se informó?"
@@ -63,6 +65,7 @@ test_that("familia surveymonkey_ genera XLSForm de referencia y data compatible"
 
   kinds <- stats::setNames(sm$vars_tbl$kind_guess, sm$vars_tbl$name_raw)
   expect_identical(kinds[["respondent_id"]], "metadata")
+  expect_identical(kinds[["Sexo"]], "select_one")
   expect_identical(kinds[["P1"]], "select_one")
   expect_identical(kinds[["P4_1"]], "battery_item")
   expect_identical(kinds[["P5_1"]], "select_multiple_dummy")
@@ -81,23 +84,33 @@ test_that("familia surveymonkey_ genera XLSForm de referencia y data compatible"
   expect_true(any(grepl("^select_multiple ", inst_ref$survey$type)))
   expect_true(any(inst_ref$survey$section == "survey_monkey_auxiliary"))
   expect_true(any(inst_ref$survey$name == "p6_other"))
+  expect_true(any(inst_ref$survey$name == "sexo"))
+  expect_true(any(inst_ref$survey$type == "select_one lst_sexo"))
   expect_true(is.na(inst_ref$survey$`label::es`[idx_grp_p4]))
   expect_identical(inst_ref$survey$`label::es`[idx_p5_other], "Otro:")
   expect_identical(inst_ref$survey$`label::es`[idx_p6_other], "Otro:")
   expect_true("lst_si_no" %in% inst_ref$choices$list_name)
+  expect_true("lst_sexo" %in% inst_ref$choices$list_name)
   expect_true("lst_acuerdo_4" %in% inst_ref$choices$list_name)
   expect_true("lst_p6" %in% inst_ref$choices$list_name)
   expect_true("lst_p5" %in% inst_ref$choices$list_name)
+  expect_true(all(c("femenino", "masculino") %in% inst_ref$choices$name[inst_ref$choices$list_name == "lst_sexo"]))
   expect_true("99" %in% as.character(inst_ref$choices$name[inst_ref$choices$list_name == "lst_acuerdo_4"]))
 
   rp_inst <- prosecnur::reporte_instrumento(path_xlsx, lang = "es")
   idx_rp_p1 <- which(rp_inst$survey$name == "p1")[1]
+  idx_rp_sexo <- which(rp_inst$survey$name == "sexo")[1]
   idx_rp_p4_1 <- which(rp_inst$survey$name == "p4_1")[1]
   idx_rp_p4_2 <- which(rp_inst$survey$name == "p4_2")[1]
   idx_rp_p6 <- which(rp_inst$survey$name == "p6")[1]
   expect_s3_class(rp_inst, "prosecnur_instrumento")
   expect_true("p5" %in% rp_inst$survey$name)
+  expect_true("sexo" %in% rp_inst$survey$name)
   expect_true("p1" %in% rp_inst$survey$name)
+  expect_identical(
+    rp_inst$survey$list_name[idx_rp_sexo],
+    "lst_sexo"
+  )
   expect_identical(
     rp_inst$survey$list_name[idx_rp_p1],
     "lst_si_no"
@@ -120,6 +133,7 @@ test_that("familia surveymonkey_ genera XLSForm de referencia y data compatible"
   expect_true(all(c(
     "p5", "p5/1", "p5/2", "p5/3", "p5/Other", "p5_other", "p6_other"
   ) %in% names(dat_ref)))
+  expect_equal(dat_ref$sexo, c("femenino", "masculino", "femenino"))
   expect_false(any(c("p5_1", "p5_2", "p5_3", "p5_o", "p6_o") %in% names(dat_ref)))
   expect_equal(dat_ref$p5, c("1", "3", "1 2"))
   expect_equal(as.numeric(dat_ref$p4_2), c(2, 3, 99))
@@ -190,4 +204,45 @@ test_that("familia surveymonkey_ genera XLSForm de referencia y data compatible"
     )
   )
   expect_true("r100_p4_1" %in% names(recod))
+})
+
+test_that("surveymonkey_xlsform reconoce satisfaccion_4 y ordena grupos por sufijo", {
+  path_sav <- tempfile(fileext = ".sav")
+  path_xlsx <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(c(path_sav, path_xlsx)), add = TRUE)
+
+  sat_labs <- c(
+    "Muy insatisfecho" = 1,
+    "Insatisfecho" = 2,
+    "Satisfecho" = 3,
+    "Muy satisfecho" = 4,
+    "SIN INF" = 99
+  )
+
+  df <- data.frame(
+    P8_1 = haven::labelled(c(1, 2), sat_labs),
+    P8_2 = haven::labelled(c(2, 3), sat_labs),
+    P8_6 = haven::labelled(c(3, 4), sat_labs),
+    P8_3 = haven::labelled(c(4, 1), sat_labs),
+    P8_4 = haven::labelled(c(1, 99), sat_labs),
+    P8_5 = haven::labelled(c(2, 3), sat_labs),
+    stringsAsFactors = FALSE
+  )
+
+  attr(df$P8_1, "label") <- "Servicio 1"
+  attr(df$P8_2, "label") <- "Servicio 2"
+  attr(df$P8_6, "label") <- "Servicio 6"
+  attr(df$P8_3, "label") <- "Servicio 3"
+  attr(df$P8_4, "label") <- "Servicio 4"
+  attr(df$P8_5, "label") <- "Servicio 5"
+
+  haven::write_sav(df, path_sav)
+
+  sm <- prosecnur::surveymonkey_leer(path_sav)
+  inst_ref <- prosecnur::surveymonkey_xlsform(sm, path = path_xlsx)
+
+  p8_rows <- inst_ref$survey[grepl("^p8_", inst_ref$survey$name), , drop = FALSE]
+  expect_identical(p8_rows$name, paste0("p8_", 1:6))
+  expect_true(all(p8_rows$type == "select_one lst_satisfaccion_4"))
+  expect_true("lst_satisfaccion_4" %in% inst_ref$choices$list_name)
 })

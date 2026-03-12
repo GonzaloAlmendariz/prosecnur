@@ -416,7 +416,8 @@ graficar_radar <- function(
   # 2) Geometría (x,y)
   # ---------------------------------------------------------------------------
   K <- length(levels(df_plot$.eje))
-  theta0 <- -pi/2
+  # Primer eje en la parte superior del radar.
+  theta0 <- pi/2
 
   angle_tbl <- tibble::tibble(
     .eje = factor(levels(df_plot$.eje), levels = levels(df_plot$.eje)),
@@ -472,12 +473,32 @@ graficar_radar <- function(
   level_lab <- NULL
   if (isTRUE(mostrar_niveles)) level_lab <- tibble::tibble(.nivel = rings, x = rings, y = 0)
 
-  label_ring <- r_lim[2] * eje_label_mult
+  max_label_lines <- max(
+    1L,
+    vapply(
+      strsplit(lab_ejes, "\n", fixed = TRUE),
+      length,
+      integer(1)
+    )
+  )
+  label_ring_mult <- max(eje_label_mult, 1.04 + (max_label_lines - 1L) * 0.04)
+  label_ring_mult <- min(label_ring_mult, 1.16)
+  label_ring <- r_lim[2] * label_ring_mult
   lab_axes <- angle_tbl |>
     dplyr::mutate(
       eje = lab_ejes[.data$.idx],
       x   = label_ring * cos(.data$.ang),
-      y   = label_ring * sin(.data$.ang)
+      y   = label_ring * sin(.data$.ang),
+      hjust = dplyr::case_when(
+        cos(.data$.ang) > 0.25  ~ 0,
+        cos(.data$.ang) < -0.25 ~ 1,
+        TRUE                    ~ 0.5
+      ),
+      vjust = dplyr::case_when(
+        sin(.data$.ang) > 0.55  ~ 1,
+        sin(.data$.ang) < -0.55 ~ 0,
+        TRUE                    ~ 0.5
+      )
     )
 
   # ---------------------------------------------------------------------------
@@ -597,7 +618,13 @@ graficar_radar <- function(
 
   p <- p + ggplot2::geom_text(
     data = lab_axes,
-    ggplot2::aes(x = .data$x, y = .data$y, label = .data$eje),
+    ggplot2::aes(
+      x = .data$x,
+      y = .data$y,
+      label = .data$eje,
+      hjust = .data$hjust,
+      vjust = .data$vjust
+    ),
     size = size_ejes / 3,
     colour = color_ejes,
     fontface = if ("ejes" %in% textos_negrita) "bold" else "plain",
@@ -615,7 +642,7 @@ graficar_radar <- function(
     )
   }
 
-  lim_xy <- r_lim[2] * max(1.28, eje_label_mult * 1.10)
+  lim_xy <- r_lim[2] * max(1.18, label_ring_mult * 1.05)
 
   clip_mode <- if (ppt_safe) "on" else "off"
 
@@ -1113,7 +1140,7 @@ graficar_radar <- function(
         dplyr::filter(is.finite(.data$x), is.finite(.data$y), !is.na(.data$x), !is.na(.data$y))
 
       # 3) límites: incluir labels dentro del viewport
-      lim_xy_ppt <- max(r_lim[2] * 1.25, (r_lim[2] * eje_label_mult) * 1.12)
+      lim_xy_ppt <- max(r_lim[2] * 1.18, (r_lim[2] * label_ring_mult) * 1.06)
 
       fondo_ppt <- if (is.na(color_fondo) || is.null(color_fondo)) "transparent" else color_fondo
 

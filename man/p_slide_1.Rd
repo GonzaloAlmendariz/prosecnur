@@ -4,10 +4,19 @@
 \alias{p_slide_1}
 \title{Slide con 1 gráfico a pantalla completa}
 \usage{
-p_slide_1(title = NULL, plot, base = NULL, footer = NULL, meta = list())
+p_slide_1(
+  title = NULL,
+  subtitle = NULL,
+  plot,
+  base = NULL,
+  footer = NULL,
+  meta = list()
+)
 }
 \arguments{
 \item{title}{Título del slide (opcional).}
+
+\item{subtitle}{Subtítulo opcional alineado bajo el título.}
 
 \item{plot}{Elemento \verb{p_*()} principal (requerido).}
 

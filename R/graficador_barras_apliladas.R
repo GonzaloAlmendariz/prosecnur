@@ -1,3 +1,96 @@
+# internal helpers for top/bottom box presets
+.normalize_box_label <- function(x) {
+  x <- as.character(x %||% "")[1]
+  x <- iconv(x, from = "", to = "ASCII//TRANSLIT")
+  x <- tolower(trimws(x))
+  gsub("[^a-z0-9]+", " ", x)
+}
+
+.extract_special_code <- function(x) {
+  x <- as.character(x %||% "")[1]
+  if (!nzchar(trimws(x))) return(NA_real_)
+  m <- regexec("^\\s*([0-9]{1,3})\\b", x, perl = TRUE)
+  got <- regmatches(x, m)[[1]]
+  if (length(got) < 2L) return(NA_real_)
+  suppressWarnings(as.numeric(got[2]))
+}
+
+.is_special_box_choice <- function(col_name, label) {
+  lab_norm <- .normalize_box_label(label)
+  patterns <- c(
+    "sin inf",
+    "sin informacion",
+    "valor perdido",
+    "missing",
+    "no sabe",
+    "no contesta",
+    "no responde",
+    "ns nc",
+    "ns nr",
+    "no sabe no contesta",
+    "no sabe no responde"
+  )
+  has_special_label <- any(vapply(patterns, grepl, logical(1), x = lab_norm, fixed = TRUE))
+  code_candidates <- c(.extract_special_code(label), .extract_special_code(col_name))
+  has_special_code <- any(is.finite(code_candidates) & code_candidates > 60)
+  has_special_label || has_special_code
+}
+
+.default_box_cols <- function(cols_porcentaje,
+                              etiquetas_grupos,
+                              n = 2L,
+                              side = c("top", "bottom")) {
+  side <- match.arg(side)
+  n <- suppressWarnings(as.integer(n)[1])
+  if (!is.finite(n) || is.na(n) || n < 1L) n <- 1L
+
+  labels_map <- etiquetas_grupos[cols_porcentaje]
+  labels_map <- as.character(labels_map)
+  if (!length(labels_map)) labels_map <- rep("", length(cols_porcentaje))
+  labels_map[is.na(labels_map)] <- ""
+
+  keep <- !vapply(seq_along(cols_porcentaje), function(i) {
+    .is_special_box_choice(cols_porcentaje[i], labels_map[i])
+  }, logical(1))
+
+  eligible <- cols_porcentaje[keep]
+  if (!length(eligible)) eligible <- cols_porcentaje
+
+  if (side == "top") {
+    tail(eligible, min(n, length(eligible)))
+  } else {
+    head(eligible, min(n, length(eligible)))
+  }
+}
+
+.auto_bar_width_apiladas <- function(n_categorias,
+                                     grosor_barras_mult = 1,
+                                     usar_grupos_canvas = TRUE) {
+  n_eff <- suppressWarnings(as.numeric(n_categorias)[1])
+  if (!is.finite(n_eff) || is.na(n_eff) || n_eff <= 0) n_eff <- 1
+
+  mult_eff <- suppressWarnings(as.numeric(grosor_barras_mult)[1])
+  if (!is.finite(mult_eff) || is.na(mult_eff) || mult_eff <= 0) mult_eff <- 1
+
+  # Calibracion suave, anclada a uso en PPT:
+  # - pocas categorias: barras claramente visibles, sin quedar enclenques
+  # - muchas categorias: sostener grosor para que no se afinen demasiado
+  base <- stats::approx(
+    x = c(1, 3, 5, 9, 12, 20),
+    y = c(0.64, 0.70, 0.71, 0.72, 0.74, 0.78),
+    xout = n_eff,
+    rule = 2
+  )$y
+
+  if (!isTRUE(usar_grupos_canvas)) {
+    # En barras sin columna de grupos, el mismo width se percibe mas grueso.
+    # Compensamos suavemente para acercar el look al modo multi-fuente.
+    base <- base * 0.88
+  }
+
+  max(0.40, min(0.85, base * mult_eff))
+}
+
 #' Graficar barras apiladas (100%) con canvas opcional y exportación
 #'
 #' Construye un gráfico de **barras apiladas horizontales** normalizadas a 100% por categoría.
@@ -21,6 +114,7 @@
 #'
 #' @param data `data.frame` o `tibble` en formato ancho con columnas de categorías, base y porcentajes.
 #' @param var_categoria Nombre de la columna categórica (eje Y).
+#' @param var_etiqueta_categoria Columna opcional con la etiqueta visible de cada categoría.
 #' @param var_n Nombre de la columna base (por ejemplo, N por categoría).
 #' @param cols_porcentaje Vector con los nombres de columnas de porcentajes (segmentos apilados).
 #' @param etiquetas_grupos Vector nombrado que mapea `cols_porcentaje` → etiqueta visible de cada segmento.
@@ -51,6 +145,7 @@
 #' @param color_texto_barras,size_texto_barras,size_texto_barras_peq Estilos de etiquetas internas.
 #' @param color_barra_extra,size_barra_extra,size_titulo_extra Estilos de la columna extra.
 #' @param color_ejes,size_ejes Estilos de las etiquetas de categorías (dibujadas en canvas).
+#' @param color_titulos_grupo,size_titulos_grupo Estilos para títulos de bloque izquierdo en canvas.
 #' @param color_fondo Color de fondo (útil en exportación).
 #'
 #' @param grosor_barras Grosor manual de barras en `geom_col()`.
@@ -63,9 +158,14 @@
 #' @param invertir_barras Si `TRUE`, invierte el orden de categorías.
 #' @param invertir_segmentos Si `TRUE`, invierte el orden del stack (segmentos).
 #' @param textos_negrita Vector con tokens para forzar negrita por componente (por ejemplo,
-#'   `"titulo"`, `"leyenda"`, `"porcentajes"`, `"eje_y"`, `"barra_extra"`).
+#'   `"titulo"`, `"leyenda"`, `"porcentajes"`/`"valores"`, `"eje_y"`, `"barra_extra"`).
 #'
 #' @param usar_canvas Si `TRUE`, arma el gráfico con `cowplot` en placeholders internos.
+#' @param var_grupo_id,var_grupo_titulo Columnas opcionales para agrupar categorías en bloques
+#'   y dibujar un título por bloque en el canvas.
+#' @param canvas_w_grupo,canvas_w_buf_grupo_etq Ancho relativo de la columna de bloque y su
+#'   separación respecto a las etiquetas del cruce.
+#' @param canvas_gap_grupos Separación vertical adicional entre bloques, expresada en “altos de fila”.
 #' @param canvas_w_etiquetas,canvas_w_buf_etq_bars,canvas_w_buf_bars_extra,canvas_w_bars,canvas_w_extra
 #'   Anchos relativos de columnas del canvas (etiquetas, buffers, panel, extra).
 #' @param canvas_h_header_in,canvas_h_legend_in,canvas_h_caption_in,canvas_h_panel_in,canvas_h_toprow_in
@@ -115,6 +215,7 @@
 graficar_barras_apiladas <- function(
     data,
     var_categoria,
+    var_etiqueta_categoria = NULL,
     var_n,
     cols_porcentaje,
     etiquetas_grupos,
@@ -153,6 +254,8 @@ graficar_barras_apiladas <- function(
     size_titulo_extra     = 3,
     color_ejes            = "#000000",
     size_ejes             = 9,
+    color_titulos_grupo   = NULL,
+    size_titulos_grupo    = NULL,
     color_fondo           = NA,
 
     grosor_barras         = 0.7,
@@ -177,6 +280,11 @@ graficar_barras_apiladas <- function(
     # CANVAS CONTROLADO
     # ==========================
     usar_canvas           = FALSE,
+    var_grupo_id          = NULL,
+    var_grupo_titulo      = NULL,
+    canvas_w_grupo        = 0,
+    canvas_w_buf_grupo_etq= 0,
+    canvas_gap_grupos     = 0,
 
     canvas_w_etiquetas      = 0.38,
     canvas_w_buf_etq_bars   = 0.00,
@@ -260,12 +368,17 @@ graficar_barras_apiladas <- function(
   hjust_caption <- hjust_from_pos(pos_nota_pie)
 
   textos_negrita <- textos_negrita %||% character(0)
+  if ("valores" %in% textos_negrita && !("porcentajes" %in% textos_negrita)) {
+    textos_negrita <- c(textos_negrita, "porcentajes")
+  }
 
   pulso_azul  <- "#002768"
   pulso_verde <- "#5BAF31"
 
   # validaciones
   if (!var_categoria %in% names(data)) stop("`var_categoria` no existe en `data`.", call. = FALSE)
+  if (is.null(var_etiqueta_categoria)) var_etiqueta_categoria <- var_categoria
+  if (!var_etiqueta_categoria %in% names(data)) stop("`var_etiqueta_categoria` no existe en `data`.", call. = FALSE)
   if (!var_n %in% names(data))         stop("`var_n` no existe en `data`.", call. = FALSE)
   if (!all(cols_porcentaje %in% names(data))) {
     faltan <- cols_porcentaje[!cols_porcentaje %in% names(data)]
@@ -274,8 +387,36 @@ graficar_barras_apiladas <- function(
   if (!all(names(etiquetas_grupos) %in% cols_porcentaje)) {
     stop("Los names de `etiquetas_grupos` deben coincidir con `cols_porcentaje`.", call. = FALSE)
   }
+  usar_grupos_canvas <- isTRUE(usar_canvas) &&
+    is.character(var_grupo_id) && length(var_grupo_id) == 1L && nzchar(trimws(var_grupo_id))
+  if (usar_grupos_canvas) {
+    var_grupo_id <- trimws(var_grupo_id)
+    if (!var_grupo_id %in% names(data)) stop("`var_grupo_id` no existe en `data`.", call. = FALSE)
+    if (!is.character(var_grupo_titulo) || length(var_grupo_titulo) != 1L || !nzchar(trimws(var_grupo_titulo))) {
+      stop("`var_grupo_titulo` debe ser character(1) no vacío cuando se usa `var_grupo_id`.", call. = FALSE)
+    }
+    var_grupo_titulo <- trimws(var_grupo_titulo)
+    if (!var_grupo_titulo %in% names(data)) stop("`var_grupo_titulo` no existe en `data`.", call. = FALSE)
+  } else {
+    var_grupo_id     <- NULL
+    var_grupo_titulo <- NULL
+  }
+  color_titulos_grupo <- color_titulos_grupo %||% color_ejes
+  size_titulos_grupo  <- size_titulos_grupo  %||% size_ejes
 
   df <- data
+  cat_map <- df |>
+    dplyr::mutate(
+      .cat_id    = as.character(.data[[var_categoria]]),
+      .cat_label = as.character(.data[[var_etiqueta_categoria]])
+    ) |>
+    dplyr::mutate(
+      .cat_label = ifelse(is.na(.data$.cat_label), "", .data$.cat_label),
+      .group_id = if (!is.null(var_grupo_id)) as.character(.data[[var_grupo_id]]) else NA_character_,
+      .group_title = if (!is.null(var_grupo_titulo)) as.character(.data[[var_grupo_titulo]]) else NA_character_
+    ) |>
+    dplyr::select(".cat_id", ".cat_label", ".group_id", ".group_title") |>
+    dplyr::distinct(.data$.cat_id, .keep_all = TRUE)
 
   # ---------------------------------------------------------------------------
   # 1) Ancho -> Largo
@@ -340,21 +481,52 @@ graficar_barras_apiladas <- function(
   # ---------------------------------------------------------------------------
   # 1.1) ORDEN MASTER de categorías (FIJO)
   # ---------------------------------------------------------------------------
-  cat_chr  <- as.character(df_long[[var_categoria]])
-  cat_lvls <- unique(cat_chr)
+  cat_lvls <- unique(as.character(cat_map$.cat_id))
   if (invertir_barras) cat_lvls <- rev(cat_lvls)
 
-  df_long[[var_categoria]] <- factor(cat_chr, levels = cat_lvls)
+  cat_layout <- cat_map[match(cat_lvls, cat_map$.cat_id), , drop = FALSE]
+  rownames(cat_layout) <- NULL
   n_categorias <- length(cat_lvls)
+  plot_cat_lvls <- cat_lvls
+
+  usar_y_numerico <- isTRUE(usar_canvas) && isTRUE(usar_grupos_canvas)
+  if (usar_y_numerico) {
+    gap_grupos_eff <- suppressWarnings(as.numeric(canvas_gap_grupos))
+    if (!is.finite(gap_grupos_eff) || is.na(gap_grupos_eff) || gap_grupos_eff < 0) gap_grupos_eff <- 0
+
+    y_from_top <- numeric(n_categorias)
+    offset_top <- 0
+    for (i in seq_len(n_categorias)) {
+      y_from_top[i] <- offset_top
+      offset_top <- offset_top + 1
+      if (i < n_categorias) {
+        grp_i <- cat_layout$.group_id[i] %||% ""
+        grp_n <- cat_layout$.group_id[i + 1] %||% ""
+        if (!identical(grp_i, grp_n)) offset_top <- offset_top + gap_grupos_eff
+      }
+    }
+    max_from_top <- if (length(y_from_top)) max(y_from_top) else 0
+    cat_layout$.y_plot <- (max_from_top - y_from_top) + 1
+    df_long$.y_plot <- cat_layout$.y_plot[match(as.character(df_long[[var_categoria]]), cat_layout$.cat_id)]
+  } else {
+    cat_chr  <- as.character(df_long[[var_categoria]])
+    # En ejes discretos, ggplot dibuja el ultimo nivel arriba. Invertimos los
+    # levels de ploteo para que el primer elemento de `cat_lvls` quede arriba,
+    # igual que en el modo con y numerico (grupos canvas).
+    plot_cat_lvls <- rev(cat_lvls)
+    df_long[[var_categoria]] <- factor(cat_chr, levels = plot_cat_lvls)
+    cat_layout$.y_plot <- match(cat_layout$.cat_id, plot_cat_lvls)
+  }
 
   # ---------------------------------------------------------------------------
   # 1.5) Grosor de barras
   # ---------------------------------------------------------------------------
   if (grosor_modo == "auto") {
-    base <- 0.78
-    adj  <- if (n_categorias <= 2) 1.00 else if (n_categorias <= 5) 0.92 else if (n_categorias <= 10) 0.85 else 0.78
-    grosor_eff <- base * adj * grosor_barras_mult
-    grosor_eff <- max(0.20, min(0.95, grosor_eff))
+    grosor_eff <- .auto_bar_width_apiladas(
+      n_categorias = n_categorias,
+      grosor_barras_mult = grosor_barras_mult,
+      usar_grupos_canvas = usar_grupos_canvas
+    )
   } else {
     grosor_eff <- grosor_barras
   }
@@ -375,16 +547,26 @@ graficar_barras_apiladas <- function(
     df_long,
     ggplot2::aes(
       x    = .data$.valor_plot,
-      y    = .data[[var_categoria]],
+      y    = if (usar_y_numerico) .data$.y_plot else .data[[var_categoria]],
       fill = .data$.grupo
     )
   ) +
-    ggplot2::geom_col(width = grosor_eff) +
+    ggplot2::geom_col(width = grosor_eff, orientation = "y") +
     ggplot2::scale_x_continuous(expand = expand_x) +
-    ggplot2::scale_y_discrete(
-      limits = cat_lvls, drop = FALSE,
-      expand = ggplot2::expansion(mult = c(0, 0), add = c(0, 0))
-    ) +
+    {
+      if (usar_y_numerico) {
+        ggplot2::scale_y_continuous(
+          breaks = cat_layout$.y_plot,
+          labels = rep("", n_categorias),
+          expand = ggplot2::expansion(mult = c(0, 0), add = c(0.5, 0.5))
+        )
+      } else {
+        ggplot2::scale_y_discrete(
+          limits = plot_cat_lvls, drop = FALSE,
+          expand = ggplot2::expansion(mult = c(0, 0), add = c(0, 0))
+        )
+      }
+    } +
     ggplot2::coord_cartesian(
       xlim = c(0, x_max_bars),
       clip = if (usar_canvas) "on" else "off"
@@ -469,7 +651,11 @@ graficar_barras_apiladas <- function(
       p_bars <- p_bars +
         ggplot2::geom_text(
           data    = df_lab_grande,
-          mapping = ggplot2::aes(x = x_center, y = .data[[var_categoria]], label = lab),
+          mapping = ggplot2::aes(
+            x = x_center,
+            y = if (usar_y_numerico) .data$.y_plot else .data[[var_categoria]],
+            label = lab
+          ),
           color   = color_texto_barras,
           size    = size_texto_barras,
           fontface = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
@@ -480,7 +666,11 @@ graficar_barras_apiladas <- function(
       p_bars <- p_bars +
         ggplot2::geom_text(
           data    = df_lab_peq,
-          mapping = ggplot2::aes(x = x_center, y = .data[[var_categoria]], label = lab),
+          mapping = ggplot2::aes(
+            x = x_center,
+            y = if (usar_y_numerico) .data$.y_plot else .data[[var_categoria]],
+            label = lab
+          ),
           color   = color_texto_barras,
           size    = size_texto_barras_peq,
           fontface = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
@@ -546,7 +736,7 @@ graficar_barras_apiladas <- function(
   # ---------------------------------------------------------------------------
   # 5) Etiquetas Y y extra como texto (sin ggplot)
   # ---------------------------------------------------------------------------
-  etiquetas_vec <- cat_lvls
+  etiquetas_vec <- cat_layout$.cat_label
   if (!is.null(ancho_max_eje_y)) {
     if (!requireNamespace("stringr", quietly = TRUE)) stop("Para `ancho_max_eje_y` se requiere stringr.", call. = FALSE)
     etiquetas_vec <- stringr::str_wrap(etiquetas_vec, width = ancho_max_eje_y)
@@ -581,15 +771,21 @@ graficar_barras_apiladas <- function(
         unique(hit)
       }
 
-      # defaults (si no se indican labels): asume cols_porcentaje en orden ordinal
-      .default_top2    <- function(cols_porcentaje)  tail(cols_porcentaje, 2)
-      .default_top3    <- function(cols_porcentaje)  tail(cols_porcentaje, 3)
-      .default_bottom2 <- function(cols_porcentaje)  head(cols_porcentaje, 2)
+      # defaults: prioriza categorías sustantivas y excluye especiales
+      .default_top2 <- function(cols_porcentaje, etiquetas_grupos) {
+        .default_box_cols(cols_porcentaje, etiquetas_grupos, n = 2L, side = "top")
+      }
+      .default_top3 <- function(cols_porcentaje, etiquetas_grupos) {
+        .default_box_cols(cols_porcentaje, etiquetas_grupos, n = 3L, side = "top")
+      }
+      .default_bottom2 <- function(cols_porcentaje, etiquetas_grupos) {
+        .default_box_cols(cols_porcentaje, etiquetas_grupos, n = 2L, side = "bottom")
+      }
 
       if (barra_extra_preset == "top2box") {
 
         cols_sel <- .cols_from_labels(top2box_labels, etiquetas_grupos, cols_porcentaje)
-        if (!length(cols_sel)) cols_sel <- .default_top2(cols_porcentaje)
+        if (!length(cols_sel)) cols_sel <- .default_top2(cols_porcentaje, etiquetas_grupos)
 
         df_wide_extra$valor_extra <- rowSums(as.matrix(base_mat[, cols_sel, drop = FALSE]), na.rm = TRUE)
         if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) titulo_extra_int <- "TOP TWO BOX"
@@ -597,7 +793,7 @@ graficar_barras_apiladas <- function(
       } else if (barra_extra_preset == "top3box") {
 
         cols_sel <- .cols_from_labels(top3box_labels, etiquetas_grupos, cols_porcentaje)
-        if (!length(cols_sel)) cols_sel <- .default_top3(cols_porcentaje)
+        if (!length(cols_sel)) cols_sel <- .default_top3(cols_porcentaje, etiquetas_grupos)
 
         df_wide_extra$valor_extra <- rowSums(as.matrix(base_mat[, cols_sel, drop = FALSE]), na.rm = TRUE)
         if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) titulo_extra_int <- "TOP THREE BOX"
@@ -605,7 +801,7 @@ graficar_barras_apiladas <- function(
       } else if (barra_extra_preset == "bottom2box") {
 
         cols_sel <- .cols_from_labels(bottom2box_labels, etiquetas_grupos, cols_porcentaje)
-        if (!length(cols_sel)) cols_sel <- .default_bottom2(cols_porcentaje)
+        if (!length(cols_sel)) cols_sel <- .default_bottom2(cols_porcentaje, etiquetas_grupos)
 
         df_wide_extra$valor_extra <- rowSums(as.matrix(base_mat[, cols_sel, drop = FALSE]), na.rm = TRUE)
         if (is.null(titulo_barra_extra) || !nzchar(titulo_barra_extra)) titulo_extra_int <- "BOTTOM TWO BOX"
@@ -733,10 +929,11 @@ graficar_barras_apiladas <- function(
 
   # alturas en pulgadas
   alto_por_cat_eff <- alto_por_categoria %||% 0.42
+  n_filas_virtuales <- if (usar_y_numerico) max(cat_layout$.y_plot, na.rm = TRUE) else max(1L, n_categorias)
   h_panel_in <- if (!is.null(canvas_h_panel_in) && is.finite(canvas_h_panel_in) && canvas_h_panel_in > 0) {
     canvas_h_panel_in
   } else {
-    max(1L, n_categorias) * alto_por_cat_eff
+    n_filas_virtuales * alto_por_cat_eff
   }
 
   has_header  <- (!is.null(titulo) && nzchar(titulo)) || (!is.null(subtitulo) && nzchar(subtitulo))
@@ -760,23 +957,29 @@ graficar_barras_apiladas <- function(
   y_legend0  <- y_panel0  - legend_h
   y_caption0 <- y_legend0 - caption_h
 
-  # widths (5 columnas) — placeholders independientes
+  # widths (6 columnas efectivas) — grupo + etiquetas + buffers + barras + extra
+  w_group <- if (usar_grupos_canvas) canvas_w_grupo else 0
+  w_buf0  <- if (usar_grupos_canvas) canvas_w_buf_grupo_etq else 0
   w_etq   <- canvas_w_etiquetas
   w_buf1  <- canvas_w_buf_etq_bars
   w_bars  <- canvas_w_bars
   w_buf2  <- canvas_w_buf_bars_extra
   w_extra <- canvas_w_extra
 
-  w_sum <- w_etq + w_buf1 + w_bars + w_buf2 + w_extra
+  w_sum <- w_group + w_buf0 + w_etq + w_buf1 + w_bars + w_buf2 + w_extra
   if (!is.finite(w_sum) || w_sum <= 0) w_sum <- 1
 
+  w_group <- w_group / w_sum
+  w_buf0  <- w_buf0  / w_sum
   w_etq   <- w_etq   / w_sum
   w_buf1  <- w_buf1  / w_sum
   w_bars  <- w_bars  / w_sum
   w_buf2  <- w_buf2  / w_sum
   w_extra <- w_extra / w_sum
 
-  x_etq0   <- 0
+  x_group0 <- 0
+  x_buf00  <- x_group0 + w_group
+  x_etq0   <- x_buf00 + w_buf0
   x_buf10  <- x_etq0 + w_etq
   x_bars0  <- x_buf10 + w_buf1
   x_buf20  <- x_bars0 + w_bars
@@ -861,6 +1064,7 @@ graficar_barras_apiladas <- function(
 
     if (debug_ph_bordes) {
       canvas <- canvas +
+        .ph_border(x_group0, y_top0, w_group, top_h) +
         .ph_border(x_etq0,   y_top0, w_etq,   top_h) +
         .ph_border(x_bars0,  y_top0, w_bars,  top_h) +
         .ph_border(x_extra0, y_top0, w_extra, top_h)
@@ -922,23 +1126,21 @@ graficar_barras_apiladas <- function(
 
   if (!is.numeric(y_rng) || length(y_rng) != 2 || any(!is.finite(y_rng))) {
     # fallback ultra seguro
-    y_rng <- c(0.5, n_categorias + 0.5)
+    y_rng <- c(0.5, max(cat_layout$.y_plot, na.rm = TRUE) + 0.5)
   }
 
-  # centros teóricos en coords del panel discreto: 1..n
-  y_centros <- seq_len(n_categorias)
-
-  # normalizar a [0,1] con el rango real del panel
   den <- diff(y_rng); if (!is.finite(den) || den <= 0) den <- 1
-  y_npc <- (y_centros - y_rng[1]) / den
+  if (usar_y_numerico) {
+    y_npc <- (cat_layout$.y_plot - y_rng[1]) / den
+  } else {
+    y_centros <- cat_layout$.y_plot
+    y_npc <- (y_centros - y_rng[1]) / den
+  }
   y_npc <- pmax(0, pmin(1, y_npc))
-
-  # OJO: por defecto ggplot pone el 1 ABAJO en eje Y.
-  # Si tu gráfico muestra "Total" ARRIBA (como en tu imagen), invierte:
-  y_npc <- rev(y_npc)
 
   # llevar a coordenadas absolutas del canvas (área útil)
   y_abs <- y_bars_area0 + y_npc * h_bars_area
+  cat_layout$.y_abs <- y_abs
 
   # debug: bordes del PH total + pads + área útil
   if (debug_ph_bordes) {
@@ -948,6 +1150,35 @@ graficar_barras_apiladas <- function(
       .ph_border(x_bars0, y_padtop0,    w_bars, h_padtop) +
       .ph_border(x_bars0, y_bars_area0, w_bars, h_bars_area) +
       .ph_border(x_bars0, y_padbot0,    w_bars, h_padbot)
+  }
+
+  if (usar_grupos_canvas && w_group > 0) {
+    group_df <- cat_layout |>
+      dplyr::filter(!is.na(.data$.group_id) & nzchar(trimws(.data$.group_id))) |>
+      dplyr::group_by(.data$.group_id) |>
+      dplyr::summarise(
+        .group_title = dplyr::first(.data$.group_title),
+        y_min = min(.data$.y_abs, na.rm = TRUE),
+        y_max = max(.data$.y_abs, na.rm = TRUE),
+        .groups = "drop"
+      )
+
+    x_group_txt <- x_group0 + (w_group * 0.5)
+    for (i in seq_len(nrow(group_df))) {
+      title_i <- as.character(group_df$.group_title[i])
+      if (is.na(title_i)) title_i <- ""
+      if (!nzchar(trimws(title_i))) next
+      canvas <- canvas + cowplot::draw_text(
+        text     = title_i,
+        x        = x_group_txt,
+        y        = mean(c(group_df$y_min[i], group_df$y_max[i])),
+        hjust    = 0.5,
+        vjust    = 0.5,
+        size     = size_titulos_grupo,
+        colour   = color_titulos_grupo,
+        fontface = "bold"
+      )
+    }
   }
 
   # Etiquetas (columna izquierda)
@@ -987,6 +1218,8 @@ graficar_barras_apiladas <- function(
 
   if (debug_ph_bordes) {
     canvas <- canvas +
+      .ph_border(x_group0, y_main0, w_group, main_h) +
+      .ph_border(x_buf00,  y_main0, w_buf0,  main_h) +
       .ph_border(x_etq0,   y_main0, w_etq,   main_h) +
       .ph_border(x_buf10,  y_main0, w_buf1,  main_h) +
       .ph_border(x_buf20,  y_main0, w_buf2,  main_h) +

@@ -11,6 +11,7 @@ p_radar_tabla(
   cruce = NULL,
   box_labels = NULL,
   titulo_tabla = NULL,
+  colores_series = NULL,
   titulo = NULL,
   top_n = NULL,
   sm_omit_codes = NULL,

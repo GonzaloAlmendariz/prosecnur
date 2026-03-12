@@ -19,9 +19,16 @@
 #' 2) Definir `diapo_001 <- p_slide_*(...)`, `diapo_002 <- ...` (uno o varios chunks).
 #' 3) Llamar a `reporte_ppt_plan(presets = presets, ...)` para recolectar y exportar.
 #'
-#' @param data `data.frame` o `tibble` con las variables (o dummies) a reportar.
+#' Cuando `data` e `instrumento` son listas nombradas, los elementos `p_*()` pueden
+#' referenciar variables con la sintaxis `fuente$variable`, por ejemplo
+#' `"estudiantes$p6_1"` o `"docentes$p4_1"`.
+#'
+#' @param data `data.frame`/`tibble` con las variables (o dummies) a reportar, o
+#'   una lista nombrada de bases cuando el plan combina varias fuentes.
 #' @param instrumento Objeto de instrumento con al menos `survey` (y opcionalmente `choices`,
-#'   `orders_list`). Si es `NULL`, se busca el atributo `instrumento_reporte` en `data`.
+#'   `orders_list`), o una lista nombrada de instrumentos alineada con `data`.
+#'   Si es `NULL`, se busca el atributo `instrumento_reporte` en `data` cuando
+#'   hay una sola fuente.
 #' @param path_ppt Ruta del `.pptx` de salida.
 #'
 #' @param presets Lista de presets por tipo de gráfico. El contrato esperado es
@@ -71,26 +78,76 @@ reporte_ppt_plan <- function(
   # -----------------------
   # 0) Validaciones mínimas
   # -----------------------
-  if (!is.data.frame(data)) stop("`data` debe ser un data.frame o tibble.", call. = FALSE)
-
   if (!requireNamespace("officer", quietly = TRUE) ||
       !requireNamespace("rvg", quietly = TRUE)) {
     stop("Se requieren los paquetes 'officer' y 'rvg'.", call. = FALSE)
   }
 
+  .is_data_sources <- function(x) {
+    is.list(x) && !is.data.frame(x) && length(x) > 0L &&
+      all(vapply(x, is.data.frame, logical(1)))
+  }
+
+  .is_inst_sources <- function(x) {
+    is.list(x) && !is.data.frame(x) && length(x) > 0L &&
+      all(vapply(x, function(z) is.list(z) && !is.null(z$survey), logical(1)))
+  }
+
+  .normalize_named_sources <- function(x, arg_name) {
+    nms <- names(x)
+    if (is.null(nms) || any(!nzchar(trimws(nms)))) {
+      stop("`", arg_name, "` debe ser una lista nombrada cuando contiene varias fuentes.", call. = FALSE)
+    }
+    names(x) <- trimws(nms)
+    x
+  }
+
+  if (!is.data.frame(data) && !.is_data_sources(data)) {
+    stop("`data` debe ser un data.frame/tibble o una lista nombrada de data.frames.", call. = FALSE)
+  }
+
+  data_sources <- if (is.data.frame(data)) {
+    list(default = data)
+  } else {
+    .normalize_named_sources(data, "data")
+  }
+
   if (is.null(instrumento)) {
-    instrumento <- attr(data, "instrumento_reporte", exact = TRUE)
+    if (length(data_sources) != 1L) {
+      stop("Cuando `data` contiene varias fuentes, `instrumento` debe proveerse explícitamente como lista nombrada.", call. = FALSE)
+    }
+    instrumento <- attr(data_sources[[1]], "instrumento_reporte", exact = TRUE)
     if (is.null(instrumento)) {
       stop("No se proporcionó `instrumento` y `data` no tiene atributo `instrumento_reporte`.", call. = FALSE)
     }
   }
 
-  survey      <- instrumento$survey %||% NULL
-  choices     <- instrumento$choices %||% NULL
-  orders_list <- instrumento$orders_list %||% NULL
+  instrument_sources <- if (.is_inst_sources(instrumento)) {
+    .normalize_named_sources(instrumento, "instrumento")
+  } else if (is.list(instrumento) && !is.null(instrumento$survey)) {
+    stats::setNames(list(instrumento), names(data_sources)[1])
+  } else {
+    stop("`instrumento` debe ser un objeto con `$survey` o una lista nombrada de instrumentos.", call. = FALSE)
+  }
 
-  if (is.null(survey) || !"name" %in% names(survey)) {
-    stop("`instrumento$survey` debe existir y contener al menos la columna `name`.", call. = FALSE)
+  missing_inst <- setdiff(names(data_sources), names(instrument_sources))
+  if (length(missing_inst)) {
+    stop(
+      "`instrumento` no contiene definición para estas fuentes de `data`: ",
+      paste(missing_inst, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  default_source <- if (length(data_sources) == 1L) names(data_sources)[1] else NA_character_
+  if (!is.na(default_source)) {
+    survey      <- instrument_sources[[default_source]]$survey %||% NULL
+    choices     <- instrument_sources[[default_source]]$choices %||% NULL
+    orders_list <- instrument_sources[[default_source]]$orders_list %||% NULL
+  } else {
+    survey <- NULL
+    choices <- NULL
+    orders_list <- NULL
   }
 
   # -----------------------
@@ -405,37 +462,253 @@ reporte_ppt_plan <- function(
     fl
   }
 
-  .list_name_of_var <- function(var) {
-    if ("list_name" %in% names(survey)) {
-      idx <- !is.na(survey$name) & survey$name == var
-      x <- survey$list_name[idx]
+  .pretty_source_label <- function(source) {
+    source <- as.character(source %||% "")[1]
+    source <- gsub("_+", " ", trimws(source))
+    if (!nzchar(source)) return(source)
+    tools::toTitleCase(source)
+  }
+
+  .parse_ref_parts <- function(ref) {
+    ref <- as.character(ref %||% NA_character_)[1]
+    if (is.na(ref) || !nzchar(trimws(ref))) {
+      return(list(source = NA_character_, var = NA_character_, qualified = FALSE, raw = ref))
+    }
+    ref <- trimws(ref)
+    m <- regexec("^([^$]+)\\$(.+)$", ref, perl = TRUE)
+    got <- regmatches(ref, m)[[1]]
+    if (length(got) == 3L) {
+      return(list(
+        source = trimws(got[2]),
+        var = trimws(got[3]),
+        qualified = TRUE,
+        raw = ref
+      ))
+    }
+    list(source = NA_character_, var = ref, qualified = FALSE, raw = ref)
+  }
+
+  .resolve_source_name <- function(source = NULL, ref = NULL, arg_name = "var") {
+    ref_info <- .parse_ref_parts(ref)
+    candidates <- c(source, ref_info$source, default_source)
+    candidates <- as.character(candidates)
+    candidates <- candidates[!is.na(candidates)]
+    candidates <- trimws(candidates)
+    candidates <- candidates[nzchar(candidates)]
+    src <- if (length(candidates)) candidates[1] else NA_character_
+
+    if (is.na(src) || !nzchar(trimws(src))) {
+      stop(
+        "La referencia de `", arg_name, "` requiere prefijo `fuente$` porque `data` contiene varias fuentes.",
+        call. = FALSE
+      )
+    }
+    src <- trimws(src)
+
+    if (!src %in% names(data_sources)) {
+      stop("La fuente `", src, "` no existe en `data`.", call. = FALSE)
+    }
+    if (!src %in% names(instrument_sources)) {
+      stop("La fuente `", src, "` no existe en `instrumento`.", call. = FALSE)
+    }
+
+    src
+  }
+
+  .source_ctx <- function(source) {
+    src <- .resolve_source_name(source = source, ref = NULL, arg_name = "source")
+    inst <- instrument_sources[[src]]
+    surv <- inst$survey %||% NULL
+    if (is.null(surv) || !"name" %in% names(surv)) {
+      stop("`instrumento[['", src, "']]$survey` debe existir y contener al menos la columna `name`.", call. = FALSE)
+    }
+    list(
+      source = src,
+      data = data_sources[[src]],
+      instrumento = inst,
+      survey = surv,
+      choices = inst$choices %||% inst$choices_raw %||% NULL,
+      orders_list = inst$orders_list %||% NULL
+    )
+  }
+
+  .resolve_ref <- function(ref, source = NULL, arg_name = "var") {
+    ref_info <- .parse_ref_parts(ref)
+    if (is.na(ref_info$var) || !nzchar(ref_info$var)) {
+      stop("`", arg_name, "` debe ser character(1) no vacío.", call. = FALSE)
+    }
+    ctx <- .source_ctx(.resolve_source_name(source = source, ref = ref, arg_name = arg_name))
+    ctx$var <- ref_info$var
+    ctx$qualified <- isTRUE(ref_info$qualified)
+    ctx$raw_ref <- ref_info$raw
+    ctx
+  }
+
+  .extract_ref_values <- function(x) {
+    if (is.null(x)) return(character(0))
+    if (is.character(x)) return(x)
+    if (is.list(x)) {
+      return(unlist(lapply(x, .extract_ref_values), use.names = FALSE))
+    }
+    character(0)
+  }
+
+  .element_var_label <- function(el) {
+    if (!inherits(el, "ppt_element")) return(NA_character_)
+    ref <- el$var %||% el$vars %||% NULL
+    out <- .fmt_vars(ref)
+    if (identical(out, "<sin vars>")) NA_character_ else out
+  }
+
+  .named_lookup <- function(x, key, default = NULL) {
+    key <- as.character(key %||% NA_character_)[1]
+    if (is.null(x) || is.na(key) || !nzchar(trimws(key))) return(default)
+    nms <- names(x)
+    if (is.null(nms)) return(default)
+    nms <- trimws(as.character(nms))
+    idx <- which(nms == trimws(key))
+    if (!length(idx)) return(default)
+    x[[idx[1]]]
+  }
+
+  .single_source_for_refs <- function(refs,
+                                      source = NULL,
+                                      arg_name = "var") {
+    refs <- .extract_ref_values(refs)
+    if (!length(refs)) {
+      return(.resolve_source_name(source = source, ref = NULL, arg_name = arg_name))
+    }
+    srcs <- unique(vapply(refs, function(ref) {
+      .resolve_ref(ref, source = source, arg_name = arg_name)$source
+    }, character(1)))
+    if (length(srcs) != 1L) {
+      stop("Las referencias de `", arg_name, "` deben pertenecer a una sola fuente en este gráfico.", call. = FALSE)
+    }
+    srcs[1]
+  }
+
+  .element_source <- function(el, allow_multi = FALSE) {
+    refs <- c(
+      .extract_ref_values(el$var %||% NULL),
+      .extract_ref_values(el$vars %||% NULL),
+      .extract_ref_values(el$cruce %||% NULL),
+      .extract_ref_values(el$iter_var %||% NULL)
+    )
+    refs <- refs[!is.na(refs) & nzchar(trimws(refs))]
+    if (!length(refs)) {
+      return(if (isTRUE(allow_multi)) character(0) else .resolve_source_name(source = NULL, ref = NULL, arg_name = "var"))
+    }
+    srcs <- unique(vapply(refs, function(ref) .resolve_ref(ref, arg_name = "var")$source, character(1)))
+    if (!allow_multi && length(srcs) != 1L) {
+      stop("El elemento usa variables de varias fuentes; este renderer requiere una sola.", call. = FALSE)
+    }
+    srcs
+  }
+
+  .list_name_from_ctx <- function(ctx) {
+    surv <- ctx$survey
+    var <- ctx$var
+    if ("list_name" %in% names(surv)) {
+      idx <- !is.na(surv$name) & surv$name == var
+      x <- surv$list_name[idx]
       x <- x[!is.na(x) & nzchar(x)]
       if (length(x)) return(x[1])
     }
-    if ("list_norm" %in% names(survey)) {
-      idx <- !is.na(survey$name) & survey$name == var
-      x <- survey$list_norm[idx]
+    if ("list_norm" %in% names(surv)) {
+      idx <- !is.na(surv$name) & surv$name == var
+      x <- surv$list_norm[idx]
       x <- x[!is.na(x) & nzchar(x)]
       if (length(x)) return(x[1])
     }
     NA_character_
   }
 
-  .title_of_var <- function(var) {
-    if (exists("titulo_var", mode = "function", inherits = TRUE)) {
-      return(titulo_var(
-        var,
-        dic_vars        = NULL,
-        labels_override = NULL,
-        orders_list     = orders_list,
-        df              = data
-      ))
-    }
-    var
+  .list_name_of_var <- function(var, source = NULL) {
+    .list_name_from_ctx(.resolve_ref(var, source = source, arg_name = "var"))
   }
 
-  .filter_data <- function(filtros = list()) {
-    .apply_named_filters(data, filters = filtros %||% list(), arg_name = "filtros")
+  .choices_label_col <- function(choices_tbl) {
+    if (is.null(choices_tbl) || !is.data.frame(choices_tbl)) return(NA_character_)
+    candidates <- c("label", "label::es")
+    hit <- candidates[candidates %in% names(choices_tbl)][1]
+    if (!length(hit) || is.na(hit)) {
+      extras <- setdiff(names(choices_tbl), c("list_name", "name", "value"))
+      hit <- extras[1]
+    }
+    if (!length(hit) || is.na(hit)) NA_character_ else hit
+  }
+
+  .choice_signature_from_ctx <- function(ctx) {
+    ln <- .list_name_from_ctx(ctx)
+    ch <- ctx$choices
+    if (is.null(ch) || !is.data.frame(ch) || !nzchar(ln) ||
+        !("list_name" %in% names(ch)) || !("name" %in% names(ch))) {
+      return(NA_character_)
+    }
+    lab_col <- .choices_label_col(ch)
+    sub <- ch[ch$list_name == ln, , drop = FALSE]
+    if (!nrow(sub)) return(NA_character_)
+    labels <- if (!is.na(lab_col) && lab_col %in% names(sub)) sub[[lab_col]] else sub$name
+    labels <- as.character(labels)
+    labels[is.na(labels)] <- ""
+    codes <- as.character(sub$name)
+    codes[is.na(codes)] <- ""
+    paste(paste(codes, labels, sep = "="), collapse = "|")
+  }
+
+  .shared_scale_spec <- function(ctxs, arg_name = "vars") {
+    lns <- vapply(ctxs, .list_name_from_ctx, character(1))
+    lns_nonempty <- unique(lns[!is.na(lns) & nzchar(lns)])
+    if (length(lns_nonempty) == 1L) {
+      choices_use <- NULL
+      for (ctx_tmp in ctxs) {
+        if (!is.null(ctx_tmp$choices) && is.data.frame(ctx_tmp$choices)) {
+          choices_use <- ctx_tmp$choices
+          break
+        }
+      }
+      return(list(
+        list_name = lns_nonempty[1],
+        choices = choices_use,
+        equivalent = FALSE
+      ))
+    }
+
+    sigs <- vapply(ctxs, .choice_signature_from_ctx, character(1))
+    sigs_nonempty <- unique(sigs[!is.na(sigs) & nzchar(sigs)])
+    if (length(sigs_nonempty) == 1L) {
+      idx <- which(!is.na(sigs) & nzchar(sigs))[1]
+      return(list(
+        list_name = lns[idx] %||% NA_character_,
+        choices = ctxs[[idx]]$choices %||% NULL,
+        equivalent = TRUE
+      ))
+    }
+
+    stop(
+      "multiapiladas (modo='", arg_name, "'): las referencias no comparten una escala compatible. ",
+      "Listas encontradas: ", paste(lns_nonempty, collapse = " | "),
+      call. = FALSE
+    )
+  }
+
+  .title_of_var <- function(var, source = NULL) {
+    ctx <- .resolve_ref(var, source = source, arg_name = "var")
+    if (exists("titulo_var", mode = "function", inherits = TRUE)) {
+      return(titulo_var(
+        ctx$var,
+        dic_vars        = NULL,
+        labels_override = NULL,
+        orders_list     = ctx$orders_list,
+        df              = ctx$data
+      ))
+    }
+    ctx$var
+  }
+
+  .filter_data <- function(filtros = list(), source = NULL, ref = NULL) {
+    src <- .resolve_source_name(source = source, ref = ref, arg_name = "var")
+    .apply_named_filters(data_sources[[src]], filters = filtros %||% list(), arg_name = "filtros")
   }
 
   .blank_canvas <- function(preset_args = list(), overrides = list(), mensaje = "Sin datos para mostrar") {
@@ -459,20 +732,17 @@ reporte_ppt_plan <- function(
       )
   }
 
-  .tab_freq <- function(var, filtros = list()) {
-    if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
-      stop("`.tab_freq()` requiere `var` como character(1). Recibido length=", length(var), call. = FALSE)
-    }
-    var <- trimws(var)
-    dsub <- .filter_data(filtros)
+  .tab_freq <- function(var, filtros = list(), source = NULL) {
+    ctx <- .resolve_ref(var, source = source, arg_name = "var")
+    dsub <- .filter_data(filtros, source = ctx$source)
     if (!nrow(dsub)) return(NULL)
 
     freq_table_spss(
       dsub,
-      var,
-      survey        = survey,
+      ctx$var,
+      survey        = ctx$survey,
       sm_vars_force = NULL,
-      orders_list   = orders_list,
+      orders_list   = ctx$orders_list,
       mostrar_todo  = FALSE
     )
   }
@@ -489,11 +759,12 @@ reporte_ppt_plan <- function(
     pal
   }
 
-  .inject_dimensiones_palette <- function(dsrc, cruce = NULL) {
-    cruce <- as.character(cruce %||% "")[1]
-    if (!nzchar(cruce) || !(cruce %in% names(dsrc))) return(dsrc)
+  .inject_dimensiones_palette <- function(dsrc, cruce = NULL, source = NULL) {
+    if (is.null(cruce)) return(dsrc)
+    cr_ctx <- .resolve_ref(cruce, source = source, arg_name = "cruce")
+    if (!(cr_ctx$var %in% names(dsrc))) return(dsrc)
 
-    ln <- .list_name_of_var(cruce)
+    ln <- .list_name_from_ctx(cr_ctx)
     pal <- .paleta_auto(ln, env_diapos)
     if (is.null(pal) || !length(pal)) return(dsrc)
 
@@ -503,8 +774,8 @@ reporte_ppt_plan <- function(
     }
 
     cfg$paletas_cruce <- cfg$paletas_cruce %||% list()
-    if (is.null(cfg$paletas_cruce[[cruce]]) || !length(cfg$paletas_cruce[[cruce]])) {
-      cfg$paletas_cruce[[cruce]] <- pal
+    if (is.null(cfg$paletas_cruce[[cr_ctx$var]]) || !length(cfg$paletas_cruce[[cr_ctx$var]])) {
+      cfg$paletas_cruce[[cr_ctx$var]] <- pal
     }
 
     attr(dsrc, "dimensiones_config") <- cfg
@@ -513,7 +784,6 @@ reporte_ppt_plan <- function(
 
   .base_auto_from_var <- function(var, filtros = list(), sufijo_auto = NULL, formato = "Base: %s") {
     if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) return(NULL)
-    var <- trimws(var)
 
     tab <- .tab_freq(var, filtros = filtros)
     if (is.null(tab) || !nrow(tab)) return(NULL)
@@ -545,25 +815,114 @@ reporte_ppt_plan <- function(
     sprintf(formato, base_core)
   }
 
+  .base_auto_from_refs <- function(refs, filtros = list(), sufijo_auto = NULL, formato = "Base: %s") {
+    refs <- .extract_ref_values(refs)
+    refs <- refs[!is.na(refs) & nzchar(trimws(refs))]
+    if (!length(refs)) return(NULL)
+
+    ctxs <- lapply(refs, .resolve_ref, arg_name = "var")
+    src_order <- names(data_sources)
+    srcs_used <- unique(vapply(ctxs, `[[`, character(1), "source"))
+    srcs_used <- src_order[src_order %in% srcs_used]
+    if (!length(srcs_used)) return(NULL)
+
+    if (length(srcs_used) == 1L) {
+      first_ref <- refs[match(srcs_used[1], vapply(ctxs, `[[`, character(1), "source"))]
+      return(.base_auto_from_var(
+        var = first_ref,
+        filtros = filtros,
+        sufijo_auto = sufijo_auto,
+        formato = formato
+      ))
+    }
+
+    parts <- character(0)
+    for (src in srcs_used) {
+      idx <- which(vapply(ctxs, `[[`, character(1), "source") == src)[1]
+      ref_src <- refs[idx]
+      tab <- .tab_freq(ref_src, filtros = filtros, source = src)
+      if (is.null(tab) || !nrow(tab)) next
+
+      N_total <- NA_real_
+      if ("Opciones" %in% names(tab) && "n" %in% names(tab)) {
+        idx_tot <- which(tab$Opciones == "Total")
+        if (length(idx_tot)) N_total <- suppressWarnings(as.numeric(tab$n[idx_tot[1]]))
+      }
+
+      tab2 <- tab |>
+        dplyr::filter(.data$Opciones != "Total") |>
+        dplyr::filter(!is.na(.data$n) & .data$n > 0)
+
+      if (!nrow(tab2)) next
+      if (!is.finite(N_total)) N_total <- sum(tab2$n, na.rm = TRUE)
+      if (!is.finite(N_total)) next
+
+      N_pretty <- format(N_total, big.mark = ",", scientific = FALSE)
+      parts <- c(parts, paste(N_pretty, src))
+    }
+
+    if (!length(parts)) return(NULL)
+    base_core <- if (length(parts) == 1L) {
+      parts
+    } else if (length(parts) == 2L) {
+      paste(parts, collapse = " y ")
+    } else {
+      paste0(paste(parts[-length(parts)], collapse = ", "), " y ", parts[length(parts)])
+    }
+    sprintf(formato, base_core)
+  }
+
   .base_auto_from_element <- function(el, sufijo_auto = NULL, formato = "Base: %s") {
     if (is.null(el) || !inherits(el, "ppt_element")) return(NULL)
 
     etype <- el$.element_type %||% ""
+    if (identical(etype, "barras_multiapiladas") && identical(el$modo %||% NULL, "multilista")) {
+      bloques <- el$bloques %||% list()
+      if (!length(bloques)) return(NULL)
+
+      refs_base <- character(0)
+      filtros_base <- el$filtros %||% list()
+      for (block in bloques) {
+        refs_block <- c(
+          .extract_ref_values(block$var %||% NULL),
+          .extract_ref_values(block$vars %||% NULL)
+        )
+        refs_block <- refs_block[!is.na(refs_block) & nzchar(trimws(refs_block))]
+        if (length(refs_block)) refs_base <- c(refs_base, refs_block)
+      }
+      refs_base <- refs_base[!duplicated(refs_base)]
+      if (!length(refs_base)) return(NULL)
+
+      return(.base_auto_from_refs(
+        refs = refs_base,
+        filtros = filtros_base,
+        sufijo_auto = sufijo_auto,
+        formato = formato
+      ))
+    }
+
     if (etype %in% c("dim_heatmap", "dim_radar", "dim_radar_tabla")) {
       if (!exists(".dim_build_context", mode = "function", inherits = TRUE) ||
           !exists(".dim_build_payload", mode = "function", inherits = TRUE)) {
         return(NULL)
       }
 
-      ctx <- .dim_build_context(data, instrumento = instrumento)
+      source_use <- .element_source(el)
+      ctx_src <- .source_ctx(source_use)
+      cruce_ref <- el$cruce %||% NULL
+      iter_ref <- el$iter_var %||% NULL
+      cruce_var <- if (!is.null(cruce_ref)) .resolve_ref(cruce_ref, source = source_use, arg_name = "cruce")$var else NULL
+      iter_var <- if (!is.null(iter_ref)) .resolve_ref(iter_ref, source = source_use, arg_name = "iter_var")$var else NULL
+
+      ctx <- .dim_build_context(ctx_src$data, instrumento = ctx_src$instrumento)
       payload <- .dim_build_payload(
         ctx,
         modo = el$modo,
         objetivo = el$objetivo,
-        cruce = el$cruce %||% NULL,
+        cruce = cruce_var,
         incluir_total = el$incluir_total %||% NULL,
         filtros = el$filtros %||% list(),
-        iter_var = el$iter_var %||% NULL,
+        iter_var = iter_var,
         iter_level = el$iter_level %||% NULL
       )
 
@@ -586,17 +945,128 @@ reporte_ppt_plan <- function(
       return(sprintf(formato, base_core))
     }
 
-    var_base <- el$var %||% {
-      v1 <- el$vars %||% NULL
-      if (!is.null(v1) && length(v1)) v1[1] else NULL
-    }
+    refs_base <- c(
+      .extract_ref_values(el$var %||% NULL),
+      .extract_ref_values(el$vars %||% NULL)
+    )
+    refs_base <- refs_base[!is.na(refs_base) & nzchar(trimws(refs_base))]
+    if (!length(refs_base)) return(NULL)
 
-    .base_auto_from_var(
-      var = var_base,
+    .base_auto_from_refs(
+      refs = refs_base,
       filtros = el$filtros %||% list(),
       sufijo_auto = sufijo_auto,
       formato = formato
     )
+  }
+
+  .slide_subtitle_style <- function() {
+    base_args <- presets$base$args %||% list()
+    font_size <- suppressWarnings(as.numeric(base_args$size_subtitulo_slide %||% 18)[1])
+    if (!is.finite(font_size) || is.na(font_size) || font_size <= 0) font_size <- 18
+    list(
+      font_family = "Arial",
+      font_size = font_size,
+      color = base_args$color_nota_pie %||% "#39588B",
+      # Separacion corta y consistente bajo el titulo.
+      top_gap = 0.015,
+      # Altura suficiente para evitar que PowerPoint reduzca automaticamente la fuente.
+      height = max(0.36, font_size * 0.022)
+    )
+  }
+
+  .placeholder_props_current <- function(doc, spec) {
+    if (is.null(spec) || is.null(spec$type)) {
+      stop("Placeholder spec inválido (NULL o sin $type).", call. = FALSE)
+    }
+    type_idx <- spec$type_idx %||% NULL
+    if (!is.null(type_idx)) {
+      type_idx <- suppressWarnings(as.integer(type_idx))
+      if (length(type_idx) != 1L || is.na(type_idx)) {
+        stop("`type_idx` debe ser un entero escalar.", call. = FALSE)
+      }
+    }
+
+    slide <- doc$slide$get_slide(doc$cursor)
+    xfrm <- tryCatch(slide$get_xfrm(), error = function(e) NULL)
+    layout_name <- NULL
+    master_name <- NULL
+
+    if (!is.null(xfrm)) {
+      layout_vals <- unique(as.character(xfrm$name))
+      layout_vals <- layout_vals[!is.na(layout_vals) & nzchar(trimws(layout_vals))]
+      if (length(layout_vals)) layout_name <- layout_vals[1]
+
+      master_vals <- unique(as.character(xfrm$master_name))
+      master_vals <- master_vals[!is.na(master_vals) & nzchar(trimws(master_vals))]
+      if (length(master_vals)) master_name <- master_vals[1]
+    }
+
+    if (is.null(master_name) || !nzchar(master_name)) {
+      master_name <- master
+    }
+
+    props <- officer::layout_properties(
+      doc,
+      layout = layout_name,
+      master = master_name
+    )
+
+    props <- props[props$type %in% spec$type, , drop = FALSE]
+    if (!nrow(props)) {
+      stop(
+        "No se encontró placeholder type='", spec$type,
+        "' en layout='", layout_name %||% "<NA>",
+        "', master='", master_name %||% "<NA>", "'.",
+        call. = FALSE
+      )
+    }
+
+    if (!is.null(type_idx)) {
+      props <- props[props$type_idx == type_idx, , drop = FALSE]
+    }
+
+    if (!nrow(props)) {
+      stop(
+        "No se encontró placeholder type='", spec$type,
+        "' type_idx=", spec$type_idx %||% "NULL",
+        " en layout='", layout_name %||% "<NA>",
+        "', master='", master_name %||% "<NA>", "'.",
+        call. = FALSE
+      )
+    }
+
+    props[1, , drop = FALSE]
+  }
+
+  .ph_with_slide_subtitle <- function(doc, subtitle, title_spec) {
+    subtitle <- as.character(subtitle %||% "")[1]
+    if (!nzchar(trimws(subtitle))) return(doc)
+
+    title_props <- .placeholder_props_current(doc, title_spec)
+    st <- .slide_subtitle_style()
+    top_gap <- suppressWarnings(as.numeric(st$top_gap)[1])
+    height <- suppressWarnings(as.numeric(st$height)[1])
+    if (!is.finite(top_gap) || is.na(top_gap) || top_gap < 0) top_gap <- 0.05
+    if (!is.finite(height) || is.na(height) || height <= 0) height <- 0.32
+
+    loc <- officer::ph_location(
+      left = title_props$offx[[1]],
+      top = title_props$offy[[1]] + title_props$cy[[1]] + top_gap,
+      width = title_props$cx[[1]],
+      height = height
+    )
+
+    fp_txt <- officer::fp_text(
+      color = st$color,
+      font.size = st$font_size,
+      font.family = st$font_family,
+      bold = TRUE
+    )
+    fp_par <- officer::fp_par(text.align = "left")
+    value <- officer::fpar(officer::ftext(subtitle, prop = fp_txt), fp_p = fp_par)
+
+    officer::ph_with(doc, value = value, location = loc)
   }
 
   # ---------------------------------------------------------------------------
@@ -764,9 +1234,17 @@ reporte_ppt_plan <- function(
 
     modo <- el$modo %||% "var"
     filtros <- el$filtros %||% list()
-    dsrc <- .filter_data(filtros)
-    if (!nrow(dsrc)) {
-      return(.blank_canvas(preset_args_multi, el$overrides %||% list()))
+    preset_args_multi  <- preset_args_multi  %||% list()
+    preset_args_single <- preset_args_single %||% list()
+    overrides          <- el$overrides %||% list()
+    wrap_y_eff <- overrides$wrap_y %||%
+      preset_args_multi$wrap_y %||%
+      preset_args_single$wrap_y %||%
+      el$wrap_y %||%
+      50
+    wrap_y_eff <- suppressWarnings(as.numeric(wrap_y_eff)[1])
+    if (!is.finite(wrap_y_eff) || is.na(wrap_y_eff) || wrap_y_eff < 10) {
+      wrap_y_eff <- 50
     }
 
     # ============================================================
@@ -776,6 +1254,219 @@ reporte_ppt_plan <- function(
       x <- as.character(x)
       x[is.na(x)] <- ""
       trimws(x)
+    }
+
+    .ordered_stack_levels <- function(list_name,
+                                      observed_opts,
+                                      choices_use = NULL,
+                                      palette_names = NULL) {
+      observed_opts <- unique(.clean_chr(observed_opts))
+      observed_opts <- observed_opts[nzchar(observed_opts)]
+      if (!length(observed_opts)) return(character(0))
+
+      niveles_formales <- character(0)
+      if (!is.null(palette_names) && length(palette_names)) {
+        niveles_formales <- palette_names
+      } else if (!is.null(choices_use) &&
+                 "list_name" %in% names(choices_use) &&
+                 "label" %in% names(choices_use)) {
+        niveles_formales <- as.character(choices_use$label[choices_use$list_name == list_name])
+      }
+      niveles_formales <- .clean_chr(niveles_formales)
+      niveles_formales <- niveles_formales[nzchar(niveles_formales)]
+
+      if (length(niveles_formales)) {
+        ordered <- intersect(niveles_formales, observed_opts)
+        extras <- setdiff(observed_opts, ordered)
+        return(c(ordered, extras))
+      }
+
+      observed_opts
+    }
+
+    .apply_top2box_alias <- function(base_args) {
+      if (!isTRUE(el$top2box)) return(base_args)
+
+      base_args$mostrar_barra_extra <- TRUE
+      base_args$barra_extra_preset  <- "top2box"
+      if (!is.null(el$top2box_labels) && length(el$top2box_labels)) {
+        base_args$top2box_labels <- el$top2box_labels
+      }
+      if (is.null(base_args$titulo_barra_extra) || !nzchar(base_args$titulo_barra_extra)) {
+        base_args$titulo_barra_extra <- "TOP TWO BOX"
+      }
+
+      base_args
+    }
+
+    .resolve_cruce_levels <- function(dsrc, cruce_name, survey_use, orders_list_use) {
+      cm <- .radar_cruce_map(
+        data        = dsrc,
+        cruce       = cruce_name,
+        survey      = survey_use,
+        orders_list = orders_list_use,
+        env_paletas = env_diapos
+      )
+      lvls_keys   <- .clean_chr(cm$keys)
+      lvls_labels <- .clean_chr(cm$labels)
+      keep <- nzchar(lvls_keys) & nzchar(lvls_labels)
+      lvls_keys   <- lvls_keys[keep]
+      lvls_labels <- lvls_labels[keep]
+
+      if (!length(lvls_keys) || !length(lvls_labels)) {
+        x <- .clean_chr(dsrc[[cruce_name]])
+        lvls_keys <- sort(unique(x[nzchar(x)]))
+        lvls_labels <- lvls_keys
+      }
+
+      list(keys = lvls_keys, labels = lvls_labels)
+    }
+
+    .multilista_wrap_lines <- function(x, width) {
+      x <- .clean_chr(x)
+      x <- x[nzchar(x)]
+      if (!length(x)) return(0L)
+
+      if (requireNamespace("stringr", quietly = TRUE)) {
+        wrapped <- stringr::str_wrap(x, width = width)
+        sum(lengths(strsplit(wrapped, "\n", fixed = TRUE)))
+      } else {
+        length(x)
+      }
+    }
+
+    .multilista_block_height <- function(block_el) {
+      if (!is.null(block_el$altura_rel)) {
+        h <- suppressWarnings(as.numeric(block_el$altura_rel)[1])
+        if (is.finite(h) && !is.na(h) && h > 0) return(h)
+      }
+
+      block_overrides <- block_el$overrides %||% list()
+      block_wrap <- block_overrides$wrap_y %||%
+        preset_args_multi$wrap_y %||%
+        preset_args_single$wrap_y %||%
+        block_el$wrap_y %||%
+        50
+      block_wrap <- suppressWarnings(as.numeric(block_wrap)[1])
+      if (!is.finite(block_wrap) || is.na(block_wrap) || block_wrap < 10) {
+        block_wrap <- 50
+      }
+
+      n_rows <- 1L
+      title_lines <- 0L
+
+      if (identical(block_el$modo, "var")) {
+        n_rows <- max(1L, length(block_el$vars %||% character(0)))
+        if (length(block_el$vars %||% character(0))) {
+          title_lines <- .multilista_wrap_lines(vapply(
+            block_el$vars,
+            function(v) .title_of_var(v),
+            character(1)
+          ), block_wrap)
+        }
+      } else if (identical(block_el$modo, "cruce")) {
+        ctx_var <- .resolve_ref(block_el$var, arg_name = "var")
+        ctx_cruce <- .resolve_ref(block_el$cruce, source = ctx_var$source, arg_name = "cruce")
+        dsrc <- .filter_data(block_el$filtros %||% list(), source = ctx_var$source)
+        lvls <- .resolve_cruce_levels(
+          dsrc,
+          ctx_cruce$var,
+          survey_use = ctx_var$survey,
+          orders_list_use = ctx_var$orders_list
+        )
+        n_rows <- max(1L, length(lvls$labels))
+        title_lines <- .multilista_wrap_lines(lvls$labels, block_wrap)
+      } else if (identical(block_el$modo, "var_cruce")) {
+        if (is.list(block_el$vars) && !is.character(block_el$vars)) {
+          n_rows <- sum(lengths(block_el$vars))
+          tg <- block_el$titulos_grupo %||% character(0)
+          lines_group <- 0L
+          for (nm in names(block_el$vars)) {
+            ttl <- .named_lookup(tg, nm, default = nm)
+            lines_group <- lines_group + .multilista_wrap_lines(
+              ttl,
+              max(12, floor(block_wrap * 0.8))
+            )
+          }
+          title_lines <- lines_group
+        } else {
+          ctx_vars <- lapply(block_el$vars, .resolve_ref, arg_name = "vars")
+          ctx_cruce <- .resolve_ref(block_el$cruce, source = ctx_vars[[1]]$source, arg_name = "cruce")
+          dsrc <- .filter_data(block_el$filtros %||% list(), source = ctx_vars[[1]]$source)
+          lvls <- .resolve_cruce_levels(
+            dsrc,
+            ctx_cruce$var,
+            survey_use = ctx_vars[[1]]$survey,
+            orders_list_use = ctx_vars[[1]]$orders_list
+          )
+          n_rows <- max(1L, length(block_el$vars) * length(lvls$labels))
+          tg <- block_el$titulos_grupo %||% character(0)
+          title_lines <- 0L
+          for (v in block_el$vars) {
+            ttl <- .named_lookup(tg, v, default = .title_of_var(v))
+            title_lines <- title_lines + .multilista_wrap_lines(
+              ttl,
+              max(12, floor(block_wrap * 0.8))
+            )
+          }
+        }
+      }
+
+      show_legend <- block_overrides$mostrar_leyenda %||%
+        preset_args_multi$mostrar_leyenda %||%
+        preset_args_single$mostrar_leyenda %||%
+        TRUE
+
+      show_extra <- block_overrides$mostrar_barra_extra %||%
+        isTRUE(block_el$top2box) ||
+        (!is.null(block_overrides$barra_extra_preset) &&
+           !identical(block_overrides$barra_extra_preset, "ninguno"))
+
+      0.85 +
+        (0.90 * max(1, n_rows)) +
+        (0.18 * title_lines) +
+        if (isTRUE(show_legend)) 0.70 else 0 +
+        if (isTRUE(show_extra)) 0.25 else 0
+    }
+
+    if (identical(modo, "multilista")) {
+      bloques <- el$bloques %||% list()
+      if (!length(bloques)) return(NULL)
+      if (!requireNamespace("cowplot", quietly = TRUE)) {
+        stop("multiapiladas (modo='multilista'): se requiere cowplot.", call. = FALSE)
+      }
+
+      rendered <- list()
+      rel_heights <- numeric(0)
+      for (block in bloques) {
+        # En multilista, cada subbloque debe renderizarse sin titulo/subtitulo
+        # automaticos salvo que el usuario los haya pedido explicitamente.
+        block_render <- block
+        block_render$title_slide <- NULL
+        block_render$overrides <- block_render$overrides %||% list()
+        block_render$overrides$titulo <- block_render$.multilista_block_title %||% ""
+        block_render$overrides$subtitulo <- block_render$.multilista_block_subtitle %||% ""
+
+        p_block <- .render_barras_multiapiladas(
+          block_render,
+          preset_args_multi = preset_args_multi,
+          preset_args_single = preset_args_single
+        )
+        if (is.null(p_block)) next
+        rendered[[length(rendered) + 1L]] <- p_block
+        rel_heights <- c(rel_heights, .multilista_block_height(block))
+      }
+
+      if (!length(rendered)) {
+        return(.blank_canvas(preset_args_multi, el$overrides %||% list()))
+      }
+
+      return(cowplot::plot_grid(
+        plotlist = rendered,
+        ncol = 1,
+        align = "v",
+        rel_heights = rel_heights
+      ))
     }
 
     # ============================================================
@@ -788,23 +1479,23 @@ reporte_ppt_plan <- function(
       vars <- trimws(vars); vars <- vars[nzchar(vars)]
       if (!length(vars)) return(NULL)
 
-      # regla fuerte: 1 list_name para todo el bloque
-      lns <- vapply(vars, .list_name_of_var, character(1))
-      lns <- unique(lns[!is.na(lns) & nzchar(lns)])
-      if (length(lns) != 1L) {
-        stop("multiapiladas (modo='var'): las vars no comparten un único list_name. Encontrados: ",
-             paste(lns, collapse = " | "), call. = FALSE)
-      }
-      ln <- lns[1]
+      ctxs <- lapply(vars, .resolve_ref, arg_name = "vars")
+
+      scale_spec <- .shared_scale_spec(ctxs, arg_name = "var")
+      ln <- scale_spec$list_name
 
       colores_grupos <- .paleta_auto(ln, env_diapos)
+      choices_use <- scale_spec$choices
 
       rows <- list()
       all_opts <- character(0)
       tabs_by_v <- list()
       N_by_v <- numeric(0)
+      labels_by_v <- character(0)
 
-      for (v in vars) {
+      for (i in seq_along(vars)) {
+        v <- vars[i]
+        ctx_v <- ctxs[[i]]
         tab <- .tab_freq(v, filtros = filtros)
         if (is.null(tab) || !nrow(tab)) next
 
@@ -823,31 +1514,35 @@ reporte_ppt_plan <- function(
 
         tabs_by_v[[v]] <- tab
         N_by_v[v] <- N_total
+        labels_by_v[v] <- .title_of_var(v)
         all_opts <- union(all_opts, as.character(tab$Opciones))
       }
 
       if (!length(tabs_by_v)) return(.blank_canvas(preset_args_multi, el$overrides %||% list()))
 
-      # ordenar niveles: paleta -> choices -> lo observado
-      niveles_formales <- character(0)
-      if (!is.null(colores_grupos) && is.atomic(colores_grupos) && !is.null(names(colores_grupos))) {
-        niveles_formales <- names(colores_grupos)
-      } else if (!is.null(choices) && "list_name" %in% names(choices) && "label" %in% names(choices)) {
-        niveles_formales <- as.character(choices$label[choices$list_name == ln])
-      }
-      niveles_formales <- niveles_formales[!is.na(niveles_formales) & nzchar(niveles_formales)]
-      if (length(niveles_formales)) all_opts <- intersect(niveles_formales, all_opts)
+      all_opts <- .ordered_stack_levels(
+        ln,
+        all_opts,
+        choices_use = choices_use,
+        palette_names = names(colores_grupos %||% NULL)
+      )
 
       cols_pct <- paste0("pct_", seq_along(all_opts))
       etiquetas_grupos <- stats::setNames(all_opts, cols_pct)
+
+      duplicated_labels <- duplicated(labels_by_v) | duplicated(labels_by_v, fromLast = TRUE)
 
       for (v in vars) {
         tab <- tabs_by_v[[v]]
         if (is.null(tab)) next
 
-        label_v <- .title_of_var(v)
+        ctx_v <- .resolve_ref(v, arg_name = "vars")
+        label_v <- labels_by_v[[v]] %||% .title_of_var(v)
+        if (isTRUE(duplicated_labels[match(v, names(labels_by_v))])) {
+          label_v <- .pretty_source_label(ctx_v$source)
+        }
         if (requireNamespace("stringr", quietly = TRUE)) {
-          label_v <- stringr::str_wrap(label_v, width = el$wrap_y %||% 50)
+          label_v <- stringr::str_wrap(label_v, width = wrap_y_eff)
         }
 
         pct_int <- .pct_enteros_100(tab$n)
@@ -880,27 +1575,7 @@ reporte_ppt_plan <- function(
         nota_pie         = NULL
       )
 
-      # ============================================================
-      # NUEVO: TOP TWO BOX (alias del wrapper -> args nativos)
-      #   - NO depende del "preset"
-      #   - fuerza barra_extra_preset="top2box"
-      # ============================================================
-      if (isTRUE(el$top2box)) {
-        base_args$mostrar_barra_extra <- TRUE
-        base_args$barra_extra_preset  <- "top2box"
-
-        # Si el usuario no pasa labels, el graficador usa defaults (tail cols)
-        if (!is.null(el$top2box_labels) && length(el$top2box_labels)) {
-          base_args$top2box_labels <- el$top2box_labels
-        }
-        if (is.null(base_args$titulo_barra_extra) || !nzchar(base_args$titulo_barra_extra)) {
-          base_args$titulo_barra_extra <- "TOP TWO BOX"
-        }
-      }
-
-      preset_args_multi  <- preset_args_multi  %||% list()
-      preset_args_single <- preset_args_single %||% list()
-      overrides          <- el$overrides %||% list()
+      base_args <- .apply_top2box_alias(base_args)
 
       args <- .merge_args(base_args, preset_args_single, preset_args_multi, overrides)
       fun  <- graficar_barras_apiladas
@@ -922,36 +1597,31 @@ reporte_ppt_plan <- function(
       if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
         stop("multiapiladas (modo='cruce'): falta `cruce` (character(1)).", call. = FALSE)
       }
-      var   <- trimws(var)
-      cruce <- trimws(cruce)
+      ctx_var <- .resolve_ref(var, arg_name = "var")
+      ctx_cruce <- .resolve_ref(cruce, source = ctx_var$source, arg_name = "cruce")
+      dsrc <- .filter_data(filtros, source = ctx_var$source)
+      if (!nrow(dsrc)) {
+        return(.blank_canvas(preset_args_multi, el$overrides %||% list()))
+      }
+      var <- ctx_var$var
+      cruce <- ctx_cruce$var
 
       # --- segmentos: opciones de var (y paleta de var)
-      ln_var <- .list_name_of_var(var)
+      ln_var <- .list_name_from_ctx(ctx_var)
       if (is.na(ln_var) || !nzchar(ln_var)) {
         stop("multiapiladas (modo='cruce'): no se encontró list_name para `var`=", var, call. = FALSE)
       }
       colores_grupos <- .paleta_auto(ln_var, env_diapos)
 
       # --- niveles del cruce (keys para filtrar + labels para mostrar) usando instrumento
-      cm <- .radar_cruce_map(
-        data        = dsrc,
-        cruce       = cruce,
-        survey      = survey,
-        orders_list = orders_list,
-        env_paletas = env_diapos
+      cruce_levels <- .resolve_cruce_levels(
+        dsrc,
+        cruce,
+        survey_use = ctx_var$survey,
+        orders_list_use = ctx_var$orders_list
       )
-      lvls_keys   <- cm$keys
-      lvls_labels <- cm$labels
-
-      lvls_keys   <- .clean_chr(lvls_keys);   lvls_keys   <- lvls_keys[nzchar(lvls_keys)]
-      lvls_labels <- .clean_chr(lvls_labels); lvls_labels <- lvls_labels[nzchar(lvls_labels)]
-
-      # fallback si algo raro
-      if (!length(lvls_keys) || !length(lvls_labels)) {
-        x <- .clean_chr(data[[cruce]])
-        lvls_keys <- sort(unique(x[nzchar(x)]))
-        lvls_labels <- lvls_keys
-      }
+      lvls_keys   <- cruce_levels$keys
+      lvls_labels <- cruce_levels$labels
 
       # --- primero, descubrir el set de opciones (segmentos) de var (sobre total)
       tab_total <- .tab_freq(var, filtros = filtros)
@@ -965,16 +1635,12 @@ reporte_ppt_plan <- function(
 
       all_opts <- as.character(tab_total$Opciones)
 
-      # ordenar opciones: paleta -> choices -> observado
-      if (!is.null(colores_grupos) && is.atomic(colores_grupos) && !is.null(names(colores_grupos))) {
-        pref <- names(colores_grupos)
-        pref <- pref[!is.na(pref) & nzchar(pref)]
-        if (length(pref)) all_opts <- intersect(pref, all_opts)
-      } else if (!is.null(choices) && "list_name" %in% names(choices) && "label" %in% names(choices)) {
-        pref <- as.character(choices$label[choices$list_name == ln_var])
-        pref <- pref[!is.na(pref) & nzchar(pref)]
-        if (length(pref)) all_opts <- intersect(pref, all_opts)
-      }
+      all_opts <- .ordered_stack_levels(
+        ln_var,
+        all_opts,
+        choices_use = ctx_var$choices,
+        palette_names = names(colores_grupos %||% NULL)
+      )
 
       cols_pct <- paste0("pct_", seq_along(all_opts))
       etiquetas_grupos <- stats::setNames(all_opts, cols_pct)
@@ -997,9 +1663,9 @@ reporte_ppt_plan <- function(
         tab <- freq_table_spss(
           dsub,
           var,
-          survey        = survey,
+          survey        = ctx_var$survey,
           sm_vars_force = NULL,
-          orders_list   = orders_list,
+          orders_list   = ctx_var$orders_list,
           mostrar_todo  = FALSE
         )
 
@@ -1025,7 +1691,7 @@ reporte_ppt_plan <- function(
 
         cat_j <- as.character(lab_j)
         if (requireNamespace("stringr", quietly = TRUE)) {
-          cat_j <- stringr::str_wrap(cat_j, width = el$wrap_y %||% 50)
+          cat_j <- stringr::str_wrap(cat_j, width = wrap_y_eff)
         }
 
         row <- tibble::tibble(
@@ -1056,25 +1722,297 @@ reporte_ppt_plan <- function(
         nota_pie         = NULL
       )
 
-      # ============================================================
-      # NUEVO: TOP TWO BOX (alias del wrapper -> args nativos)
-      # ============================================================
-      if (isTRUE(el$top2box)) {
-        base_args$mostrar_barra_extra <- TRUE
-        base_args$barra_extra_preset  <- "top2box"
-        if (!is.null(el$top2box_labels) && length(el$top2box_labels)) {
-          base_args$top2box_labels <- el$top2box_labels
+      base_args <- .apply_top2box_alias(base_args)
+
+      args <- .merge_args(base_args, preset_args_single, preset_args_multi, overrides)
+      fun  <- graficar_barras_apiladas
+      args <- .keep_formals(fun, args)
+      return(suppressWarnings(do.call(fun, args)))
+    }
+
+    if (identical(modo, "var_cruce")) {
+
+      vars  <- el$vars
+      cruce <- el$cruce %||% NULL
+
+      titulos_grupo <- el$titulos_grupo %||% character(0)
+
+      if (is.list(vars) && !is.character(vars)) {
+        group_refs <- vars
+        group_ids <- names(group_refs)
+        if (!length(group_refs)) return(NULL)
+
+        flat_refs <- .extract_ref_values(group_refs)
+        ctx_all <- lapply(flat_refs, .resolve_ref, arg_name = "vars")
+        src_all <- unique(vapply(ctx_all, `[[`, character(1), "source"))
+
+        if (!is.null(cruce) && nzchar(trimws(as.character(cruce)[1])) && length(src_all) > 1L) {
+          stop("multiapiladas (modo='var_cruce'): cuando `vars` usa varias fuentes, `cruces` debe ser NULL.", call. = FALSE)
         }
-        if (is.null(base_args$titulo_barra_extra) || !nzchar(base_args$titulo_barra_extra)) {
-          base_args$titulo_barra_extra <- "TOP TWO BOX"
+
+        scale_spec <- .shared_scale_spec(ctx_all, arg_name = "var_cruce")
+        ln <- scale_spec$list_name
+        colores_grupos <- .paleta_auto(ln, env_diapos)
+        choices_use <- scale_spec$choices
+
+        all_opts <- character(0)
+        valid_refs <- list()
+        for (group_id in group_ids) {
+          refs_i <- group_refs[[group_id]]
+          refs_i <- refs_i[!is.na(refs_i) & nzchar(trimws(refs_i))]
+          if (!length(refs_i)) next
+
+          valid_refs[[group_id]] <- list()
+          for (ref in refs_i) {
+            tab_total <- .tab_freq(ref, filtros = filtros)
+            if (is.null(tab_total) || !nrow(tab_total)) next
+
+            tab_total <- tab_total |>
+              dplyr::filter(.data$Opciones != "Total") |>
+              dplyr::filter(!is.na(.data$n) & .data$n > 0)
+
+            if (!nrow(tab_total)) next
+            valid_refs[[group_id]][[ref]] <- .resolve_ref(ref, arg_name = "vars")
+            all_opts <- union(all_opts, as.character(tab_total$Opciones))
+          }
+
+          if (!length(valid_refs[[group_id]])) {
+            valid_refs[[group_id]] <- NULL
+          }
+        }
+
+        if (!length(valid_refs) || !length(all_opts)) {
+          return(.blank_canvas(preset_args_multi, el$overrides %||% list()))
+        }
+
+        all_opts <- .ordered_stack_levels(
+          ln,
+          all_opts,
+          choices_use = choices_use,
+          palette_names = names(colores_grupos %||% NULL)
+        )
+        cols_pct <- paste0("pct_", seq_along(all_opts))
+        etiquetas_grupos <- stats::setNames(all_opts, cols_pct)
+
+        rows <- list()
+        for (group_id in names(valid_refs)) {
+          refs_i <- valid_refs[[group_id]]
+          if (!length(refs_i)) next
+
+          group_title <- .named_lookup(titulos_grupo, group_id, default = group_id)
+          group_title <- as.character(group_title)[1]
+          if (!nzchar(trimws(group_title))) group_title <- group_id
+          if (requireNamespace("stringr", quietly = TRUE)) {
+            group_title <- stringr::str_wrap(group_title, width = max(12, floor(wrap_y_eff * 0.8)))
+          }
+
+          filas_var <- 0L
+          for (ref in names(refs_i)) {
+            ctx_v <- refs_i[[ref]]
+            tab <- .tab_freq(ref, filtros = filtros)
+            if (is.null(tab) || !nrow(tab)) next
+
+            N_total <- NA_real_
+            if ("Opciones" %in% names(tab) && "n" %in% names(tab)) {
+              idx_tot <- which(tab$Opciones == "Total")
+              if (length(idx_tot)) N_total <- suppressWarnings(as.numeric(tab$n[idx_tot[1]]))
+            }
+
+            tab <- tab |>
+              dplyr::filter(.data$Opciones != "Total") |>
+              dplyr::filter(!is.na(.data$n) & .data$n > 0)
+
+            if (!nrow(tab)) next
+            if (!is.finite(N_total)) N_total <- sum(tab$n, na.rm = TRUE)
+            if (!is.finite(N_total) || N_total <= 0) next
+
+            pct_int <- .pct_enteros_100(tab$n)
+            names(pct_int) <- as.character(tab$Opciones)
+
+            cat_label <- .pretty_source_label(ctx_v$source)
+            if (requireNamespace("stringr", quietly = TRUE)) {
+              cat_label <- stringr::str_wrap(cat_label, width = wrap_y_eff)
+            }
+
+            row <- tibble::tibble(
+              .categoria_id = paste0(group_id, "__", filas_var + 1L, "__", ctx_v$source),
+              categoria     = cat_label,
+              N             = N_total,
+              .grupo_id     = group_id,
+              .grupo_titulo = group_title
+            )
+            for (k in seq_along(all_opts)) {
+              opt <- all_opts[k]
+              row[[cols_pct[k]]] <- (pct_int[opt] %||% 0) / 100
+            }
+
+            rows[[length(rows) + 1L]] <- row
+            filas_var <- filas_var + 1L
+          }
+        }
+      } else {
+        if (!is.character(vars) || length(vars) < 1L) return(NULL)
+        vars <- trimws(vars)
+        vars <- vars[nzchar(vars)]
+        if (!length(vars)) return(NULL)
+
+        if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
+          stop("multiapiladas (modo='var_cruce'): falta `cruce` (character(1)).", call. = FALSE)
+        }
+        source_use <- .single_source_for_refs(vars, arg_name = "vars")
+        ctx_vars <- lapply(vars, .resolve_ref, source = source_use, arg_name = "vars")
+        ctx_cruce <- .resolve_ref(cruce, source = source_use, arg_name = "cruce")
+        dsrc <- .filter_data(filtros, source = source_use)
+        if (!nrow(dsrc)) {
+          return(.blank_canvas(preset_args_multi, el$overrides %||% list()))
+        }
+        cruce <- ctx_cruce$var
+
+        scale_spec <- .shared_scale_spec(ctx_vars, arg_name = "var_cruce")
+        ln <- scale_spec$list_name
+        colores_grupos <- .paleta_auto(ln, env_diapos)
+
+        cruce_levels <- .resolve_cruce_levels(
+          dsrc,
+          cruce,
+          survey_use = ctx_vars[[1]]$survey,
+          orders_list_use = ctx_vars[[1]]$orders_list
+        )
+        lvls_keys   <- cruce_levels$keys
+        lvls_labels <- cruce_levels$labels
+
+        all_opts <- character(0)
+        vars_con_datos <- list()
+        for (i in seq_along(vars)) {
+          v <- vars[i]
+          tab_total <- .tab_freq(v, filtros = filtros)
+          if (is.null(tab_total) || !nrow(tab_total)) next
+
+          tab_total <- tab_total |>
+            dplyr::filter(.data$Opciones != "Total") |>
+            dplyr::filter(!is.na(.data$n) & .data$n > 0)
+
+          if (!nrow(tab_total)) next
+          vars_con_datos[[v]] <- ctx_vars[[i]]
+          all_opts <- union(all_opts, as.character(tab_total$Opciones))
+        }
+
+        if (!length(vars_con_datos) || !length(all_opts)) {
+          return(.blank_canvas(preset_args_multi, el$overrides %||% list()))
+        }
+
+        all_opts <- .ordered_stack_levels(
+          ln,
+          all_opts,
+          choices_use = scale_spec$choices,
+          palette_names = names(colores_grupos %||% NULL)
+        )
+        cols_pct <- paste0("pct_", seq_along(all_opts))
+        etiquetas_grupos <- stats::setNames(all_opts, cols_pct)
+
+        rows <- list()
+        x_cruce <- .clean_chr(dsrc[[cruce]])
+
+        for (i in seq_along(vars)) {
+          v <- vars[i]
+          ctx_v <- vars_con_datos[[v]]
+          if (is.null(ctx_v)) next
+
+          group_title <- .named_lookup(titulos_grupo, ctx_v$raw_ref,
+            default = .named_lookup(titulos_grupo, ctx_v$var, default = .title_of_var(v))
+          )
+          group_title <- as.character(group_title)[1]
+          if (!nzchar(trimws(group_title))) group_title <- .title_of_var(v)
+          if (requireNamespace("stringr", quietly = TRUE)) {
+            group_title <- stringr::str_wrap(group_title, width = max(12, floor(wrap_y_eff * 0.8)))
+          }
+
+          filas_var <- 0L
+          for (j in seq_along(lvls_keys)) {
+            key_j <- lvls_keys[j]
+            lab_j <- lvls_labels[j]
+
+            mask <- nzchar(x_cruce) & (x_cruce == .clean_chr(key_j))
+            dsub <- dsrc[mask, , drop = FALSE]
+            if (!nrow(dsub)) next
+
+            tab <- freq_table_spss(
+              dsub,
+              ctx_v$var,
+              survey        = ctx_v$survey,
+              sm_vars_force = NULL,
+              orders_list   = ctx_v$orders_list,
+              mostrar_todo  = FALSE
+            )
+
+            if (is.null(tab) || !nrow(tab)) next
+
+            N_total <- NA_real_
+            if ("Opciones" %in% names(tab) && "n" %in% names(tab)) {
+              idx_tot <- which(tab$Opciones == "Total")
+              if (length(idx_tot)) N_total <- suppressWarnings(as.numeric(tab$n[idx_tot[1]]))
+            }
+
+            tab <- tab |>
+              dplyr::filter(.data$Opciones != "Total") |>
+              dplyr::filter(!is.na(.data$n) & .data$n > 0)
+
+            if (!nrow(tab)) next
+            if (!is.finite(N_total)) N_total <- sum(tab$n, na.rm = TRUE)
+            if (!is.finite(N_total) || N_total <= 0) next
+
+            pct_int <- .pct_enteros_100(tab$n)
+            names(pct_int) <- as.character(tab$Opciones)
+
+            cat_label <- as.character(lab_j)
+            if (requireNamespace("stringr", quietly = TRUE)) {
+              cat_label <- stringr::str_wrap(cat_label, width = wrap_y_eff)
+            }
+
+            row <- tibble::tibble(
+              .categoria_id = paste0(ctx_v$raw_ref, "__", filas_var + 1L, "__", key_j),
+              categoria     = cat_label,
+              N             = N_total,
+              .grupo_id     = ctx_v$raw_ref,
+              .grupo_titulo = group_title
+            )
+            for (k in seq_along(all_opts)) {
+              opt <- all_opts[k]
+              row[[cols_pct[k]]] <- (pct_int[opt] %||% 0) / 100
+            }
+
+            rows[[length(rows) + 1L]] <- row
+            filas_var <- filas_var + 1L
+          }
         }
       }
 
-      preset_args_multi  <- preset_args_multi  %||% list()
-      preset_args_single <- preset_args_single %||% list()
-      overrides          <- el$overrides %||% list()
+      if (!length(rows)) return(.blank_canvas(preset_args_multi, el$overrides %||% list()))
+      df_block <- dplyr::bind_rows(rows)
+
+      base_args <- list(
+        data                   = df_block,
+        var_categoria          = ".categoria_id",
+        var_etiqueta_categoria = "categoria",
+        var_grupo_id           = ".grupo_id",
+        var_grupo_titulo       = ".grupo_titulo",
+        var_n                  = "N",
+        cols_porcentaje        = cols_pct,
+        etiquetas_grupos       = etiquetas_grupos,
+        escala_valor           = "proporcion_1",
+        colores_grupos         = colores_grupos,
+        titulo                 = NULL,
+        subtitulo              = NULL,
+        nota_pie               = NULL,
+        usar_canvas            = TRUE,
+        canvas_w_grupo         = 0.24,
+        canvas_w_buf_grupo_etq = 0.03,
+        canvas_gap_grupos      = 0.35
+      )
+      base_args <- .apply_top2box_alias(base_args)
 
       args <- .merge_args(base_args, preset_args_single, preset_args_multi, overrides)
+      args$usar_canvas <- TRUE
       fun  <- graficar_barras_apiladas
       args <- .keep_formals(fun, args)
       return(suppressWarnings(do.call(fun, args)))
@@ -1214,50 +2152,25 @@ reporte_ppt_plan <- function(
     preset_args <- preset_args %||% list()
     overrides   <- el$overrides %||% list()
 
-    cruce <- overrides$cruce %||% el$cruce %||% preset_args$cruce %||% NULL
+    ctx_var <- .resolve_ref(var, arg_name = "var")
+
+    cruce_ref <- overrides$cruce %||% el$cruce %||% preset_args$cruce %||% NULL
     preset_args$cruce <- NULL
     overrides$cruce   <- NULL
 
-    df <- NULL
-    if (!is.null(el$data) && is.data.frame(el$data)) df <- el$data
-    if (is.null(df) && !is.null(el$df) && is.data.frame(el$df)) df <- el$df
-
-    if (is.null(df) && exists(".df", inherits = TRUE)) {
-      tmp <- get(".df", inherits = TRUE)
-      if (is.data.frame(tmp)) df <- tmp
-    }
-    if (is.null(df) && exists("data", inherits = TRUE)) {
-      tmp <- get("data", inherits = TRUE)
-      if (is.data.frame(tmp)) df <- tmp
+    ctx_cruce <- NULL
+    cruce <- NULL
+    if (!is.null(cruce_ref) &&
+        is.character(cruce_ref) &&
+        length(cruce_ref) == 1L &&
+        nzchar(trimws(cruce_ref))) {
+      ctx_cruce <- .resolve_ref(cruce_ref, source = ctx_var$source, arg_name = "cruce")
+      cruce <- ctx_cruce$var
     }
 
-    if (is.null(df) || !is.data.frame(df)) {
-      stop("`.render_numerico`: no se encontró un data.frame válido en `el$data/el$df` ni en el entorno.", call. = FALSE)
-    }
-    df <- .apply_named_filters(df, filters = el$filtros %||% list(), arg_name = "filtros")
+    df <- .filter_data(el$filtros %||% list(), source = ctx_var$source)
     if (!nrow(df)) return(.blank_canvas(preset_args, overrides))
-    if (!var %in% names(df)) return(NULL)
-
-    if (!is.null(cruce)) {
-      if (!is.character(cruce) || length(cruce) != 1L || !nzchar(cruce)) cruce <- NULL
-      if (!is.null(cruce) && !cruce %in% names(df)) {
-        stop("`.render_numerico`: el cruce '", cruce, "' no existe en `df`.", call. = FALSE)
-      }
-    }
-
-    .get_inst <- function() {
-      cand <- list(el$instrumento, el$inst, el$rp_inst)
-      cand <- cand[!vapply(cand, is.null, logical(1))]
-      for (obj in cand) if (is.list(obj) && !is.null(obj$survey)) return(obj)
-
-      for (nm in c(".inst", "inst", "instrumento", "rp_inst")) {
-        if (exists(nm, inherits = TRUE)) {
-          obj <- get(nm, inherits = TRUE)
-          if (is.list(obj) && !is.null(obj$survey)) return(obj)
-        }
-      }
-      NULL
-    }
+    if (!ctx_var$var %in% names(df)) return(NULL)
 
     .labels_from_inst <- function(inst, varname) {
       if (is.null(inst) || is.null(inst$survey)) return(NULL)
@@ -1323,7 +2236,7 @@ reporte_ppt_plan <- function(
       return(list(x = x_chr, lvls = unique(x_chr)))
     }
 
-    x_raw <- df[[var]]
+    x_raw <- df[[ctx_var$var]]
     if (is.factor(x_raw)) x_raw <- as.character(x_raw)
     x <- suppressWarnings(as.numeric(x_raw))
 
@@ -1344,8 +2257,8 @@ reporte_ppt_plan <- function(
       m <- mean(x2, na.rm = TRUE)
       if (!is.finite(m)) return(.blank_canvas(preset_args, overrides))
 
-      cat_label <- tryCatch(.title_of_var(var), error = function(e) var)
-      if (is.null(cat_label) || !nzchar(cat_label)) cat_label <- var
+      cat_label <- tryCatch(.title_of_var(ctx_var$raw_ref), error = function(e) ctx_var$var)
+      if (is.null(cat_label) || !nzchar(cat_label)) cat_label <- ctx_var$var
 
       df_wide <- tibble::tibble(
         categoria = cat_label,
@@ -1355,7 +2268,7 @@ reporte_ppt_plan <- function(
 
     } else {
 
-      inst <- .get_inst()
+      inst <- ctx_var$instrumento
       cr <- .apply_cruce_labels(df[[cruce]], inst, cruce)
 
       d2 <- tibble::tibble(
@@ -1433,19 +2346,32 @@ reporte_ppt_plan <- function(
     }
 
     modo  <- el$modo %||% "sm"
-    cruce <- el$cruce %||% NULL
+    multi_source_box <- identical(modo, "box") && is.list(el$vars) && !is.character(el$vars)
+
+    source_use <- if (isTRUE(multi_source_box)) NULL else .element_source(el)
+    ctx_src <- if (isTRUE(multi_source_box)) NULL else .source_ctx(source_use)
+
+    cruce <- if (!is.null(el$cruce)) {
+      .resolve_ref(el$cruce, source = source_use, arg_name = "cruce")$var
+    } else {
+      NULL
+    }
     titulo_tabla <- el$titulo_tabla %||% if (modo == "sm") "Opciones" else "Top 2 Box"
-    data_radar <- .filter_data(el$filtros %||% list())
-    if (!nrow(data_radar)) return(.blank_canvas(preset_args, el$overrides %||% list()))
+    data_radar <- if (isTRUE(multi_source_box)) NULL else .filter_data(el$filtros %||% list(), source = source_use)
+    if (!isTRUE(multi_source_box) && !nrow(data_radar)) return(.blank_canvas(preset_args, el$overrides %||% list()))
+
+    preset_args <- preset_args %||% list()
+    overrides   <- el$overrides %||% list()
 
     if (identical(modo, "sm")) {
+      var_use <- .resolve_ref(el$var, source = source_use, arg_name = "var")$var
 
       omit_codes  <- el$sm_omit_codes  %||% preset_args$sm_omit_codes  %||% NULL
       omit_labels <- el$sm_omit_labels %||% preset_args$sm_omit_labels %||% NULL
       omit_na     <- el$sm_omit_na     %||% preset_args$sm_omit_na     %||% TRUE
 
       d_radar <- .radar_build_sm(
-        var         = el$var,
+        var         = var_use,
         cruce       = cruce,
         top_n       = el$top_n %||% NULL,
 
@@ -1454,21 +2380,149 @@ reporte_ppt_plan <- function(
         sm_omit_na     = omit_na,
 
         data        = data_radar,
-        survey      = survey,
-        orders_list = orders_list,
+        survey      = ctx_src$survey,
+        orders_list = ctx_src$orders_list,
         env_paletas = env_diapos
       )
     } else if (identical(modo, "box")) {
-      d_radar <- .radar_build_box(
-        vars        = el$vars,
-        cruce       = cruce,
-        box_labels  = el$box_labels,
-        titulo_tabla = titulo_tabla,
-        data        = data_radar,
-        survey      = survey,
-        orders_list = orders_list,
-        env_paletas = env_diapos
-      )
+      if (is.list(el$vars) && !is.character(el$vars)) {
+        axis_refs <- el$vars
+        flat_refs <- .extract_ref_values(axis_refs)
+        ctx_all <- lapply(flat_refs, .resolve_ref, arg_name = "vars")
+        src_order <- names(data_sources)
+        srcs_used <- unique(vapply(ctx_all, `[[`, character(1), "source"))
+        srcs_used <- src_order[src_order %in% srcs_used]
+
+        if (!is.null(cruce) && length(srcs_used) > 1L) {
+          stop("radar_tabla (modo='box'): cuando `vars` usa varias fuentes, `cruce` debe ser NULL.", call. = FALSE)
+        }
+
+        scale_spec <- .shared_scale_spec(ctx_all, arg_name = "radar_tabla(box)")
+        ln <- scale_spec$list_name
+        choices_use <- scale_spec$choices
+        choices_label_col <- .choices_label_col(choices_use)
+
+        label_to_code <- NULL
+        if (!is.null(choices_use) && is.data.frame(choices_use) &&
+            nzchar(ln) && "list_name" %in% names(choices_use) && "name" %in% names(choices_use)) {
+          sub_choices <- choices_use[choices_use$list_name == ln, , drop = FALSE]
+          if (nrow(sub_choices)) {
+            labels_use <- if (!is.na(choices_label_col) && choices_label_col %in% names(sub_choices)) {
+              as.character(sub_choices[[choices_label_col]])
+            } else {
+              as.character(sub_choices$name)
+            }
+            label_to_code <- stats::setNames(as.character(sub_choices$name), labels_use)
+          }
+        }
+
+        codes_box_global <- NULL
+        if (!is.null(label_to_code)) {
+          codes_box_global <- unname(label_to_code[el$box_labels])
+          if (any(is.na(codes_box_global))) {
+            stop(
+              "radar_tabla (modo='box'): no se mapearon correctamente los códigos desde `box_labels`.\n",
+              "Labels pedidos: ", paste(el$box_labels, collapse = " | "),
+              call. = FALSE
+            )
+          }
+        }
+
+        default_palette <- function(labels) {
+          cols <- grDevices::hcl.colors(length(labels), palette = "Dark 3")
+          stats::setNames(cols, labels)
+        }
+
+        rows <- list()
+        for (axis_id in names(axis_refs)) {
+          refs_i <- axis_refs[[axis_id]]
+          axis_title <- axis_id
+          if (!nzchar(trimws(axis_title))) axis_title <- axis_id
+
+          for (ref in refs_i) {
+            ctx_v <- .resolve_ref(ref, arg_name = "vars")
+            tab <- .tab_freq(ref, filtros = el$filtros %||% list(), source = ctx_v$source)
+            if (is.null(tab) || !nrow(tab)) next
+
+            N_total <- NA_real_
+            if ("Opciones" %in% names(tab) && "n" %in% names(tab)) {
+              idx_tot <- which(tab$Opciones == "Total")
+              if (length(idx_tot)) N_total <- suppressWarnings(as.numeric(tab$n[idx_tot[1]]))
+            }
+
+            tab <- tab |>
+              dplyr::filter(.data$Opciones != "Total") |>
+              dplyr::filter(!is.na(.data$n) & .data$n > 0)
+
+            if (!nrow(tab)) next
+            if (!is.finite(N_total)) N_total <- sum(tab$n, na.rm = TRUE)
+            if (!is.finite(N_total) || N_total <= 0) next
+
+            opts_chr <- as.character(tab$Opciones)
+            labels_sel <- el$box_labels
+            codes_sel <- codes_box_global %||% character(0)
+            matched_sel <- union(
+              labels_sel[labels_sel %in% opts_chr],
+              codes_sel[codes_sel %in% opts_chr]
+            )
+            if (!length(matched_sel)) {
+              stop(
+                "radar_tabla (modo='box'): no se mapearon correctamente las categorías desde `box_labels`.\n",
+                "Labels pedidos: ", paste(el$box_labels, collapse = " | "),
+                "\nLabels disponibles: ", paste(unique(opts_chr), collapse = " | "),
+                call. = FALSE
+              )
+            }
+
+            n_box <- sum(tab$n[opts_chr %in% matched_sel], na.rm = TRUE)
+            pct <- as.numeric(n_box) / N_total
+
+            rows[[length(rows) + 1L]] <- tibble::tibble(
+              eje = as.character(axis_title),
+              grupo = .pretty_source_label(ctx_v$source),
+              valor = as.numeric(pct)
+            )
+          }
+        }
+
+        d_radar <- dplyr::bind_rows(rows)
+        if (nrow(d_radar)) {
+          group_levels <- unique(unlist(lapply(axis_refs, function(refs_i) {
+            refs_i <- refs_i[!is.na(refs_i) & nzchar(trimws(refs_i))]
+            if (!length(refs_i)) return(character(0))
+            ctx_i <- lapply(refs_i, .resolve_ref, arg_name = "vars")
+            src_i <- unique(vapply(ctx_i, `[[`, character(1), "source"))
+            src_i <- src_order[src_order %in% src_i]
+            vapply(src_i, .pretty_source_label, character(1))
+          }), use.names = FALSE))
+
+          d_radar$grupo <- factor(as.character(d_radar$grupo), levels = unique(group_levels))
+          pal_user <- el$colores_series %||% NULL
+          if (!is.null(pal_user) && !is.null(names(pal_user))) {
+            keep <- levels(d_radar$grupo)[levels(d_radar$grupo) %in% names(pal_user)]
+            pal_use <- pal_user[keep]
+          } else {
+            pal_use <- default_palette(levels(d_radar$grupo))
+          }
+          attr(d_radar, "palette") <- pal_use
+        }
+      } else {
+        vars_use <- vapply(
+          .extract_ref_values(el$vars),
+          function(v) .resolve_ref(v, source = source_use, arg_name = "vars")$var,
+          character(1)
+        )
+        d_radar <- .radar_build_box(
+          vars        = vars_use,
+          cruce       = cruce,
+          box_labels  = el$box_labels,
+          titulo_tabla = titulo_tabla,
+          data        = data_radar,
+          survey      = ctx_src$survey,
+          orders_list = ctx_src$orders_list,
+          env_paletas = env_diapos
+        )
+      }
     } else {
       stop("radar_tabla: modo no soportado: ", modo, call. = FALSE)
     }
@@ -1486,7 +2540,7 @@ reporte_ppt_plan <- function(
     # -----------------------------
     # FIX: pasar paleta del CRUCE
     # -----------------------------
-    pal_series <- attr(d_radar, "palette", exact = TRUE)
+    pal_series <- el$colores_series %||% attr(d_radar, "palette", exact = TRUE)
 
     if (!is.null(pal_series) && is.atomic(pal_series) && length(pal_series) && !is.null(names(pal_series))) {
 
@@ -1521,9 +2575,6 @@ reporte_ppt_plan <- function(
       }
     }
 
-    preset_args <- preset_args %||% list()
-    overrides   <- el$overrides %||% list()
-
     args <- .merge_args(base_args, preset_args, overrides)
     fun  <- graficar_radar
     args <- .keep_formals(fun, args)
@@ -1536,17 +2587,21 @@ reporte_ppt_plan <- function(
       stop("No existe `graficar_heatmap_dimensiones()` en el entorno/paquete.", call. = FALSE)
     }
 
-    data_dim <- .inject_dimensiones_palette(data, el$cruce %||% NULL)
+    source_use <- .element_source(el)
+    ctx_src <- .source_ctx(source_use)
+    cruce_var <- if (!is.null(el$cruce)) .resolve_ref(el$cruce, source = source_use, arg_name = "cruce")$var else NULL
+    iter_var <- if (!is.null(el$iter_var)) .resolve_ref(el$iter_var, source = source_use, arg_name = "iter_var")$var else NULL
+    data_dim <- .inject_dimensiones_palette(ctx_src$data, el$cruce %||% NULL, source = source_use)
 
     base_args <- list(
       data = data_dim,
-      instrumento = instrumento,
+      instrumento = ctx_src$instrumento,
       modo = el$modo,
       objetivo = el$objetivo,
-      cruce = el$cruce %||% NULL,
+      cruce = cruce_var,
       incluir_total = el$incluir_total %||% NULL,
       filtros = el$filtros %||% list(),
-      iter_var = el$iter_var %||% NULL,
+      iter_var = iter_var,
       iter_level = el$iter_level %||% NULL,
       titulo = NULL,
       subtitulo = NULL,
@@ -1563,17 +2618,21 @@ reporte_ppt_plan <- function(
       stop("No existe `graficar_radar_dimensiones()` en el entorno/paquete.", call. = FALSE)
     }
 
-    data_dim <- .inject_dimensiones_palette(data, el$cruce %||% NULL)
+    source_use <- .element_source(el)
+    ctx_src <- .source_ctx(source_use)
+    cruce_var <- if (!is.null(el$cruce)) .resolve_ref(el$cruce, source = source_use, arg_name = "cruce")$var else NULL
+    iter_var <- if (!is.null(el$iter_var)) .resolve_ref(el$iter_var, source = source_use, arg_name = "iter_var")$var else NULL
+    data_dim <- .inject_dimensiones_palette(ctx_src$data, el$cruce %||% NULL, source = source_use)
 
     base_args <- list(
       data = data_dim,
-      instrumento = instrumento,
+      instrumento = ctx_src$instrumento,
       modo = el$modo,
       objetivo = el$objetivo,
-      cruce = el$cruce %||% NULL,
+      cruce = cruce_var,
       incluir_total = el$incluir_total %||% NULL,
       filtros = el$filtros %||% list(),
-      iter_var = el$iter_var %||% NULL,
+      iter_var = iter_var,
       iter_level = el$iter_level %||% NULL,
       titulo = NULL,
       subtitulo = NULL,
@@ -1590,17 +2649,21 @@ reporte_ppt_plan <- function(
       stop("No existe `graficar_radar_tabla_dimensiones()` en el entorno/paquete.", call. = FALSE)
     }
 
-    data_dim <- .inject_dimensiones_palette(data, el$cruce %||% NULL)
+    source_use <- .element_source(el)
+    ctx_src <- .source_ctx(source_use)
+    cruce_var <- if (!is.null(el$cruce)) .resolve_ref(el$cruce, source = source_use, arg_name = "cruce")$var else NULL
+    iter_var <- if (!is.null(el$iter_var)) .resolve_ref(el$iter_var, source = source_use, arg_name = "iter_var")$var else NULL
+    data_dim <- .inject_dimensiones_palette(ctx_src$data, el$cruce %||% NULL, source = source_use)
 
     base_args <- list(
       data = data_dim,
-      instrumento = instrumento,
+      instrumento = ctx_src$instrumento,
       modo = el$modo,
       objetivo = el$objetivo,
-      cruce = el$cruce %||% NULL,
+      cruce = cruce_var,
       incluir_total = el$incluir_total %||% NULL,
       filtros = el$filtros %||% list(),
-      iter_var = el$iter_var %||% NULL,
+      iter_var = iter_var,
       iter_level = el$iter_level %||% NULL,
       titulo = NULL,
       subtitulo = NULL,
@@ -1852,6 +2915,7 @@ reporte_ppt_plan <- function(
 
       title_slide <- slide$title %||% NULL
       slots       <- slide$slots %||% list()
+      subtitle_slide <- slots$subtitle %||% NULL
       el_plot     <- slots$plot %||% NULL
 
       if (!inherits(el_plot, "ppt_element")) {
@@ -1868,7 +2932,7 @@ reporte_ppt_plan <- function(
       p <- .render_element(el_plot)
 
       if (is.null(p)) {
-        vv <- el_plot$var %||% paste(el_plot$vars %||% character(0), collapse = ", ")
+        vv <- .element_var_label(el_plot) %||% "<sin vars>"
         stop("No se pudo renderizar elemento: ", etype, " (", vv, ").", call. = FALSE)
       }
 
@@ -1879,7 +2943,8 @@ reporte_ppt_plan <- function(
         title_slide <- el_plot$title_slide %||% {
           if (!is.null(el_plot$var)) .title_of_var(el_plot$var) else {
             v1 <- el_plot$vars %||% NULL
-            if (!is.null(v1) && length(v1)) .title_of_var(v1[1]) else NULL
+            first_ref <- if (!is.null(v1) && length(v1)) .extract_ref_values(v1)[1] else NULL
+            if (!is.null(first_ref) && nzchar(first_ref)) .title_of_var(first_ref) else NULL
           }
         }
       }
@@ -1890,6 +2955,10 @@ reporte_ppt_plan <- function(
 
         if (!is.null(title_slide) && nzchar(title_slide)) {
           doc <- .ph_with_strict(doc, title_slide, contract$slots$title)
+        }
+
+        if (!is.null(subtitle_slide) && nzchar(trimws(as.character(subtitle_slide)[1]))) {
+          doc <- .ph_with_slide_subtitle(doc, subtitle = subtitle_slide, title_spec = contract$slots$title)
         }
 
         doc <- .ph_with_strict(
@@ -1927,10 +2996,7 @@ reporte_ppt_plan <- function(
         slide_i    = i,
         slide_type = "slide_1",
         element    = el_plot$.element_type %||% NA_character_,
-        var        = el_plot$var %||% {
-          v1 <- el_plot$vars %||% NULL
-          if (!is.null(v1) && length(v1)) v1[1] else NA_character_
-        }
+        var        = .element_var_label(el_plot)
       )
       next
     }
@@ -1998,9 +3064,9 @@ reporte_ppt_plan <- function(
           el_right$.element_type %||% "<NA>"
         ),
         var = paste0(
-          (el_left$var  %||% paste(el_left$vars  %||% character(0), collapse = ",")),
+          (.element_var_label(el_left) %||% "<sin vars>"),
           " | ",
-          (el_right$var %||% paste(el_right$vars %||% character(0), collapse = ","))
+          (.element_var_label(el_right) %||% "<sin vars>")
         )
       )
       next
@@ -2090,10 +3156,10 @@ reporte_ppt_plan <- function(
           sep = " | "
         ),
         var = paste(
-          el_ul$var %||% paste(el_ul$vars %||% character(0), collapse = ","),
-          el_ur$var %||% paste(el_ur$vars %||% character(0), collapse = ","),
-          el_bl$var %||% paste(el_bl$vars %||% character(0), collapse = ","),
-          el_br$var %||% paste(el_br$vars %||% character(0), collapse = ","),
+          .element_var_label(el_ul) %||% "<sin vars>",
+          .element_var_label(el_ur) %||% "<sin vars>",
+          .element_var_label(el_bl) %||% "<sin vars>",
+          .element_var_label(el_br) %||% "<sin vars>",
           sep = " || "
         )
       )
@@ -2121,7 +3187,7 @@ reporte_ppt_plan <- function(
 
       p <- .render_element(el_plot)
       if (is.null(p)) {
-        vv <- el_plot$var %||% paste(el_plot$vars %||% character(0), collapse = ", ")
+        vv <- .element_var_label(el_plot) %||% "<sin vars>"
         stop("text_r: no se pudo renderizar plot (", el_plot$.element_type %||% "<NA>", " | ", vv, ").", call. = FALSE)
       }
       rendered[[length(rendered) + 1]] <- p
@@ -2131,7 +3197,8 @@ reporte_ppt_plan <- function(
         title_slide <- el_plot$title_slide %||% {
           if (!is.null(el_plot$var)) .title_of_var(el_plot$var) else {
             v1 <- el_plot$vars %||% NULL
-            if (!is.null(v1) && length(v1)) .title_of_var(v1[1]) else NULL
+            first_ref <- if (!is.null(v1) && length(v1)) .extract_ref_values(v1)[1] else NULL
+            if (!is.null(first_ref) && nzchar(first_ref)) .title_of_var(first_ref) else NULL
           }
         }
       }
@@ -2184,10 +3251,7 @@ reporte_ppt_plan <- function(
         slide_i    = i,
         slide_type = "text_r",
         element    = el_plot$.element_type %||% NA_character_,
-        var        = el_plot$var %||% {
-          v1 <- el_plot$vars %||% NULL
-          if (!is.null(v1) && length(v1)) v1[1] else NA_character_
-        }
+        var        = .element_var_label(el_plot)
       )
       next
     }
@@ -2212,7 +3276,7 @@ reporte_ppt_plan <- function(
 
       p <- .render_element(el_plot)
       if (is.null(p)) {
-        vv <- el_plot$var %||% paste(el_plot$vars %||% character(0), collapse = ", ")
+        vv <- .element_var_label(el_plot) %||% "<sin vars>"
         stop("text_l: no se pudo renderizar plot (", el_plot$.element_type %||% "<NA>", " | ", vv, ").", call. = FALSE)
       }
       rendered[[length(rendered) + 1]] <- p
@@ -2221,7 +3285,8 @@ reporte_ppt_plan <- function(
         title_slide <- el_plot$title_slide %||% {
           if (!is.null(el_plot$var)) .title_of_var(el_plot$var) else {
             v1 <- el_plot$vars %||% NULL
-            if (!is.null(v1) && length(v1)) .title_of_var(v1[1]) else NULL
+            first_ref <- if (!is.null(v1) && length(v1)) .extract_ref_values(v1)[1] else NULL
+            if (!is.null(first_ref) && nzchar(first_ref)) .title_of_var(first_ref) else NULL
           }
         }
       }
@@ -2274,10 +3339,7 @@ reporte_ppt_plan <- function(
         slide_i    = i,
         slide_type = "text_l",
         element    = el_plot$.element_type %||% NA_character_,
-        var        = el_plot$var %||% {
-          v1 <- el_plot$vars %||% NULL
-          if (!is.null(v1) && length(v1)) v1[1] else NA_character_
-        }
+        var        = .element_var_label(el_plot)
       )
       next
     }

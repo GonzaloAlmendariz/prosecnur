@@ -27,6 +27,31 @@
   x[1]
 }
 
+.sm_unique_nonempty <- function(x) {
+  x <- .sm_norm_ws(x)
+  x <- x[!is.na(x) & nzchar(x)]
+  unique(x)
+}
+
+.sm_unique_codes <- function(labels) {
+  codes <- .sm_safe_slug(labels)
+  used <- character(0)
+  out <- character(length(codes))
+
+  for (i in seq_along(codes)) {
+    out[i] <- .sm_unique_name(codes[i], used = used, suffix = "opt")
+    used <- c(used, out[i])
+  }
+
+  out
+}
+
+.sm_text_label_set <- function(x) {
+  labels <- .sm_unique_nonempty(x)
+  if (length(labels) < 2L) return(character(0))
+  stats::setNames(.sm_unique_codes(labels), labels)
+}
+
 .sm_mode_nonempty <- function(x, fallback = NA_character_) {
   x <- .sm_nonempty(x)
   if (!length(x)) return(as.character(fallback)[1])
@@ -149,6 +174,25 @@
   }
 
   all(unique(tolower(x_chr)) %in% c("0", "1", "true", "false", "t", "f", "si", "sí", "no", "yes"))
+}
+
+.sm_is_text_select_one_like <- function(x) {
+  if (!(is.character(x) || is.factor(x))) return(FALSE)
+
+  vals <- .sm_unique_nonempty(x)
+  n_vals <- length(vals)
+  if (n_vals < 2L || n_vals > 8L) return(FALSE)
+  if (any(nchar(vals) > 80L)) return(FALSE)
+
+  x_chr <- .sm_norm_ws(x)
+  x_chr <- x_chr[!is.na(x_chr) & nzchar(x_chr)]
+  n_nonmiss <- length(x_chr)
+  if (!n_nonmiss) return(FALSE)
+
+  # Evita tratar textos realmente abiertos como categorías cuando casi todo es único.
+  if (n_vals > max(3L, floor(n_nonmiss * 0.5))) return(FALSE)
+
+  TRUE
 }
 
 .sm_is_dummy_selected <- function(x) {
@@ -292,7 +336,32 @@
     return("satisfaccion_4")
   }
 
+  if (
+    identical(
+      core_labels,
+      c("muy insatisfecho", "insatisfecho", "satisfecho", "muy satisfecho")
+    )
+  ) {
+    return("satisfaccion_4")
+  }
+
   NA_character_
+}
+
+.sm_sort_group_rows <- function(df) {
+  if (is.null(df) || !nrow(df) || !("suffix" %in% names(df))) return(df)
+  suffix_num <- suppressWarnings(as.numeric(as.character(df$suffix)))
+  if (all(!is.na(suffix_num))) {
+    df <- df[order(suffix_num, df$order), , drop = FALSE]
+  } else {
+    df <- df[order(df$order), , drop = FALSE]
+  }
+  if ("order" %in% names(df)) {
+    start_ord <- suppressWarnings(min(as.numeric(df$order), na.rm = TRUE))
+    if (!is.finite(start_ord)) start_ord <- 1L
+    df$order <- start_ord + seq_len(nrow(df)) - 1L
+  }
+  df
 }
 
 .sm_detect_datetime <- function(x, nm = NULL) {
@@ -384,6 +453,7 @@
     is_question_like = vapply(cols, .sm_is_question_name, logical(1)),
     label_signature = vapply(data_raw, .sm_label_signature, character(1)),
     binary_like = vapply(data_raw, .sm_is_binary_like, logical(1)),
+    text_select_one_like = vapply(data_raw, .sm_is_text_select_one_like, logical(1)),
     storage_type_guess = vapply(seq_along(data_raw), function(i) .sm_storage_type_guess(data_raw[[i]], cols[i]), character(1))
   )
   vars_tbl$is_auxiliary <- !vars_tbl$is_metadata & !vars_tbl$is_question_like
@@ -399,13 +469,18 @@
         vars_tbl$group_guess %in% multi_groups, "select_multiple_dummy",
         ifelse(
           vars_tbl$group_guess %in% battery_groups, "battery_item",
-          ifelse(vars_tbl$n_value_labels > 1L, "select_one", vars_tbl$storage_type_guess)
+          ifelse(vars_tbl$n_value_labels > 1L | vars_tbl$text_select_one_like, "select_one", vars_tbl$storage_type_guess)
         )
       )
     )
   )
 
-  label_sets <- stats::setNames(lapply(data_raw, function(v) attr(v, "labels", exact = TRUE)), cols)
+  label_sets <- stats::setNames(lapply(seq_along(data_raw), function(i) {
+    labs <- attr(data_raw[[i]], "labels", exact = TRUE)
+    if (!is.null(labs) && length(labs)) return(labs)
+    if (isTRUE(vars_tbl$text_select_one_like[i])) return(.sm_text_label_set(data_raw[[i]]))
+    character(0)
+  }), cols)
   structure(
     list(
       data_raw = as.data.frame(data_raw, stringsAsFactors = FALSE),
@@ -499,6 +574,7 @@
   battery_groups <- unique(vars_tbl$group_guess[vars_tbl$kind_guess == "battery_item"])
   for (grp in battery_groups) {
     rows <- vars_tbl[vars_tbl$group_guess == grp & vars_tbl$kind_guess == "battery_item", , drop = FALSE]
+    rows <- .sm_sort_group_rows(rows)
     prompt_label <- .sm_prompt_from_labels(rows$label)
 
     labs <- .sm_or(label_sets[[rows$name_raw[1]]], numeric(0))
@@ -525,7 +601,7 @@
   non_multi_names <- vars_tbl$name_final[vars_tbl$kind_guess != "select_multiple_dummy"]
   for (grp in multi_groups) {
     rows <- vars_tbl[vars_tbl$group_guess == grp & vars_tbl$kind_guess == "select_multiple_dummy", , drop = FALSE]
-    rows <- rows[order(rows$order), , drop = FALSE]
+    rows <- .sm_sort_group_rows(rows)
     others <- vars_tbl[vars_tbl$group_guess == grp & vars_tbl$kind_guess == "other_text", , drop = FALSE]
 
     mother_name <- .sm_unique_name(grp, c(non_multi_names, used_names), suffix = "sm")
@@ -1025,13 +1101,34 @@ surveymonkey_data <- function(x, keep_raw_multi = FALSE, keep_metadata = TRUE) {
 
   question_specs <- spec$question_specs[order(spec$question_specs$order), , drop = FALSE]
 
+  recode_text_select_one <- function(values, labs) {
+    if (!(is.character(values) || is.factor(values)) || is.null(labs) || !length(labs)) {
+      return(values)
+    }
+
+    labels_norm <- .sm_norm_ws(names(labs))
+    codes_chr <- as.character(unname(labs))
+    map <- stats::setNames(codes_chr, labels_norm)
+
+    values_norm <- .sm_norm_ws(values)
+    out_vals <- unname(map[values_norm])
+    out_vals[is.na(values_norm) | !nzchar(values_norm)] <- NA_character_
+    out_vals[!is.na(values_norm) & nzchar(values_norm) & is.na(out_vals)] <- values_norm[!is.na(values_norm) & nzchar(values_norm) & is.na(out_vals)]
+    out_vals
+  }
+
   for (i in seq_len(nrow(question_specs))) {
     row <- question_specs[i, , drop = FALSE]
+    row_role <- as.character(row$role[1])
 
-    if (row$role == "metadata" && !isTRUE(keep_metadata)) next
+    if (identical(row_role, "metadata") && !isTRUE(keep_metadata)) next
 
     if (!is.na(row$raw_name) && row$raw_name %in% names(df)) {
-      out[[row$name]] <- df[[row$raw_name]]
+      values <- df[[row$raw_name]]
+      if (identical(row_role, "select_one")) {
+        values <- recode_text_select_one(values, x$label_sets[[row$raw_name]])
+      }
+      out[[row$name]] <- values
     }
   }
 

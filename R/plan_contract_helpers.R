@@ -540,6 +540,12 @@
     if (!length(x)) return("<sin vars>")
     return(paste(x, collapse = ", "))
   }
+  if (is.list(x)) {
+    vals <- unlist(lapply(x, .fmt_vars), use.names = FALSE)
+    vals <- vals[!is.na(vals) & nzchar(trimws(vals)) & vals != "<sin vars>"]
+    if (!length(vals)) return("<sin vars>")
+    return(paste(vals, collapse = ", "))
+  }
   "<sin vars>"
 }
 
@@ -1201,4 +1207,3 @@ p_reset <- function(
 
 
 `%||%` <- function(x, y) if (!is.null(x)) x else y
-

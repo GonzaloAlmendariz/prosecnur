@@ -19,10 +19,13 @@ reporte_ppt_plan(
 )
 }
 \arguments{
-\item{data}{\code{data.frame} o \code{tibble} con las variables (o dummies) a reportar.}
+\item{data}{\code{data.frame}/\code{tibble} con las variables (o dummies) a reportar, o
+una lista nombrada de bases cuando el plan combina varias fuentes.}
 
 \item{instrumento}{Objeto de instrumento con al menos \code{survey} (y opcionalmente \code{choices},
-\code{orders_list}). Si es \code{NULL}, se busca el atributo \code{instrumento_reporte} en \code{data}.}
+\code{orders_list}), o una lista nombrada de instrumentos alineada con \code{data}.
+Si es \code{NULL}, se busca el atributo \code{instrumento_reporte} en \code{data} cuando
+hay una sola fuente.}
 
 \item{path_ppt}{Ruta del \code{.pptx} de salida.}
 
@@ -72,4 +75,8 @@ El flujo recomendado es:
 \item Definir \code{diapo_001 <- p_slide_*(...)}, \code{diapo_002 <- ...} (uno o varios chunks).
 \item Llamar a \code{reporte_ppt_plan(presets = presets, ...)} para recolectar y exportar.
 }
+
+Cuando \code{data} e \code{instrumento} son listas nombradas, los elementos \verb{p_*()} pueden
+referenciar variables con la sintaxis \code{fuente$variable}, por ejemplo
+\code{"estudiantes$p6_1"} o \code{"docentes$p4_1"}.
 }
