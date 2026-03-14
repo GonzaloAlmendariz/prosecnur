@@ -91,6 +91,133 @@
   max(0.40, min(0.85, base * mult_eff))
 }
 
+.estimate_label_width_apiladas <- function(labels, size) {
+  labels <- as.character(labels)
+  if (!length(labels)) return(numeric(0))
+
+  size <- suppressWarnings(as.numeric(size))
+  if (!length(size)) size <- 3
+  size <- rep_len(size, length(labels))
+  size[!is.finite(size)] <- 3
+
+  chars <- nchar(labels, type = "width", allowNA = FALSE, keepNA = FALSE)
+  chars[!is.finite(chars)] <- 0
+
+  est <- 0.005 + 0.0045 * pmax(chars, 2) + 0.0035 * pmax(size, 1)
+  pmax(0.018, pmin(0.07, est))
+}
+
+.repel_label_positions_apiladas <- function(x,
+                                            labels,
+                                            label_size,
+                                            movable,
+                                            max_shift = 0.05,
+                                            x_min = 0,
+                                            x_max = 1,
+                                            padding = 0.003,
+                                            max_iter = 16L) {
+  x <- suppressWarnings(as.numeric(x))
+  n <- length(x)
+  if (!n) return(x)
+  if (n == 1L) return(x)
+
+  movable <- as.logical(movable)
+  movable[is.na(movable)] <- FALSE
+  if (!any(movable)) return(x)
+
+  max_shift <- suppressWarnings(as.numeric(max_shift)[1])
+  if (!is.finite(max_shift) || is.na(max_shift) || max_shift < 0) max_shift <- 0.05
+
+  ord <- order(x, seq_along(x))
+  inv <- order(ord)
+
+  x_ord <- x[ord]
+  labels_ord <- rep_len(as.character(labels), n)[ord]
+  size_ord <- rep_len(suppressWarnings(as.numeric(label_size)), n)[ord]
+  movable_ord <- movable[ord]
+
+  width_est <- .estimate_label_width_apiladas(labels_ord, size_ord)
+  half_width <- width_est / 2
+
+  lower <- pmax(x_min + half_width, x_ord - max_shift)
+  upper <- pmin(x_max - half_width, x_ord + max_shift)
+
+  impossible <- lower > upper
+  if (any(impossible)) {
+    center_fix <- pmin(x_max - half_width[impossible], pmax(x_min + half_width[impossible], x_ord[impossible]))
+    lower[impossible] <- center_fix
+    upper[impossible] <- center_fix
+  }
+
+  x_adj <- pmin(upper, pmax(lower, x_ord))
+
+  max_iter <- suppressWarnings(as.integer(max_iter)[1])
+  if (!is.finite(max_iter) || is.na(max_iter) || max_iter < 1L) max_iter <- 16L
+
+  for (iter in seq_len(max_iter)) {
+    changed <- FALSE
+
+    for (i in seq_len(n - 1L)) {
+      required_gap <- half_width[i] + half_width[i + 1L] + padding
+      current_gap <- x_adj[i + 1L] - x_adj[i]
+
+      if (!is.finite(current_gap) || current_gap + 1e-9 >= required_gap) next
+
+      overlap <- required_gap - current_gap
+      left_room <- if (movable_ord[i]) max(0, x_adj[i] - lower[i]) else 0
+      right_room <- if (movable_ord[i + 1L]) max(0, upper[i + 1L] - x_adj[i + 1L]) else 0
+
+      if (left_room <= 0 && right_room <= 0) next
+
+      shift_left <- 0
+      shift_right <- 0
+
+      if (movable_ord[i] && movable_ord[i + 1L]) {
+        shift_left <- min(overlap / 2, left_room)
+        shift_right <- min(overlap / 2, right_room)
+
+        rem <- overlap - shift_left - shift_right
+        if (rem > 1e-9 && right_room > shift_right) {
+          extra <- min(rem, right_room - shift_right)
+          shift_right <- shift_right + extra
+          rem <- rem - extra
+        }
+        if (rem > 1e-9 && left_room > shift_left) {
+          extra <- min(rem, left_room - shift_left)
+          shift_left <- shift_left + extra
+        }
+      } else if (movable_ord[i]) {
+        shift_left <- min(overlap, left_room)
+      } else if (movable_ord[i + 1L]) {
+        shift_right <- min(overlap, right_room)
+      }
+
+      if (shift_left > 0) x_adj[i] <- x_adj[i] - shift_left
+      if (shift_right > 0) x_adj[i + 1L] <- x_adj[i + 1L] + shift_right
+      if (shift_left > 0 || shift_right > 0) changed <- TRUE
+    }
+
+    x_adj <- pmin(upper, pmax(lower, x_adj))
+
+    if (n > 1L) {
+      for (i in 2:n) {
+        if (x_adj[i] <= x_adj[i - 1L]) {
+          x_adj[i] <- min(upper[i], x_adj[i - 1L] + 1e-6)
+        }
+      }
+      for (i in seq.int(n - 1L, 1L)) {
+        if (x_adj[i] >= x_adj[i + 1L]) {
+          x_adj[i] <- max(lower[i], x_adj[i + 1L] - 1e-6)
+        }
+      }
+    }
+
+    if (!changed) break
+  }
+
+  x_adj[inv]
+}
+
 #' Graficar barras apiladas (100%) con canvas opcional y exportación
 #'
 #' Construye un gráfico de **barras apiladas horizontales** normalizadas a 100% por categoría.
@@ -143,6 +270,10 @@
 #'   Estilos de texto del encabezado y caption.
 #' @param color_leyenda,size_leyenda Estilos de texto de leyenda.
 #' @param color_texto_barras,size_texto_barras,size_texto_barras_peq Estilos de etiquetas internas.
+#' @param repeler_etiquetas_peq Si `TRUE`, intenta separar horizontalmente las etiquetas pequenas
+#'   cuando se superponen, manteniendolas cerca de su centro original.
+#' @param desplazamiento_max_etiquetas_peq Corrimiento horizontal maximo permitido para etiquetas
+#'   pequenas, en la escala `0-1` de la barra normalizada.
 #' @param color_barra_extra,size_barra_extra,size_titulo_extra Estilos de la columna extra.
 #' @param color_ejes,size_ejes Estilos de las etiquetas de categorías (dibujadas en canvas).
 #' @param color_titulos_grupo,size_titulos_grupo Estilos para títulos de bloque izquierdo en canvas.
@@ -249,6 +380,8 @@ graficar_barras_apiladas <- function(
     color_texto_barras    = "white",
     size_texto_barras     = 3,
     size_texto_barras_peq = NULL,
+    repeler_etiquetas_peq = TRUE,
+    desplazamiento_max_etiquetas_peq = 0.05,
     color_barra_extra     = "#000000",
     size_barra_extra      = 3,
     size_titulo_extra     = 3,
@@ -362,6 +495,11 @@ graficar_barras_apiladas <- function(
   decimales <- suppressWarnings(as.integer(decimales))
   if (length(decimales) < 1L || !is.finite(decimales[1]) || decimales[1] < 0L) decimales <- 0L else decimales <- decimales[1]
   size_texto_barras_peq <- size_texto_barras_peq %||% size_texto_barras
+  repeler_etiquetas_peq <- isTRUE(repeler_etiquetas_peq)
+  desplazamiento_max_etiquetas_peq <- suppressWarnings(as.numeric(desplazamiento_max_etiquetas_peq)[1])
+  if (!is.finite(desplazamiento_max_etiquetas_peq) || is.na(desplazamiento_max_etiquetas_peq) || desplazamiento_max_etiquetas_peq < 0) {
+    desplazamiento_max_etiquetas_peq <- 0.05
+  }
   if (is.null(umbral_etiqueta_peq)) umbral_etiqueta_peq <- umbral_etiqueta
 
   hjust_titulo  <- hjust_from_pos(pos_titulo)
@@ -640,9 +778,28 @@ graficar_barras_apiladas <- function(
           .valor_plot >= umbral_etiqueta     ~ "grande",
           .valor_plot >= umbral_etiqueta_peq ~ "peq",
           TRUE                               ~ "ninguna"
-        )
+        ),
+        .size_label = dplyr::if_else(.tamano_etq == "grande", size_texto_barras, size_texto_barras_peq),
+        x_label = x_center
       ) |>
       dplyr::filter(.tamano_etq != "ninguna", is.finite(x_center))
+
+    if (isTRUE(repeler_etiquetas_peq) &&
+        desplazamiento_max_etiquetas_peq > 0 &&
+        nrow(df_lab) > 1L &&
+        any(df_lab$.tamano_etq == "peq")) {
+      idx_por_cat <- split(seq_len(nrow(df_lab)), as.character(df_lab[[var_categoria]]))
+      for (idx in idx_por_cat) {
+        if (length(idx) < 2L) next
+        df_lab$x_label[idx] <- .repel_label_positions_apiladas(
+          x = df_lab$x_center[idx],
+          labels = df_lab$lab[idx],
+          label_size = df_lab$.size_label[idx],
+          movable = df_lab$.tamano_etq[idx] == "peq",
+          max_shift = desplazamiento_max_etiquetas_peq
+        )
+      }
+    }
 
     df_lab_grande <- df_lab[df_lab$.tamano_etq == "grande", , drop = FALSE]
     df_lab_peq    <- df_lab[df_lab$.tamano_etq == "peq",    , drop = FALSE]
@@ -652,7 +809,7 @@ graficar_barras_apiladas <- function(
         ggplot2::geom_text(
           data    = df_lab_grande,
           mapping = ggplot2::aes(
-            x = x_center,
+            x = x_label,
             y = if (usar_y_numerico) .data$.y_plot else .data[[var_categoria]],
             label = lab
           ),
@@ -667,7 +824,7 @@ graficar_barras_apiladas <- function(
         ggplot2::geom_text(
           data    = df_lab_peq,
           mapping = ggplot2::aes(
-            x = x_center,
+            x = x_label,
             y = if (usar_y_numerico) .data$.y_plot else .data[[var_categoria]],
             label = lab
           ),

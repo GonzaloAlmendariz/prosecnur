@@ -24,11 +24,12 @@ graficar_radar <- function(
     cortes_grilla = 5L,
 
     mostrar_tela    = TRUE,
-    mostrar_radios  = TRUE,
-    mostrar_niveles = TRUE,
+    mostrar_radios  = FALSE,
+    mostrar_niveles = FALSE,
 
     wrap_ejes = 24,
-    eje_label_mult = 1.14,
+    eje_label_mult = 1.06,
+    radar_scale = 1,
 
     mostrar_puntos = TRUE,
     size_linea     = 0.9,
@@ -79,15 +80,18 @@ graficar_radar <- function(
     umbral_rojo_pct = 60,
     tabla_digits = 0L,
 
-    tabla_header_fill = "#062A63",
-    tabla_body_fill   = "#F2F2F2",
-    tabla_grid_col    = "white",
+    tabla_header_fill = NA,
+    tabla_body_fill   = NA,
+    tabla_grid_col    = "#062A63",
     tabla_text_blue   = "#062A63",
     tabla_font_family = "Arial",
 
     tabla_header_size = 14,
     tabla_body_size   = 12,
-    tabla_firstcol_bold = TRUE,
+    tabla_firstcol_bold = FALSE,
+    tabla_firstcol_size = 11,
+    tabla_firstcol_wrap = NULL,
+    tabla_firstcol_indent_npc = 0.015,
 
     tabla_padding_mm = 3,
 
@@ -97,8 +101,10 @@ graficar_radar <- function(
     tabla_ph_margin_bot = 0.06,
     tabla_firstcol_frac = 0.55,
     tabla_wrap_header   = 14,
+    tabla_height_frac   = 1,
+    tabla_line_lwd      = 1.4,
 
-    tabla_auto_fit = FALSE,
+    tabla_auto_fit = TRUE,
     tabla_fit_pad   = 0.98,
     tabla_allow_upscale = FALSE,
     tabla_clip      = TRUE,
@@ -183,15 +189,30 @@ graficar_radar <- function(
   if (!is.finite(wrap_ejes) || wrap_ejes < 0L) wrap_ejes <- 24L
 
   eje_label_mult <- suppressWarnings(as.numeric(eje_label_mult))
-  if (!is.finite(eje_label_mult) || eje_label_mult <= 0) eje_label_mult <- 1.14
+  if (!is.finite(eje_label_mult) || eje_label_mult <= 0) eje_label_mult <- 1.06
+  radar_scale <- suppressWarnings(as.numeric(radar_scale))
+  if (!is.finite(radar_scale) || radar_scale <= 0) radar_scale <- 1
+  radar_scale <- max(0.70, min(1.10, radar_scale))
 
   # clamps tabla
   tabla_header_size <- suppressWarnings(as.numeric(tabla_header_size))
   if (!is.finite(tabla_header_size) || tabla_header_size <= 0) tabla_header_size <- 14
   tabla_body_size <- suppressWarnings(as.numeric(tabla_body_size))
   if (!is.finite(tabla_body_size) || tabla_body_size <= 0) tabla_body_size <- 12
+  tabla_firstcol_size <- suppressWarnings(as.numeric(tabla_firstcol_size))
+  if (!is.finite(tabla_firstcol_size) || tabla_firstcol_size <= 0) tabla_firstcol_size <- 11
+  tabla_firstcol_wrap <- suppressWarnings(as.integer(tabla_firstcol_wrap))
+  if (!is.finite(tabla_firstcol_wrap) || tabla_firstcol_wrap <= 0) tabla_firstcol_wrap <- NA_integer_
+  tabla_firstcol_indent_npc <- suppressWarnings(as.numeric(tabla_firstcol_indent_npc))
+  if (!is.finite(tabla_firstcol_indent_npc)) tabla_firstcol_indent_npc <- 0.015
+  tabla_firstcol_indent_npc <- max(0, min(0.08, tabla_firstcol_indent_npc))
   tabla_padding_mm <- suppressWarnings(as.numeric(tabla_padding_mm))
   if (!is.finite(tabla_padding_mm) || tabla_padding_mm < 0) tabla_padding_mm <- 3
+  tabla_height_frac <- suppressWarnings(as.numeric(tabla_height_frac))
+  if (!is.finite(tabla_height_frac) || tabla_height_frac <= 0) tabla_height_frac <- 1
+  tabla_height_frac <- max(0.60, min(1, tabla_height_frac))
+  tabla_line_lwd <- suppressWarnings(as.numeric(tabla_line_lwd))
+  if (!is.finite(tabla_line_lwd) || tabla_line_lwd <= 0) tabla_line_lwd <- 1.4
   tabla_fit_pad <- suppressWarnings(as.numeric(tabla_fit_pad))
   if (!is.finite(tabla_fit_pad) || tabla_fit_pad <= 0 || tabla_fit_pad > 1.2) tabla_fit_pad <- 0.98
 
@@ -242,19 +263,29 @@ graficar_radar <- function(
     header_size = 14,
     body_size   = 12,
     firstcol_bold = TRUE,
+    firstcol_size = 11,
+    firstcol_indent_npc = 0,
     highlight_threshold = 60,
     highlight_col = "red",
     padding_mm = 3,
-    firstcol_frac = tabla_firstcol_frac
+    firstcol_frac = tabla_firstcol_frac,
+    line_lwd = tabla_line_lwd
   ) {
-    if (!requireNamespace("gridExtra", quietly = TRUE)) stop("Requiere gridExtra.", call. = FALSE)
-
     n_data <- nrow(tb)
     n_cols <- ncol(tb)
 
     firstcol_frac <- suppressWarnings(as.numeric(firstcol_frac))
     if (!is.finite(firstcol_frac)) firstcol_frac <- tabla_firstcol_frac
     firstcol_frac <- max(0.40, min(0.80, firstcol_frac))
+
+    if ((is.na(header_fill) || identical(tolower(as.character(header_fill)[1]), "transparent")) &&
+        identical(header_text, "white")) {
+      header_text <- text_blue
+    }
+    if ((is.na(header_fill) || identical(tolower(as.character(header_fill)[1]), "transparent")) &&
+        identical(as.character(grid_col)[1], "white")) {
+      grid_col <- text_blue
+    }
 
     if (requireNamespace("stringr", quietly=TRUE) && is.finite(tabla_wrap_header) && tabla_wrap_header > 0) {
       nms <- names(tb)
@@ -264,93 +295,143 @@ graficar_radar <- function(
       }
     }
 
-    tg <- gridExtra::tableGrob(
-      tb,
-      rows = NULL,
-      theme = gridExtra::ttheme_minimal(
-        base_size   = body_size,
-        base_family = font_family,
-        padding     = grid::unit(rep(padding_mm, 2), "mm"),
-        colhead = list(
-          fg_params = list(col = header_text, fontface = "bold"),
-          bg_params = list(fill = header_fill, col = grid_col, lwd = 2)
+    cell_text_grob <- function(label, x0, y0, w, h, x_npc, just, gp) {
+      label <- as.character(label %||% "")
+      grid::grobTree(
+        grid::textGrob(
+          label = label,
+          x = grid::unit(x_npc, "npc"),
+          y = grid::unit(0.5, "npc"),
+          just = c(just, "center"),
+          gp = gp
         ),
-        core = list(
-          fg_params = list(col = text_blue),
-          bg_params = list(fill = body_fill, col = grid_col, lwd = 2)
+        vp = grid::viewport(
+          x = grid::unit(x0, "npc"),
+          y = grid::unit(y0, "npc"),
+          width = grid::unit(w, "npc"),
+          height = grid::unit(h, "npc"),
+          just = c("left", "bottom"),
+          clip = "on"
         )
       )
-    )
+    }
 
-    # widths post-creation
+    row_lines <- function(x) {
+      x <- as.character(x)
+      pmax(1L, lengths(strsplit(x, "\n", fixed = TRUE)))
+    }
+
+    header_units <- max(row_lines(names(tb))) * 1.0 + 0.20
+    body_units <- rep(1, n_data)
+    if (n_data > 0) {
+      line_mat <- sapply(tb, row_lines)
+      if (is.null(dim(line_mat))) line_mat <- matrix(line_mat, ncol = n_cols)
+      body_units <- apply(line_mat, 1, max) * 1.0 + 0.20
+    }
+    row_units <- c(header_units, body_units)
+    row_heights <- row_units / sum(row_units)
+    row_bottoms <- 1 - cumsum(row_heights)
+
     if (n_cols >= 2) {
       rest <- (1 - firstcol_frac) / (n_cols - 1)
-      tg$widths <- grid::unit(c(firstcol_frac, rep(rest, n_cols - 1)), "npc")
+      col_widths <- c(firstcol_frac, rep(rest, n_cols - 1))
     } else {
-      tg$widths <- grid::unit(1, "npc")
+      col_widths <- 1
+    }
+    col_lefts <- c(0, cumsum(col_widths))[seq_len(n_cols)]
+
+    parse_pct <- function(x) suppressWarnings(as.numeric(gsub("%", "", x)))
+    header_fill_use <- if (is.na(header_fill) || identical(tolower(as.character(header_fill)[1]), "transparent")) NA_character_ else as.character(header_fill)[1]
+    body_fill_use <- if (is.na(body_fill) || identical(tolower(as.character(body_fill)[1]), "transparent")) NA_character_ else as.character(body_fill)[1]
+
+    grobs <- list()
+
+    if (!is.na(header_fill_use) && nzchar(header_fill_use)) {
+      grobs[[length(grobs) + 1L]] <- grid::rectGrob(
+        x = 0, y = row_bottoms[1], width = 1, height = row_heights[1],
+        just = c("left", "bottom"),
+        gp = grid::gpar(fill = header_fill_use, col = NA)
+      )
     }
 
-    # header centered
-    for (j in seq_len(n_cols)) {
-      k <- which(tg$layout$t == 1 & tg$layout$l == j & tg$layout$name == "colhead-fg")
-      if (length(k)) {
-        tg$grobs[[k]]$just <- "center"
-        tg$grobs[[k]]$x <- grid::unit(0.5, "npc")
-        tg$grobs[[k]]$gp <- grid::gpar(col = header_text, fontface = "bold", fontsize = header_size)
-      }
-    }
-
-    # body centered; first col bold
-    for (i in seq_len(n_data)) {
-      r <- i + 1
-
-      k1 <- which(tg$layout$t == r & tg$layout$l == 1 & tg$layout$name == "core-fg")
-      if (length(k1)) {
-        tg$grobs[[k1]]$just <- "center"
-        tg$grobs[[k1]]$x <- grid::unit(0.5, "npc")
-        tg$grobs[[k1]]$y <- grid::unit(0.5, "npc")
-        tg$grobs[[k1]]$gp <- grid::gpar(
-          col = text_blue,
-          fontface = if (isTRUE(firstcol_bold)) "bold" else "plain",
-          fontsize = body_size,
-          lineheight = 0.95
+    if (n_data > 0 && !is.na(body_fill_use) && nzchar(body_fill_use)) {
+      for (i in seq_len(n_data)) {
+        grobs[[length(grobs) + 1L]] <- grid::rectGrob(
+          x = 0, y = row_bottoms[i + 1L], width = 1, height = row_heights[i + 1L],
+          just = c("left", "bottom"),
+          gp = grid::gpar(fill = body_fill_use, col = NA)
         )
       }
+    }
 
-      if (n_cols >= 2) {
-        for (j in 2:n_cols) {
-          kj <- which(tg$layout$t == r & tg$layout$l == j & tg$layout$name == "core-fg")
-          if (length(kj)) {
-            tg$grobs[[kj]]$just <- "center"
-            tg$grobs[[kj]]$x <- grid::unit(0.5, "npc")
-            tg$grobs[[kj]]$y <- grid::unit(0.5, "npc")
-            tg$grobs[[kj]]$gp <- grid::gpar(col = text_blue, fontface = "plain", fontsize = body_size)
-          }
+    # Horizontal lines only.
+    y_edges <- c(1, row_bottoms)
+    y_edges[length(y_edges)] <- max(0.001, y_edges[length(y_edges)])
+    for (yy in y_edges) {
+      grobs[[length(grobs) + 1L]] <- grid::segmentsGrob(
+        x0 = grid::unit(0, "npc"), x1 = grid::unit(1, "npc"),
+        y0 = grid::unit(yy, "npc"), y1 = grid::unit(yy, "npc"),
+        gp = grid::gpar(col = grid_col, lwd = line_lwd)
+      )
+    }
+
+    # Header.
+    for (j in seq_len(n_cols)) {
+      grobs[[length(grobs) + 1L]] <- cell_text_grob(
+        label = names(tb)[j],
+        x0 = col_lefts[j],
+        y0 = row_bottoms[1],
+        w = col_widths[j],
+        h = row_heights[1],
+        x_npc = if (j == 1) firstcol_indent_npc else 0.5,
+        just = if (j == 1) "left" else "center",
+        gp = grid::gpar(
+          col = header_text,
+          fontface = "bold",
+          fontsize = header_size,
+          fontfamily = font_family,
+          lineheight = 0.95
+        )
+      )
+    }
+
+    # Body.
+    for (i in seq_len(n_data)) {
+      for (j in seq_len(n_cols)) {
+        cell_label <- tb[[j]][i]
+        cell_gp <- if (j == 1) {
+          grid::gpar(
+            col = text_blue,
+            fontface = if (isTRUE(firstcol_bold)) "bold" else "plain",
+            fontsize = firstcol_size,
+            fontfamily = font_family,
+            lineheight = 0.95
+          )
+        } else {
+          val_num <- parse_pct(cell_label)
+          grid::gpar(
+            col = if (is.finite(val_num) && !is.na(val_num) && val_num <= highlight_threshold) highlight_col else text_blue,
+            fontface = if (is.finite(val_num) && !is.na(val_num) && val_num <= highlight_threshold) "bold" else "plain",
+            fontsize = body_size,
+            fontfamily = font_family,
+            lineheight = 0.95
+          )
         }
+
+        grobs[[length(grobs) + 1L]] <- cell_text_grob(
+          label = cell_label,
+          x0 = col_lefts[j],
+          y0 = row_bottoms[i + 1L],
+          w = col_widths[j],
+          h = row_heights[i + 1L],
+          x_npc = if (j == 1) firstcol_indent_npc else 0.5,
+          just = if (j == 1) "left" else "center",
+          gp = cell_gp
+        )
       }
     }
 
-    # highlight <= threshold
-    parse_pct <- function(x) suppressWarnings(as.numeric(gsub("%", "", x)))
-    if (n_cols >= 2) {
-      for (j in 2:n_cols) {
-        vals <- parse_pct(tb[[j]])
-        idx_low <- which(is.finite(vals) & !is.na(vals) & vals <= highlight_threshold)
-        if (length(idx_low)) {
-          for (ii in idx_low) {
-            r <- ii + 1
-            kj <- which(tg$layout$t == r & tg$layout$l == j & tg$layout$name == "core-fg")
-            if (length(kj)) {
-              tg$grobs[[kj]]$gp <- grid::gpar(col = highlight_col, fontface = "bold", fontsize = body_size)
-              tg$grobs[[kj]]$just <- "center"
-              tg$grobs[[kj]]$x <- grid::unit(0.5, "npc")
-            }
-          }
-        }
-      }
-    }
-
-    tg
+    grid::grobTree(children = do.call(grid::gList, grobs))
   }
 
   .wrap_clip <- function(g) {
@@ -428,8 +509,8 @@ graficar_radar <- function(
   df_xy <- df_plot |>
     dplyr::left_join(angle_tbl, by = ".eje") |>
     dplyr::mutate(
-      x = .data$.valor * cos(.data$.ang),
-      y = .data$.valor * sin(.data$.ang)
+      x = .data$.valor * radar_scale * cos(.data$.ang),
+      y = .data$.valor * radar_scale * sin(.data$.ang)
     )
 
   df_poly <- df_xy |>
@@ -458,7 +539,7 @@ graficar_radar <- function(
   if (isTRUE(mostrar_tela)) {
     grid_df <- lapply(rings, function(rr) {
       lvl <- angle_tbl |>
-        dplyr::mutate(.r = rr, x = rr * cos(.data$.ang), y = rr * sin(.data$.ang)) |>
+        dplyr::mutate(.r = rr, x = rr * radar_scale * cos(.data$.ang), y = rr * radar_scale * sin(.data$.ang)) |>
         dplyr::arrange(.data$.idx)
       dplyr::bind_rows(lvl, lvl[1, , drop = FALSE])
     }) |> dplyr::bind_rows()
@@ -467,11 +548,11 @@ graficar_radar <- function(
   axes_df <- NULL
   if (isTRUE(mostrar_radios)) {
     axes_df <- angle_tbl |>
-      dplyr::mutate(x0 = 0, y0 = 0, x1 = r_lim[2] * cos(.data$.ang), y1 = r_lim[2] * sin(.data$.ang))
+      dplyr::mutate(x0 = 0, y0 = 0, x1 = r_lim[2] * radar_scale * cos(.data$.ang), y1 = r_lim[2] * radar_scale * sin(.data$.ang))
   }
 
   level_lab <- NULL
-  if (isTRUE(mostrar_niveles)) level_lab <- tibble::tibble(.nivel = rings, x = rings, y = 0)
+  if (isTRUE(mostrar_niveles)) level_lab <- tibble::tibble(.nivel = rings, x = rings * radar_scale, y = 0)
 
   max_label_lines <- max(
     1L,
@@ -481,8 +562,12 @@ graficar_radar <- function(
       integer(1)
     )
   )
-  label_ring_mult <- max(eje_label_mult, 1.04 + (max_label_lines - 1L) * 0.04)
-  label_ring_mult <- min(label_ring_mult, 1.16)
+  # `eje_label_mult` debe poder acercar de verdad las etiquetas a las puntas.
+  # Mantenemos solo un margen minimo respecto al radar ya escalado para evitar
+  # que las etiquetas caigan dentro del poligono.
+  min_label_gap <- 0.03 + (max_label_lines - 1L) * 0.01
+  label_ring_mult <- max(eje_label_mult, radar_scale + min_label_gap)
+  label_ring_mult <- min(label_ring_mult, 1.10)
   label_ring <- r_lim[2] * label_ring_mult
   lab_axes <- angle_tbl |>
     dplyr::mutate(
@@ -815,16 +900,24 @@ graficar_radar <- function(
         w_radar <- 1 - w_tab - w_gap
       }
 
-      # Radar izquierda
-      canvas <- canvas + cowplot::draw_plot(p_panel, x = 0, y = y_panel0, width = w_radar, height = panel_h)
+      # Radar izquierda: dibujar como grob clippeado para que las etiquetas
+      # del radar no invadan el placeholder reservado para la tabla.
+      panel_draw <- .wrap_clip(ggplot2::ggplotGrob(p_panel))
+      canvas <- canvas + cowplot::draw_grob(
+        panel_draw,
+        x = 0, y = y_panel0, width = w_radar, height = panel_h,
+        hjust = 0, vjust = 0
+      )
       if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_panel0, w_radar, panel_h)
 
       # Tabla derecha con top/bot
-      y_tab <- y_panel0 + tabla_ph_margin_bot
-      h_tab <- panel_h - tabla_ph_margin_top - tabla_ph_margin_bot
-      if (h_tab <= 0) {
+      h_tab_avail <- panel_h - tabla_ph_margin_top - tabla_ph_margin_bot
+      if (h_tab_avail <= 0) {
         y_tab <- y_panel0
         h_tab <- panel_h
+      } else {
+        h_tab <- h_tab_avail * tabla_height_frac
+        y_tab <- y_panel0 + tabla_ph_margin_bot + ((h_tab_avail - h_tab) * 0.5)
       }
 
       tb <- .make_tabla_ttb_df(
@@ -844,15 +937,18 @@ graficar_radar <- function(
         ph_w_in <- ancho * w_tab
 
         # porcentaje del PH que se quiere para la 1ra columna (ajustable)
-        firstcol_frac <- 0.62
+        firstcol_frac <- tabla_firstcol_frac
         firstcol_in   <- ph_w_in * firstcol_frac
 
-        # estimación: caracteres por pulgada según tamaño de fuente
-        # (0.55 es un factor práctico para fuentes tipo Arial)
-        chars_per_in <- 72 / (tabla_body_size * 0.55)
-
-        wrap_n <- floor(firstcol_in * chars_per_in)
-        wrap_n <- max(12, min(60, wrap_n))  # clamps razonables
+        if (is.finite(tabla_firstcol_wrap) && !is.na(tabla_firstcol_wrap)) {
+          wrap_n <- as.integer(tabla_firstcol_wrap)
+        } else {
+          # estimación: caracteres por pulgada según tamaño de fuente
+          # (0.55 es un factor práctico para fuentes tipo Arial)
+          chars_per_in <- 72 / (tabla_firstcol_size * 0.55)
+          wrap_n <- floor(firstcol_in * chars_per_in)
+          wrap_n <- max(12, min(60, wrap_n))  # clamps razonables
+        }
 
         tb[[1]] <- stringr::str_wrap(tb[[1]], width = wrap_n)
       }
@@ -867,9 +963,12 @@ graficar_radar <- function(
         header_size = tabla_header_size,
         body_size   = tabla_body_size,
         firstcol_bold = tabla_firstcol_bold,
+        firstcol_size = tabla_firstcol_size,
+        firstcol_indent_npc = tabla_firstcol_indent_npc,
         highlight_threshold = umbral_rojo_pct,
         highlight_col = "red",
-        padding_mm = tabla_padding_mm
+        padding_mm = tabla_padding_mm,
+        line_lwd = tabla_line_lwd
       )
 
       tab_draw <- if (isTRUE(tabla_clip)) .wrap_clip(tab_grob) else tab_grob
@@ -903,22 +1002,27 @@ graficar_radar <- function(
         }
       }
 
-      # IMPORTANTE: centrar el grob dentro del PH:
-      # draw_grob con hjust/vjust = 0.5 y x/y al centro del PH
+      # IMPORTANTE: anclar el grob al borde izquierdo del PH para evitar
+      # que una tabla ancha "derrame" por la izquierda cuando auto_fit = FALSE.
       canvas <- canvas + cowplot::draw_grob(
         tab_draw,
-        x = (w_radar + w_gap) + (w_tab * 0.5),
+        x = (w_radar + w_gap),
         y = y_tab + (h_tab * 0.5),
         width  = w_tab,
         height = h_tab,
-        hjust = 0.5, vjust = 0.5,
+        hjust = 0, vjust = 0.5,
         scale = scale_tab
       )
 
       if (debug_ph_bordes) canvas <- canvas + .ph_border(w_radar + w_gap, y_tab, w_tab, h_tab)
 
     } else {
-      canvas <- canvas + cowplot::draw_plot(p_panel, x = 0, y = y_panel0, width = 1, height = panel_h)
+      panel_draw <- .wrap_clip(ggplot2::ggplotGrob(p_panel))
+      canvas <- canvas + cowplot::draw_grob(
+        panel_draw,
+        x = 0, y = y_panel0, width = 1, height = panel_h,
+        hjust = 0, vjust = 0
+      )
       if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_panel0, 1, panel_h)
     }
 

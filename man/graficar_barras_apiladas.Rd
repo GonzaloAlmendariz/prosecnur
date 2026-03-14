@@ -39,6 +39,8 @@ graficar_barras_apiladas(
   color_texto_barras = "white",
   size_texto_barras = 3,
   size_texto_barras_peq = NULL,
+  repeler_etiquetas_peq = TRUE,
+  desplazamiento_max_etiquetas_peq = 0.05,
   color_barra_extra = "#000000",
   size_barra_extra = 3,
   size_titulo_extra = 3,
@@ -148,6 +150,12 @@ Sus \code{names()} deben coincidir con \code{cols_porcentaje}.}
 \item{color_leyenda, size_leyenda}{Estilos de texto de leyenda.}
 
 \item{color_texto_barras, size_texto_barras, size_texto_barras_peq}{Estilos de etiquetas internas.}
+
+\item{repeler_etiquetas_peq}{Si \code{TRUE}, intenta separar horizontalmente las etiquetas pequenas
+cuando se superponen, manteniendolas cerca de su centro original.}
+
+\item{desplazamiento_max_etiquetas_peq}{Corrimiento horizontal maximo permitido para etiquetas
+pequenas, en la escala \code{0-1} de la barra normalizada.}
 
 \item{color_barra_extra, size_barra_extra, size_titulo_extra}{Estilos de la columna extra.}
 

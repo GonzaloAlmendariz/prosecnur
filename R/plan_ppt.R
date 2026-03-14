@@ -969,7 +969,7 @@ reporte_ppt_plan <- function(
       font_size = font_size,
       color = base_args$color_nota_pie %||% "#39588B",
       # Separacion corta y consistente bajo el titulo.
-      top_gap = 0.015,
+      top_gap = 0.008,
       # Altura suficiente para evitar que PowerPoint reduzca automaticamente la fuente.
       height = max(0.36, font_size * 0.022)
     )
@@ -2363,6 +2363,22 @@ reporte_ppt_plan <- function(
     preset_args <- preset_args %||% list()
     overrides   <- el$overrides %||% list()
 
+    # Defaults editoriales del radar-tabla. Pueden sobreescribirse en preset/overrides.
+    preset_args$mostrar_radios    <- preset_args$mostrar_radios    %||% FALSE
+    preset_args$mostrar_niveles   <- preset_args$mostrar_niveles   %||% FALSE
+    preset_args$tabla_auto_fit    <- preset_args$tabla_auto_fit    %||% TRUE
+    preset_args$tabla_header_fill <- preset_args$tabla_header_fill %||% NA
+    preset_args$tabla_body_fill   <- preset_args$tabla_body_fill   %||% NA
+    preset_args$tabla_grid_col    <- preset_args$tabla_grid_col    %||% "#062A63"
+    preset_args$tabla_text_blue   <- preset_args$tabla_text_blue   %||% "#062A63"
+    preset_args$tabla_firstcol_bold <- preset_args$tabla_firstcol_bold %||% FALSE
+    preset_args$tabla_firstcol_size <- preset_args$tabla_firstcol_size %||% 11
+    preset_args$tabla_firstcol_indent_npc <- preset_args$tabla_firstcol_indent_npc %||% 0.015
+    preset_args$tabla_height_frac <- preset_args$tabla_height_frac %||% 1
+    preset_args$tabla_line_lwd <- preset_args$tabla_line_lwd %||% 1.4
+    preset_args$eje_label_mult    <- preset_args$eje_label_mult    %||% 1.06
+    preset_args$radar_scale       <- preset_args$radar_scale       %||% 1
+
     if (identical(modo, "sm")) {
       var_use <- .resolve_ref(el$var, source = source_use, arg_name = "var")$var
 
@@ -2404,7 +2420,7 @@ reporte_ppt_plan <- function(
 
         label_to_code <- NULL
         if (!is.null(choices_use) && is.data.frame(choices_use) &&
-            nzchar(ln) && "list_name" %in% names(choices_use) && "name" %in% names(choices_use)) {
+            !is.na(ln) && nzchar(ln) && "list_name" %in% names(choices_use) && "name" %in% names(choices_use)) {
           sub_choices <- choices_use[choices_use$list_name == ln, , drop = FALSE]
           if (nrow(sub_choices)) {
             labels_use <- if (!is.na(choices_label_col) && choices_label_col %in% names(sub_choices)) {
