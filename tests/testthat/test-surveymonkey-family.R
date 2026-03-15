@@ -1,3 +1,29 @@
+set_familias_modo_so <- function(path, values, sheet = "familias") {
+  fam <- readxl::read_excel(path, sheet = sheet)
+  fam_names <- janitor::make_clean_names(names(fam))
+  col_modo <- match("modo_so", fam_names)
+  col_parent <- match("parent", fam_names)
+  if (is.na(col_modo) || is.na(col_parent)) {
+    stop("La plantilla de familias no tiene columnas 'modo_so' y 'parent'.")
+  }
+
+  wb <- openxlsx::loadWorkbook(path)
+  if (is.null(names(values)) || !all(nzchar(names(values)))) {
+    rows <- which(tolower(as.character(fam$tipo)) == "select_one")
+    for (i in rows) {
+      openxlsx::writeData(wb, sheet, x = values[[1]], startCol = col_modo, startRow = i + 1L, colNames = FALSE)
+    }
+  } else {
+    for (nm in names(values)) {
+      row_idx <- which(as.character(fam[[col_parent]]) == nm)[1]
+      if (is.na(row_idx)) next
+      openxlsx::writeData(wb, sheet, x = values[[nm]], startCol = col_modo, startRow = row_idx + 1L, colNames = FALSE)
+    }
+  }
+  openxlsx::saveWorkbook(wb, path, overwrite = TRUE)
+  invisible(path)
+}
+
 test_that("familia surveymonkey_ genera XLSForm de referencia y data compatible", {
   path_sav <- tempfile(fileext = ".sav")
   path_xlsx <- tempfile(fileext = ".xlsx")
@@ -145,6 +171,7 @@ test_that("familia surveymonkey_ genera XLSForm de referencia y data compatible"
   inst_codif <- prosecnur::leer_instrumento_xlsform(path_xlsx)
   dat_codif_obj <- prosecnur::leer_datos(path_codif)
   prosecnur::escribir_plantilla_familias(inst_codif, dat_codif_obj, path = path_familias)
+  set_familias_modo_so(path_familias, c(p6 = "padre"))
   familias <- prosecnur::leer_familias_clasificar(
     path = path_familias,
     inst = inst_codif,
@@ -245,4 +272,779 @@ test_that("surveymonkey_xlsform reconoce satisfaccion_4 y ordena grupos por sufi
   expect_identical(p8_rows$name, paste0("p8_", 1:6))
   expect_true(all(p8_rows$type == "select_one lst_satisfaccion_4"))
   expect_true("lst_satisfaccion_4" %in% inst_ref$choices$list_name)
+})
+
+make_codif_inst <- function(survey, choices) {
+  survey <- as.data.frame(survey, stringsAsFactors = FALSE, check.names = FALSE)
+  choices <- as.data.frame(choices, stringsAsFactors = FALSE, check.names = FALSE)
+
+  if (!"q_order" %in% names(survey)) survey$q_order <- seq_len(nrow(survey))
+  if (!"type_base" %in% names(survey)) survey$type_base <- sub("\\s.*$", "", as.character(survey$type))
+  if (!"list_name" %in% names(survey)) {
+    survey$list_name <- ifelse(
+      grepl("^select_(one|multiple)\\b", survey$type),
+      trimws(sub("^\\S+\\s+", "", as.character(survey$type))),
+      NA_character_
+    )
+  }
+  survey$list_norm <- tolower(gsub("[^a-z0-9_]", "_", gsub("\\s+", "_", as.character(survey$list_name))))
+  if (!"label_spanish_es" %in% names(survey)) {
+    survey$label_spanish_es <- if ("label::Spanish (ES)" %in% names(survey)) {
+      survey[["label::Spanish (ES)"]]
+    } else if ("label" %in% names(survey)) {
+      survey[["label"]]
+    } else {
+      survey$name
+    }
+  }
+
+  if (!"list_norm" %in% names(choices)) {
+    choices$list_norm <- tolower(gsub("[^a-z0-9_]", "_", gsub("\\s+", "_", as.character(choices$list_name))))
+  }
+  if (!"label_spanish_es" %in% names(choices)) {
+    choices$label_spanish_es <- if ("label::Spanish (ES)" %in% names(choices)) {
+      choices[["label::Spanish (ES)"]]
+    } else if ("label" %in% names(choices)) {
+      choices[["label"]]
+    } else {
+      choices$name
+    }
+  }
+
+  list(
+    survey = survey,
+    survey_raw = survey,
+    choices = choices,
+    choices_raw = choices
+  )
+}
+
+make_codif_dat <- function(df) {
+  df <- as.data.frame(df, stringsAsFactors = FALSE, check.names = FALSE)
+  clean <- janitor::make_clean_names(names(df))
+  list(
+    raw = df,
+    clean = stats::setNames(df, clean),
+    name_map = tibble::tibble(clean = clean, original = names(df))
+  )
+}
+
+write_codif_inst_xlsx <- function(inst, path) {
+  settings <- data.frame(
+    form_title = "Instrumento de prueba",
+    default_language = "es",
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  openxlsx::write.xlsx(
+    list(
+      survey = inst$survey_raw,
+      choices = inst$choices_raw,
+      settings = settings
+    ),
+    file = path,
+    overwrite = TRUE
+  )
+  invisible(path)
+}
+
+read_sheet_headers <- function(path, sheet) {
+  readxl::read_excel(path, sheet = sheet, n_max = 2, col_names = FALSE)
+}
+
+count_workbook_comments <- function(path) {
+  exdir <- tempfile("xlsx_comments_")
+  dir.create(exdir, recursive = TRUE)
+  on.exit(unlink(exdir, recursive = TRUE), add = TRUE)
+  utils::unzip(path, exdir = exdir)
+  files <- list.files(file.path(exdir, "xl"), pattern = "^comments[0-9]+\\.xml$", full.names = TRUE)
+  if (!length(files)) {
+    return(list(count = 0L, text = ""))
+  }
+  txt <- paste(unlist(lapply(files, readLines, warn = FALSE, encoding = "UTF-8")), collapse = "\n")
+  matches <- gregexpr("<comment ", txt, fixed = TRUE)[[1]]
+  count <- if (identical(matches[1], -1L)) 0L else length(matches)
+  list(count = count, text = txt)
+}
+
+test_that("recodificacion detecta other por semantica del XLSForm y usa la etiqueta real", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("select_multiple lst_need", "text"),
+      name = c("need", "need_detail"),
+      relevant = c(NA, "selected(${need}, '70')"),
+      `label::Spanish (ES)` = c("Necesidad principal", "Detalle de necesidad"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_need", "lst_need"),
+      name = c("1", "70"),
+      `label::Spanish (ES)` = c("Trabajo", "Servicio comunitario"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  dat <- make_codif_dat(data.frame(
+    `_uuid` = c("u1", "u2"),
+    `_index` = c(1, 2),
+    need = c("1 70", "1"),
+    `need/1` = c(1, 1),
+    `need/70` = c(1, 0),
+    need_detail = c("Red local", NA),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  ))
+  path_familias <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(path_familias), add = TRUE)
+
+  expect_no_warning(
+    prosecnur::escribir_plantilla_familias(inst, dat, path = path_familias)
+  )
+  fam <- prosecnur::leer_familias_clasificar(path_familias, inst, dat, verbose = FALSE)
+
+  row_need <- fam$familias_filtradas[fam$familias_filtradas$parent == "need", , drop = FALSE]
+  expect_identical(row_need$other_dummy_col[1], "need/70")
+  expect_identical(row_need$text_col[1], "need_detail")
+
+  plantilla <- prosecnur::construir_plantilla_desde_familias(inst, dat, fam)
+  sheet_need <- plantilla$sheets[["need"]]
+  expect_true("Servicio comunitario" %in% names(sheet_need))
+  expect_false("Otro, por favor especificar" %in% names(sheet_need))
+  expect_identical(sheet_need$Seleccionadas[[1]], "Trabajo; Servicio comunitario")
+  expect_identical(sheet_need$Seleccionadas_cod[[1]], "1; 70")
+})
+
+test_that("recodificacion no sugiere other si no hay vinculo semantico claro", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("select_multiple lst_need", "text"),
+      name = c("need", "free_note"),
+      relevant = c(NA, "${otra} = '70'"),
+      `label::Spanish (ES)` = c("Necesidad principal", "Detalle libre"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_need", "lst_need"),
+      name = c("1", "70"),
+      `label::Spanish (ES)` = c("Trabajo", "Servicio comunitario"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  dat <- make_codif_dat(data.frame(
+    need = c("70", "1"),
+    `need/70` = c(1, 0),
+    free_note = c("texto", NA),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  ))
+  path_familias <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(path_familias), add = TRUE)
+
+  prosecnur::escribir_plantilla_familias(inst, dat, path = path_familias)
+  sugeridas <- readxl::read_excel(path_familias, sheet = "familias")
+  row_need <- sugeridas[sugeridas$parent == "need", , drop = FALSE]
+  expect_true(is.na(row_need$text_col[1]) || row_need$text_col[1] == "")
+  expect_true(is.na(row_need$other_dummy_col[1]) || row_need$other_dummy_col[1] == "")
+
+  fam <- prosecnur::leer_familias_clasificar(path_familias, inst, dat, verbose = FALSE)
+  diag_need <- fam$diagnostico_clasificacion[fam$diagnostico_clasificacion$parent == "need", , drop = FALSE]
+  expect_identical(diag_need$estado_clasificacion[1], "excluida")
+  expect_match(diag_need$motivo_clasificacion[1], "text_col no existe", fixed = TRUE)
+})
+
+test_that("recodificacion resuelve select_one con codigo no literal", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("select_one lst_mode", "text"),
+      name = c("mode", "mode_detail"),
+      relevant = c(NA, "${mode} = 96"),
+      `label::Spanish (ES)` = c("Modo", "Detalle modo"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_mode", "lst_mode"),
+      name = c("1", "96"),
+      `label::Spanish (ES)` = c("Presencial", "Canal alternativo"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  dat <- make_codif_dat(data.frame(
+    mode = c("96", "1"),
+    mode_detail = c("Mixto", NA),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  ))
+  path_familias <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(path_familias), add = TRUE)
+
+  prosecnur::escribir_plantilla_familias(inst, dat, path = path_familias)
+  set_familias_modo_so(path_familias, c(mode = "padre"))
+  fam <- prosecnur::leer_familias_clasificar(path_familias, inst, dat, verbose = FALSE)
+  row_mode <- fam$familias_filtradas[fam$familias_filtradas$parent == "mode", , drop = FALSE]
+  expect_identical(row_mode$tipo[1], "select_one")
+  expect_identical(row_mode$text_col[1], "mode_detail")
+})
+
+test_that("recodificacion repeat-aware replica la deteccion semantica y no inventa columna generica", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("begin_repeat", "select_multiple lst_need", "text", "end_repeat"),
+      name = c("hh", "need", "need_detail", "hh_end"),
+      relevant = c(NA, NA, "selected(${need}, '70')", NA),
+      `label::Spanish (ES)` = c(NA, "Necesidad principal", "Detalle de necesidad", NA),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_need", "lst_need"),
+      name = c("1", "70"),
+      `label::Spanish (ES)` = c("Trabajo", "Servicio comunitario"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  tabs <- list(
+    main = make_codif_dat(data.frame(`_uuid` = character(), `_index` = integer(), check.names = FALSE)),
+    hh = make_codif_dat(data.frame(
+      `_uuid` = c("u1", "u2"),
+      `_index` = c(1, 2),
+      need = c("1 70", "1"),
+      `need/1` = c(1, 1),
+      `need/70` = c(1, 0),
+      need_detail = c("Red local", NA),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ))
+  )
+  path_familias <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(path_familias), add = TRUE)
+
+  prosecnur::escribir_plantilla_familias_repeat(inst, tabs, path = path_familias, verbose = FALSE)
+  fam <- prosecnur::leer_familias_clasificar_repeat(path_familias, inst, tabs, verbose = FALSE)
+  row_need <- fam$familias_filtradas[fam$familias_filtradas$parent == "need", , drop = FALSE]
+  expect_identical(row_need$hoja_datos[1], "hh")
+  expect_identical(row_need$other_dummy_col[1], "need/70")
+  expect_identical(row_need$text_col[1], "need_detail")
+
+  plantilla <- prosecnur::construir_plantilla_desde_familias_repeat(inst, tabs, fam)
+  sheet_need <- plantilla$sheets[["need"]]
+  expect_true("Servicio comunitario" %in% names(sheet_need))
+  expect_false("Otro, por favor especificar" %in% names(sheet_need))
+  expect_identical(sheet_need$Seleccionadas[[1]], "Trabajo; Servicio comunitario")
+  expect_identical(sheet_need$Seleccionadas_cod[[1]], "1; 70")
+})
+
+test_that("construir_plantilla_desde_familias_repeat no crea columna generica desde text_col solo", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("begin_repeat", "select_multiple lst_need", "text", "end_repeat"),
+      name = c("hh", "need", "need_detail", "hh_end"),
+      relevant = c(NA, NA, "selected(${need}, '70')", NA),
+      `label::Spanish (ES)` = c(NA, "Necesidad principal", "Detalle de necesidad", NA),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_need", "lst_need"),
+      name = c("1", "70"),
+      `label::Spanish (ES)` = c("Trabajo", "Servicio comunitario"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  tabs <- list(
+    hh = make_codif_dat(data.frame(
+      `_uuid` = c("u1", "u2"),
+      `_index` = c(1, 2),
+      need = c("1 70", "1"),
+      need_detail = c("Red local", NA),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ))
+  )
+  fam <- list(
+    select_one = tibble::tibble(),
+    select_multiple = tibble::tibble(
+      section = "hh",
+      hoja_datos = "hh",
+      use = TRUE,
+      q_order = 2L,
+      tipo = "select_multiple",
+      parent = "need",
+      parent_label = "Necesidad principal",
+      list_norm = "lst_need",
+      parent_col = "need",
+      other_dummy_col = "",
+      text_col = "need_detail"
+    ),
+    text = tibble::tibble(),
+    integer = tibble::tibble(),
+    adopciones = tibble::tibble(),
+    choices_usadas = NULL
+  )
+
+  plantilla <- prosecnur::construir_plantilla_desde_familias_repeat(inst, tabs, fam)
+  sheet_need <- plantilla$sheets[["need"]]
+  expect_false("Otro, por favor especificar" %in% names(sheet_need))
+})
+
+test_that("leer_familias_clasificar exige modo_so para select_one", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("select_one lst_mode", "text"),
+      name = c("mode", "mode_detail"),
+      relevant = c(NA, "${mode} = '96'"),
+      `label::Spanish (ES)` = c("Modo principal", "Detalle modo"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_mode", "lst_mode"),
+      name = c("1", "96"),
+      `label::Spanish (ES)` = c("Presencial", "Canal alternativo"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  dat <- make_codif_dat(data.frame(
+    mode = c("96", "1"),
+    mode_detail = c("Mixto", NA),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  ))
+  path_familias <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(path_familias), add = TRUE)
+
+  prosecnur::escribir_plantilla_familias(inst, dat, path = path_familias)
+
+  expect_error(
+    prosecnur::leer_familias_clasificar(path_familias, inst, dat, verbose = FALSE),
+    regexp = "modo_so.*padre.*hijo",
+    perl = TRUE
+  )
+})
+
+test_that("exportar plantilla codificacion separa select_one e integer con bloque auxiliar", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("select_one lst_mode", "text", "select_multiple lst_need", "text", "integer"),
+      name = c("mode", "mode_detail", "need", "need_detail", "age"),
+      relevant = c(NA, "${mode} = '96'", NA, "selected(${need}, '70')", NA),
+      `label::Spanish (ES)` = c("Modo principal", "Detalle modo", "Necesidad principal", "Detalle de necesidad", "Edad"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_mode", "lst_mode", "lst_need", "lst_need"),
+      name = c("1", "96", "1", "70"),
+      `label::Spanish (ES)` = c("Presencial", "Canal alternativo", "Trabajo", "Servicio comunitario"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  dat <- make_codif_dat(data.frame(
+    `_uuid` = c("u1", "u2"),
+    `_index` = c(1, 2),
+    mode = c("96", "1"),
+    mode_detail = c("Mixto", NA),
+    need = c("1 70", "1"),
+    `need/1` = c(1, 1),
+    `need/70` = c(1, 0),
+    need_detail = c("Red local", NA),
+    age = c(35, 29),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  ))
+  path_familias <- tempfile(fileext = ".xlsx")
+  path_tpl <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(c(path_familias, path_tpl)), add = TRUE)
+
+  prosecnur::escribir_plantilla_familias(inst, dat, path = path_familias)
+  set_familias_modo_so(path_familias, c(mode = "padre"))
+  fam <- prosecnur::leer_familias_clasificar(path_familias, inst, dat, verbose = FALSE)
+  plantilla <- prosecnur::construir_plantilla_desde_familias(inst, dat, fam)
+  prosecnur::exportar_plantilla_codificacion_xlsx(plantilla, path_xlsx = path_tpl, inst = inst)
+
+  instr <- readxl::read_excel(path_tpl, sheet = "INSTRUCCIONES", col_names = FALSE)
+  instr_lines <- as.character(unlist(instr, use.names = FALSE))
+  instr_lines <- instr_lines[!is.na(instr_lines) & nzchar(instr_lines)]
+  expect_true(any(grepl("modo padre", instr_lines, ignore.case = TRUE)))
+  expect_true(any(grepl("nuevo_codigo y nueva_etiqueta", instr_lines, fixed = TRUE)))
+  expect_true(any(grepl("integer", instr_lines, ignore.case = TRUE)))
+
+  hdr_mode <- read_sheet_headers(path_tpl, "mode")
+  expect_true("mode" %in% as.character(hdr_mode[1, ]))
+  expect_true("mode_label" %in% as.character(hdr_mode[1, ]))
+  expect_true("mode_recod" %in% as.character(hdr_mode[1, ]))
+  expect_false("mode_detail_recod" %in% as.character(hdr_mode[1, ]))
+  expect_true("nuevo_codigo" %in% as.character(hdr_mode[1, ]))
+  expect_true("nueva_etiqueta" %in% as.character(hdr_mode[1, ]))
+  expect_true("Código final de la variable" %in% as.character(hdr_mode[2, ]))
+  expect_true("Detalle modo (referencia)" %in% as.character(hdr_mode[2, ]))
+
+  hdr_age <- read_sheet_headers(path_tpl, "age")
+  expect_true("age_recod" %in% as.character(hdr_age[1, ]))
+  expect_true("nuevo_codigo" %in% as.character(hdr_age[1, ]))
+  expect_true("nueva_etiqueta" %in% as.character(hdr_age[1, ]))
+  expect_true("Código final" %in% as.character(hdr_age[2, ]))
+
+  need_sheet <- readxl::read_excel(path_tpl, sheet = "need", col_names = FALSE)
+  need_vals <- as.character(unlist(need_sheet, use.names = FALSE))
+  expect_true("need/ejemplo_recod" %in% need_vals)
+  expect_true("Ejemplo: etiqueta visible" %in% need_vals)
+  expect_true("1" %in% need_vals)
+  expect_true("0" %in% need_vals)
+
+  cmts <- count_workbook_comments(path_tpl)
+  expect_match(cmts$text, "bloque auxiliar", ignore.case = TRUE)
+  expect_match(cmts$text, "nuevas categorías", ignore.case = TRUE)
+  expect_match(cmts$text, "select_multiple", ignore.case = TRUE)
+  expect_match(cmts$text, "no se adapta", ignore.case = TRUE)
+  expect_match(cmts$text, "La posición de la nueva columna no es obligatoria", fixed = TRUE)
+  expect_match(cmts$text, "fila 1 = need/&lt;nuevo_codigo&gt;_recod", fixed = TRUE)
+})
+
+test_that("ppra_adaptar_data usa el bloque auxiliar para integer", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("integer"),
+      name = c("age"),
+      `label::Spanish (ES)` = c("Edad"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = character(0),
+      name = character(0),
+      `label::Spanish (ES)` = character(0),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  dat <- make_codif_dat(data.frame(
+    `_uuid` = c("u1", "u2"),
+    `_index` = c(1, 2),
+    age = c(35, 29),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  ))
+  path_inst <- tempfile(fileext = ".xlsx")
+  path_data <- tempfile(fileext = ".xlsx")
+  path_familias <- tempfile(fileext = ".xlsx")
+  path_tpl <- tempfile(fileext = ".xlsx")
+  path_out <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(c(path_inst, path_data, path_familias, path_tpl, path_out)), add = TRUE)
+
+  write_codif_inst_xlsx(inst, path_inst)
+  openxlsx::write.xlsx(list(data = dat$raw), file = path_data, overwrite = TRUE)
+  prosecnur::escribir_plantilla_familias(inst, dat, path = path_familias)
+  fam <- prosecnur::leer_familias_clasificar(path_familias, inst, dat, verbose = FALSE)
+  expect_s3_class(fam$integer, "data.frame")
+  expect_identical(fam$integer$parent[[1]], "age")
+  plantilla <- prosecnur::construir_plantilla_desde_familias(inst, dat, fam)
+  prosecnur::exportar_plantilla_codificacion_xlsx(plantilla, path_xlsx = path_tpl, inst = inst)
+
+  wb <- openxlsx::loadWorkbook(path_tpl)
+  hdr_age <- read_sheet_headers(path_tpl, "age")
+  col_age <- which(as.character(hdr_age[1, ]) == "age_recod")
+  col_new_code <- which(as.character(hdr_age[1, ]) == "nuevo_codigo")
+  col_new_label <- which(as.character(hdr_age[1, ]) == "nueva_etiqueta")
+  openxlsx::writeData(wb, "age", x = c("1", "2"), startCol = col_age, startRow = 3, colNames = FALSE)
+  openxlsx::writeData(wb, "age", x = c("1", "2"), startCol = col_new_code, startRow = 3, colNames = FALSE)
+  openxlsx::writeData(wb, "age", x = c("Adulto", "Mayor"), startCol = col_new_label, startRow = 3, colNames = FALSE)
+  openxlsx::saveWorkbook(wb, path_tpl, overwrite = TRUE)
+
+  prosecnur::ppra_adaptar_data(
+    path_instrumento = path_inst,
+    path_datos = path_data,
+    path_plantilla = path_tpl,
+    int_vars = "age",
+    out_path = path_out
+  )
+
+  out <- readxl::read_excel(path_out, sheet = "data")
+  expect_identical(as.character(out$age_recod), c("1", "2"))
+  expect_identical(as.character(out$age_recod_label), c("Adulto", "Mayor"))
+})
+
+test_that("ppra_adaptar_data e instrumento resuelven select_one modo padre con bloque auxiliar", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("select_one lst_mode", "text"),
+      name = c("mode", "mode_detail"),
+      relevant = c(NA, "${mode} = '96'"),
+      `label::Spanish (ES)` = c("Modo principal", "Detalle modo"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_mode", "lst_mode"),
+      name = c("1", "96"),
+      `label::Spanish (ES)` = c("Presencial", "Canal alternativo"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  dat <- make_codif_dat(data.frame(
+    `_uuid` = c("u1", "u2"),
+    `_index` = c(1, 2),
+    mode = c("96", "1"),
+    mode_detail = c("Mixto", NA),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  ))
+  path_inst <- tempfile(fileext = ".xlsx")
+  path_data <- tempfile(fileext = ".xlsx")
+  path_familias <- tempfile(fileext = ".xlsx")
+  path_tpl <- tempfile(fileext = ".xlsx")
+  path_out_data <- tempfile(fileext = ".xlsx")
+  path_out_inst <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(c(path_inst, path_data, path_familias, path_tpl, path_out_data, path_out_inst)), add = TRUE)
+
+  write_codif_inst_xlsx(inst, path_inst)
+  openxlsx::write.xlsx(list(data = dat$raw), file = path_data, overwrite = TRUE)
+  prosecnur::escribir_plantilla_familias(inst, dat, path = path_familias)
+  set_familias_modo_so(path_familias, c(mode = "padre"))
+  fam <- prosecnur::leer_familias_clasificar(path_familias, inst, dat, verbose = FALSE)
+  plantilla <- prosecnur::construir_plantilla_desde_familias(inst, dat, fam)
+  prosecnur::exportar_plantilla_codificacion_xlsx(plantilla, path_xlsx = path_tpl, inst = inst)
+
+  wb <- openxlsx::loadWorkbook(path_tpl)
+  hdr_mode <- read_sheet_headers(path_tpl, "mode")
+  col_mode_recod <- which(as.character(hdr_mode[1, ]) == "mode_recod")
+  col_new_code <- which(as.character(hdr_mode[1, ]) == "nuevo_codigo")
+  col_new_label <- which(as.character(hdr_mode[1, ]) == "nueva_etiqueta")
+  openxlsx::writeData(wb, "mode", x = "3", startCol = col_mode_recod, startRow = 3, colNames = FALSE)
+  openxlsx::writeData(wb, "mode", x = "3", startCol = col_new_code, startRow = 3, colNames = FALSE)
+  openxlsx::writeData(wb, "mode", x = "Canal mixto", startCol = col_new_label, startRow = 3, colNames = FALSE)
+  openxlsx::saveWorkbook(wb, path_tpl, overwrite = TRUE)
+
+  prosecnur::ppra_adaptar_data(
+    path_instrumento = path_inst,
+    path_datos = path_data,
+    path_plantilla = path_tpl,
+    so_parent_vars = "mode",
+    out_path = path_out_data
+  )
+
+  out <- readxl::read_excel(path_out_data, sheet = "data")
+  expect_identical(as.character(out$mode_recod[[1]]), "3")
+  expect_identical(as.character(out$mode_recod_label[[1]]), "Canal mixto")
+
+  prosecnur::ppra_adaptar_instrumento(
+    path_instrumento_in = path_inst,
+    path_data_adaptada = path_out_data,
+    path_instrumento_out = path_out_inst,
+    so_parent_vars = "mode"
+  )
+
+  choices_out <- readxl::read_excel(path_out_inst, sheet = "choices")
+  lst_mode_recod <- choices_out[choices_out$list_name == "lst_mode_recod", , drop = FALSE]
+  label_col <- names(choices_out)[match(TRUE, tolower(names(choices_out)) %in% c(
+    "label::spanish (es)", "label::spanish(es)", "label::spanish_es",
+    "label_spanish_es", "label::spanish", "label", "label::es"
+  ))]
+  expect_true("3" %in% as.character(lst_mode_recod$name))
+  expect_identical(
+    as.character(lst_mode_recod[[label_col]][match("3", as.character(lst_mode_recod$name))]),
+    "Canal mixto"
+  )
+})
+
+test_that("ppra_adaptar_data e instrumento resuelven select_one modo hijo con bloque auxiliar", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("select_one lst_mode", "text"),
+      name = c("mode", "mode_detail"),
+      relevant = c(NA, "${mode} = '96'"),
+      `label::Spanish (ES)` = c("Modo principal", "Detalle modo"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_mode", "lst_mode"),
+      name = c("1", "96"),
+      `label::Spanish (ES)` = c("Presencial", "Canal alternativo"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  dat <- make_codif_dat(data.frame(
+    `_uuid` = c("u1", "u2"),
+    `_index` = c(1, 2),
+    mode = c("96", "1"),
+    mode_detail = c("Mixto", NA),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  ))
+  path_inst <- tempfile(fileext = ".xlsx")
+  path_data <- tempfile(fileext = ".xlsx")
+  path_familias <- tempfile(fileext = ".xlsx")
+  path_tpl <- tempfile(fileext = ".xlsx")
+  path_out_data <- tempfile(fileext = ".xlsx")
+  path_out_inst <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(c(path_inst, path_data, path_familias, path_tpl, path_out_data, path_out_inst)), add = TRUE)
+
+  write_codif_inst_xlsx(inst, path_inst)
+  openxlsx::write.xlsx(list(data = dat$raw), file = path_data, overwrite = TRUE)
+  prosecnur::escribir_plantilla_familias(inst, dat, path = path_familias)
+  set_familias_modo_so(path_familias, c(mode = "hijo"))
+  fam <- prosecnur::leer_familias_clasificar(path_familias, inst, dat, verbose = FALSE)
+  plantilla <- prosecnur::construir_plantilla_desde_familias(inst, dat, fam)
+  prosecnur::exportar_plantilla_codificacion_xlsx(plantilla, path_xlsx = path_tpl, inst = inst)
+
+  hdr_mode <- read_sheet_headers(path_tpl, "mode")
+  expect_false("mode_recod" %in% as.character(hdr_mode[1, ]))
+  expect_true("mode_detail_recod" %in% as.character(hdr_mode[1, ]))
+
+  wb <- openxlsx::loadWorkbook(path_tpl)
+  col_child_recod <- which(as.character(hdr_mode[1, ]) == "mode_detail_recod")
+  col_new_code <- which(as.character(hdr_mode[1, ]) == "nuevo_codigo")
+  col_new_label <- which(as.character(hdr_mode[1, ]) == "nueva_etiqueta")
+  openxlsx::writeData(wb, "mode", x = "7", startCol = col_child_recod, startRow = 3, colNames = FALSE)
+  openxlsx::writeData(wb, "mode", x = "7", startCol = col_new_code, startRow = 3, colNames = FALSE)
+  openxlsx::writeData(wb, "mode", x = "Canal mixto extendido", startCol = col_new_label, startRow = 3, colNames = FALSE)
+  openxlsx::saveWorkbook(wb, path_tpl, overwrite = TRUE)
+
+  prosecnur::ppra_adaptar_data(
+    path_instrumento = path_inst,
+    path_datos = path_data,
+    path_plantilla = path_tpl,
+    so_child_vars = "mode",
+    path_familias = path_familias,
+    out_path = path_out_data
+  )
+
+  out <- readxl::read_excel(path_out_data, sheet = "data")
+  expect_false("mode_recod" %in% names(out))
+  expect_identical(as.character(out$mode_detail_recod[[1]]), "7")
+  expect_identical(as.character(out$mode_detail_recod_label[[1]]), "Canal mixto extendido")
+
+  prosecnur::ppra_adaptar_instrumento(
+    path_instrumento_in = path_inst,
+    path_data_adaptada = path_out_data,
+    path_instrumento_out = path_out_inst,
+    so_child_vars = "mode"
+  )
+
+  survey_out <- readxl::read_excel(path_out_inst, sheet = "survey")
+  choices_out <- readxl::read_excel(path_out_inst, sheet = "choices")
+  expect_true("mode_detail_recod" %in% survey_out$name)
+  expect_true(any(grepl("select_one lst_mode_detail_recod", survey_out$type, fixed = TRUE)))
+  expect_true("lst_mode_detail_recod" %in% choices_out$list_name)
+})
+
+test_that("ppra_adaptar_data devuelve un error claro si el bloque auxiliar tiene etiquetas inconsistentes", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("select_one lst_mode", "text"),
+      name = c("mode", "mode_detail"),
+      relevant = c(NA, "${mode} = '96'"),
+      `label::Spanish (ES)` = c("Modo principal", "Detalle modo"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_mode", "lst_mode"),
+      name = c("1", "96"),
+      `label::Spanish (ES)` = c("Presencial", "Canal alternativo"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  dat <- make_codif_dat(data.frame(
+    `_uuid` = c("u1", "u2"),
+    `_index` = c(1, 2),
+    mode = c("96", "1"),
+    mode_detail = c("Mixto", NA),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  ))
+  path_inst <- tempfile(fileext = ".xlsx")
+  path_data <- tempfile(fileext = ".xlsx")
+  path_familias <- tempfile(fileext = ".xlsx")
+  path_tpl <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(c(path_inst, path_data, path_familias, path_tpl)), add = TRUE)
+
+  write_codif_inst_xlsx(inst, path_inst)
+  openxlsx::write.xlsx(list(data = dat$raw), file = path_data, overwrite = TRUE)
+  prosecnur::escribir_plantilla_familias(inst, dat, path = path_familias)
+  set_familias_modo_so(path_familias, c(mode = "padre"))
+  fam <- prosecnur::leer_familias_clasificar(path_familias, inst, dat, verbose = FALSE)
+  plantilla <- prosecnur::construir_plantilla_desde_familias(inst, dat, fam)
+  prosecnur::exportar_plantilla_codificacion_xlsx(plantilla, path_xlsx = path_tpl, inst = inst)
+
+  wb <- openxlsx::loadWorkbook(path_tpl)
+  hdr_mode <- read_sheet_headers(path_tpl, "mode")
+  col_mode_recod <- which(as.character(hdr_mode[1, ]) == "mode_recod")
+  col_new_code <- which(as.character(hdr_mode[1, ]) == "nuevo_codigo")
+  col_new_label <- which(as.character(hdr_mode[1, ]) == "nueva_etiqueta")
+  openxlsx::writeData(wb, "mode", x = c("3", "3"), startCol = col_mode_recod, startRow = 3, colNames = FALSE)
+  openxlsx::writeData(wb, "mode", x = c("3", "3"), startCol = col_new_code, startRow = 3, colNames = FALSE)
+  openxlsx::writeData(wb, "mode", x = c("Canal mixto", "Canal C"), startCol = col_new_label, startRow = 3, colNames = FALSE)
+  openxlsx::saveWorkbook(wb, path_tpl, overwrite = TRUE)
+
+  expect_error(
+    prosecnur::ppra_adaptar_data(
+      path_instrumento = path_inst,
+      path_datos = path_data,
+      path_plantilla = path_tpl,
+      so_parent_vars = "mode"
+    ),
+    regexp = "código nuevo '3'.*más de una etiqueta declarada.*bloque auxiliar",
+    perl = TRUE
+  )
+})
+
+test_that("ppra_adaptar_instrumento reutiliza listas iguales para integer", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("integer", "integer"),
+      name = c("age", "score"),
+      `label::Spanish (ES)` = c("Edad", "Puntaje"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = character(0),
+      name = character(0),
+      `label::Spanish (ES)` = character(0),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  data_adapt <- data.frame(
+    age = c(35, 40),
+    age_recod = c("1", "2"),
+    age_recod_label = c("Adulto", "Mayor"),
+    score = c(10, 20),
+    score_recod = c("2", "1"),
+    score_recod_label = c("Mayor", "Adulto"),
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  path_inst <- tempfile(fileext = ".xlsx")
+  path_out_inst <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(c(path_inst, path_out_inst)), add = TRUE)
+
+  write_codif_inst_xlsx(inst, path_inst)
+  prosecnur::ppra_adaptar_instrumento(
+    path_instrumento_in = path_inst,
+    path_data_adaptada = data_adapt,
+    path_instrumento_out = path_out_inst,
+    integer_vars = c("age", "score")
+  )
+
+  survey_out <- readxl::read_excel(path_out_inst, sheet = "survey")
+  choices_out <- readxl::read_excel(path_out_inst, sheet = "choices")
+  type_age <- survey_out$type[match("age_recod", survey_out$name)]
+  type_score <- survey_out$type[match("score_recod", survey_out$name)]
+  expect_identical(type_age, "select_one lst_age_recod")
+  expect_identical(type_score, "select_one lst_age_recod")
+  expect_identical(unique(choices_out$list_name), "lst_age_recod")
 })

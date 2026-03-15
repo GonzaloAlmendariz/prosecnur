@@ -79,6 +79,63 @@
   unique(toks[nzchar(toks)])
 }
 
+.collect_code_label_map_from_col <- function(df_or_path, code_col, label_col,
+                                             known_codes = character(0),
+                                             context = code_col){
+  if (is.character(df_or_path) && file.exists(df_or_path)) {
+    lst <- .read_all_sheets(df_or_path)
+  } else if (is.data.frame(df_or_path)) {
+    lst <- list(DATA = df_or_path)
+  } else {
+    stop("path_data_adaptada debe ser data.frame o ruta a XLSX con la data adaptada.")
+  }
+
+  acc <- tibble::tibble(code = character(0), label = character(0), sheet = character(0))
+  for (nm in names(lst)) {
+    d <- lst[[nm]]
+    if (is.null(d) || !ncol(d) || !(code_col %in% names(d))) next
+    codes <- trimws(as.character(d[[code_col]]))
+    codes[codes == ""] <- NA_character_
+    labels <- if (label_col %in% names(d)) trimws(as.character(d[[label_col]])) else rep(NA_character_, length(codes))
+    labels[labels == ""] <- NA_character_
+    keep <- !is.na(codes)
+    if (!any(keep)) next
+    acc <- dplyr::bind_rows(
+      acc,
+      tibble::tibble(code = codes[keep], label = labels[keep], sheet = nm)
+    )
+  }
+
+  if (!nrow(acc)) return(character(0))
+
+  new_codes <- setdiff(unique(acc$code), as.character(known_codes))
+  if (!length(new_codes)) return(character(0))
+
+  out <- character(0)
+  for (code in new_codes) {
+    labs <- unique(acc$label[acc$code == code & !is.na(acc$label)])
+    if (!length(labs)) {
+      stop(
+        "[Recodificación] En la data adaptada, el código nuevo '", code, "' para '", context,
+        "' no tiene etiqueta declarada en '", label_col,
+        "'. Completa esa etiqueta al menos una vez para ese código.",
+        call. = FALSE
+      )
+    }
+    if (length(labs) > 1L) {
+      stop(
+        "[Recodificación] En la data adaptada, el código nuevo '", code, "' para '", context,
+        "' tiene más de una etiqueta declarada en '", label_col,
+        "': ", paste(shQuote(labs), collapse = ", "),
+        ". Usa una sola etiqueta por código.",
+        call. = FALSE
+      )
+    }
+    out[code] <- labs[1]
+  }
+  out
+}
+
 .collect_child_cols <- function(df_or_path, parent){
   # Devuelve nombres de columnas hijas *_recod a lo largo de todas las hojas:
   # ^<parent>_.+_recod$, excluyendo <parent>_recod
@@ -101,6 +158,78 @@
   unique(out)
 }
 
+.collect_all_colnames <- function(df_or_path){
+  if (is.character(df_or_path) && file.exists(df_or_path)) {
+    lst <- .read_all_sheets(df_or_path)
+  } else if (is.data.frame(df_or_path)) {
+    lst <- list(DATA = df_or_path)
+  } else {
+    stop("path_data_adaptada debe ser data.frame o ruta a XLSX con la data adaptada.")
+  }
+  unique(unlist(lapply(lst, names), use.names = FALSE))
+}
+
+.find_text_children_for_parent <- function(survey, parent){
+  if (is.null(survey) || !nrow(survey) || !all(c("name", "type") %in% names(survey))) {
+    return(character(0))
+  }
+  rel_col <- names(survey)[match(TRUE, tolower(names(survey)) %in% c("relevant", "relevance"))]
+  if (is.na(rel_col)) return(character(0))
+
+  is_text <- grepl("^text\\b", trimws(as.character(survey$type)))
+  rel <- as.character(survey[[rel_col]] %||% "")
+  parent_rx <- paste0("\\$\\{", gsub("([\\W])", "\\\\\\1", parent), "\\}")
+  hits <- is_text & grepl(parent_rx, rel, perl = TRUE)
+  unique(as.character(survey$name[hits]))
+}
+
+.code_label_signature <- function(code_label_map){
+  if (is.null(code_label_map) || !length(code_label_map)) return("")
+  codes <- names(code_label_map)
+  ord <- order(codes)
+  paste0(codes[ord], "=", unname(code_label_map[ord]), collapse = "||")
+}
+
+.reorder_choices_by_anchor <- function(choices, survey, extra_anchor = NULL){
+  if (is.null(choices) || !nrow(choices) || is.null(survey) || !nrow(survey)) return(choices)
+
+  survey <- as.data.frame(survey, stringsAsFactors = FALSE, check.names = FALSE)
+  survey$q_order_tmp <- seq_len(nrow(survey))
+  survey$list_name_tmp <- vapply(as.character(survey$type), .extract_listname, FUN.VALUE = character(1))
+
+  list_anchor <- survey %>%
+    dplyr::filter(!is.na(.data$list_name_tmp) & nzchar(.data$list_name_tmp)) %>%
+    dplyr::group_by(.data$list_name_tmp) %>%
+    dplyr::summarise(anchor_order = min(.data$q_order_tmp), .groups = "drop") %>%
+    dplyr::rename(list_name = .data$list_name_tmp)
+
+  anchors <- list_anchor
+  if (!is.null(extra_anchor) && nrow(extra_anchor)) {
+    anchors <- dplyr::bind_rows(anchors, extra_anchor) %>%
+      dplyr::group_by(.data$list_name) %>%
+      dplyr::summarise(
+        anchor_order = min(.data$anchor_order),
+        is_new = max(dplyr::coalesce(.data$is_new, FALSE)),
+        .groups = "drop"
+      )
+  } else {
+    anchors$is_new <- FALSE
+  }
+
+  anchors$is_new[is.na(anchors$is_new)] <- FALSE
+  choices$row_id_tmp <- seq_len(nrow(choices))
+  choices <- choices %>%
+    dplyr::left_join(anchors, by = "list_name") %>%
+    dplyr::mutate(
+      anchor_order = dplyr::coalesce(.data$anchor_order, Inf),
+      is_new = dplyr::coalesce(.data$is_new, FALSE)
+    ) %>%
+    dplyr::arrange(.data$anchor_order, .data$is_new, .data$list_name, .data$row_id_tmp) %>%
+    dplyr::select(-dplyr::all_of(c("row_id_tmp", "anchor_order", "is_new")))
+
+  choices
+}
+
 .style <- function(hex) openxlsx::createStyle(fgFill = hex)
 
 .paint_new <- function(wb, sheet, rows, ncols, hex){
@@ -118,6 +247,7 @@
                            kind = c("multiple","one"),
                            list_name_hint = NULL,
                            tokens_from_data = character(0),
+                           labels_from_data = NULL,
                            lab_col_s,
                            lab_col_c,
                            choices_order = c("original_first","by_first_seen","alphabetical"),
@@ -184,6 +314,12 @@
     }
   }
 
+  if (length(codes) && !is.null(labels_from_data) && length(labels_from_data)) {
+    idx_map <- match(codes, names(labels_from_data))
+    hit_map <- !is.na(idx_map)
+    labels[hit_map] <- dplyr::coalesce(labels[hit_map], unname(labels_from_data[idx_map[hit_map]]))
+  }
+
   # completar labels desde códigos cuando no se copió catálogo original
   if (!copied_original && length(codes)) {
     na_lab <- is.na(labels) | !nzchar(labels)
@@ -208,6 +344,9 @@
 
   # inyectar choices del list destino (evitando duplicados exactos)
   if (length(codes)) {
+    if (lab_col_c %in% names(choices)) {
+      choices[[lab_col_c]] <- as.character(choices[[lab_col_c]])
+    }
     add_choices <- tibble::tibble(list_name = base_list,
                                   name      = codes)
     add_choices[[lab_col_c]] <- labels
@@ -366,12 +505,14 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
   survey$name       <- as.character(survey$name)
   choices$name      <- as.character(choices$name)
   choices$list_name <- as.character(choices$list_name)
+  survey_base <- survey
 
   # --- preparar acceso multi-hojas ---
   df_is_xlsx <- is.character(path_data_adaptada) && file.exists(path_data_adaptada)
   df_single  <- is.data.frame(path_data_adaptada)
   if (!df_is_xlsx && !df_single)
     stop("path_data_adaptada debe ser data.frame o ruta a XLSX con la data adaptada.")
+  all_cols_data <- .collect_all_colnames(path_data_adaptada)
 
   # --- logs de NUEVOS NOMBRES (survey) y listas nuevas (choices) -------------
   new_names_sm   <- character(0)   # nombres nuevos para SM
@@ -381,6 +522,7 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
   new_lists_sm   <- character(0)   # list_name nuevas SM
   new_lists_so   <- character(0)   # list_name nuevas SO (padre + hijo)
   new_lists_int  <- character(0)   # list_name nuevas INTEGER
+  integer_registry <- list()
 
   # =======================
   # 1) SELECT MULTIPLE (padre)
@@ -417,12 +559,30 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
     for (pv in so_parent_vars) {
       col_rec <- paste0(pv, "_recod")
       toks <- .collect_tokens_from_col(path_data_adaptada, col_rec)
+      known_codes <- if (pv %in% survey$name) {
+        ln_orig <- .extract_listname(as.character(survey$type[match(pv, survey$name)][1]))
+        if (!is.na(ln_orig) && ln_orig %in% choices$list_name) {
+          as.character(choices$name[choices$list_name == ln_orig])
+        } else {
+          character(0)
+        }
+      } else {
+        character(0)
+      }
+      lab_map <- .collect_code_label_map_from_col(
+        path_data_adaptada,
+        code_col = col_rec,
+        label_col = paste0(pv, "_recod_label"),
+        known_codes = known_codes,
+        context = pv
+      )
 
       res <- .add_recoded_q(survey, choices,
                             base_name      = pv,
                             kind           = "one",
                             list_name_hint = NULL,  # usa <ln_orig>_recod
                             tokens_from_data = toks,
+                            labels_from_data = lab_map,
                             lab_col_s      = lab_col_s,
                             lab_col_c      = lab_col_c,
                             choices_order  = choices_order,
@@ -443,12 +603,23 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
   # =======================
   if (length(so_child_vars)) {
     for (pv in so_child_vars) {
-      child_cols <- .collect_child_cols(path_data_adaptada, pv)
+      child_vars <- .find_text_children_for_parent(survey_base, pv)
+      child_cols <- intersect(paste0(child_vars, "_recod"), all_cols_data)
+      if (!length(child_cols)) {
+        child_cols <- .collect_child_cols(path_data_adaptada, pv)
+      }
       if (!length(child_cols)) next
 
       for (cc in child_cols) {
         toks <- .collect_tokens_from_col(path_data_adaptada, cc)
         toks <- toks[nzchar(toks)]
+        lab_map <- .collect_code_label_map_from_col(
+          path_data_adaptada,
+          code_col = cc,
+          label_col = paste0(cc, "_label"),
+          known_codes = character(0),
+          context = cc
+        )
 
         # base para la etiqueta: versión sin _recod
         base_child_name <- sub("(?i)_recod$", "", cc, perl = TRUE)
@@ -456,17 +627,18 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
         res <- .add_recoded_q(survey, choices,
                               base_name      = base_child_name,                 # para type/label
                               kind           = "one",
-                              list_name_hint = paste0(.sanitize(cc), "_lista"), # ej: calidad_docente_why_recod_lista
+                              list_name_hint = paste0("lst_", cc),
                               tokens_from_data = toks,
+                              labels_from_data = lab_map,
                               lab_col_s      = lab_col_s,
                               lab_col_c      = lab_col_c,
                               choices_order  = choices_order,
-                              insert_below_original = FALSE,   # listas al final
+                              insert_below_original = FALSE,
                               copy_from_original    = FALSE,   # sin catálogo original
                               new_name_override     = cc)      # nombre EXACTO de la col hija recod
 
-        survey  <- res$survey
-        choices <- res$choices
+      survey  <- res$survey
+      choices <- res$choices
 
         new_names_so   <- c(new_names_so,   res$new_name)
         new_lists_so   <- c(new_lists_so,   res$list_name)
@@ -481,18 +653,35 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
     for (pv in integer_vars) {
       col_rec <- paste0(pv, "_recod")
       toks <- .collect_tokens_from_col(path_data_adaptada, col_rec)
+      lab_map <- .collect_code_label_map_from_col(
+        path_data_adaptada,
+        code_col = col_rec,
+        label_col = paste0(col_rec, "_label"),
+        known_codes = character(0),
+        context = pv
+      )
+      sig <- .code_label_signature(lab_map)
+      known_list <- if (nzchar(sig) && !is.null(integer_registry[[sig]])) integer_registry[[sig]] else NULL
+      list_hint <- known_list %||% paste0("lst_", pv, "_recod")
+      tokens_use <- if (is.null(known_list)) toks else character(0)
+      labels_use <- if (is.null(known_list)) lab_map else NULL
 
       res <- .add_recoded_q(survey, choices,
                             base_name      = pv,
                             kind           = "one",
-                            list_name_hint = paste0(pv, "_recod_lista"),
-                            tokens_from_data = toks,
+                            list_name_hint = list_hint,
+                            tokens_from_data = tokens_use,
+                            labels_from_data = labels_use,
                             lab_col_s      = lab_col_s,
                             lab_col_c      = lab_col_c,
                             choices_order  = choices_order,
-                            insert_below_original = FALSE,  # listas al final
+                            insert_below_original = FALSE,
                             copy_from_original    = FALSE,  # no hay catálogo original
                             new_name_override     = NULL)   # genera <var>_recod
+
+      if (nzchar(sig) && is.null(integer_registry[[sig]])) {
+        integer_registry[[sig]] <- res$list_name
+      }
 
       survey  <- res$survey
       choices <- res$choices
@@ -501,6 +690,8 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
       new_lists_int  <- c(new_lists_int,  res$list_name)
     }
   }
+
+  choices <- .reorder_choices_by_anchor(choices, survey)
 
   # =======================
   # 5) Exportar + colorear

@@ -831,6 +831,854 @@ find_other_dummy_for_parent <- function(parent_original, name_map){
   out[1] %||% NA_character_
 }
 
+.codif_regex_escape <- function(x){
+  gsub("([\\W])", "\\\\\\1", as.character(x), perl = TRUE)
+}
+
+.codif_norm_list_name <- function(x){
+  x <- tolower(trimws(as.character(x)))
+  x <- gsub("\\s+", "_", x)
+  gsub("[^a-z0-9_]", "_", x)
+}
+
+.codif_build_survey_context <- function(inst){
+  survey <- inst$survey %||% inst$survey_raw
+  if (is.null(survey) || !nrow(survey) || !"name" %in% names(survey)) {
+    return(tibble::tibble(
+      survey_idx = integer(),
+      q_order = integer(),
+      name = character(),
+      name_clean = character(),
+      type = character(),
+      type_base = character(),
+      relevant = character(),
+      repeat_section = character(),
+      group_path = character()
+    ))
+  }
+
+  if (!"type" %in% names(survey)) survey$type <- NA_character_
+  if (!"q_order" %in% names(survey) || all(is.na(survey$q_order))) {
+    survey$q_order <- seq_len(nrow(survey))
+  }
+
+  rel_col <- names(survey)[match(TRUE, tolower(names(survey)) %in% c("relevant", "relevance"))]
+  relevant <- if (!is.na(rel_col)) as.character(survey[[rel_col]]) else rep(NA_character_, nrow(survey))
+  type_chr <- as.character(survey$type)
+  type_tok <- tolower(gsub("\\s+", "_", type_chr))
+  type_base <- sub("\\s.*$", "", tolower(type_chr))
+  name_clean <- janitor::make_clean_names(survey$name)
+
+  repeat_stack <- character(0)
+  group_stack  <- character(0)
+  repeat_section <- character(nrow(survey))
+  group_path     <- character(nrow(survey))
+
+  for (i in seq_len(nrow(survey))) {
+    repeat_section[i] <- if (length(repeat_stack)) repeat_stack[length(repeat_stack)] else "main"
+    group_path[i]     <- if (length(group_stack)) paste(group_stack, collapse = "/") else "main"
+
+    if (grepl("^begin_?repeat\\b", type_tok[i])) {
+      nm <- name_clean[i] %||% paste0("repeat_", i)
+      repeat_stack <- c(repeat_stack, nm)
+      group_stack  <- c(group_stack, nm)
+      next
+    }
+    if (grepl("^begin_?group\\b", type_tok[i])) {
+      nm <- name_clean[i] %||% paste0("group_", i)
+      group_stack <- c(group_stack, nm)
+      next
+    }
+    if (grepl("^end_?repeat\\b", type_tok[i])) {
+      if (length(group_stack)) group_stack <- head(group_stack, -1)
+      if (length(repeat_stack)) repeat_stack <- head(repeat_stack, -1)
+      next
+    }
+    if (grepl("^end_?group\\b", type_tok[i]) && length(group_stack)) {
+      group_stack <- head(group_stack, -1)
+    }
+  }
+
+  tibble::tibble(
+    survey_idx = seq_len(nrow(survey)),
+    q_order = as.integer(survey$q_order),
+    name = as.character(survey$name),
+    name_clean = name_clean,
+    type = type_chr,
+    type_base = type_base,
+    relevant = relevant,
+    repeat_section = repeat_section,
+    group_path = group_path
+  )
+}
+
+.codif_choices_lookup <- function(inst, survey_ctx = NULL){
+  survey_ctx <- survey_ctx %||% .codif_build_survey_context(inst)
+  if (!nrow(survey_ctx)) return(list())
+
+  choices_es <- choices_es_tbl(inst)
+  if (!nrow(choices_es)) return(list())
+
+  survey <- inst$survey %||% inst$survey_raw
+  if (is.null(survey) || !"name" %in% names(survey)) return(list())
+  if (!"list_norm" %in% names(survey)) {
+    if (!"list_name" %in% names(survey)) {
+      survey$list_name <- trimws(sub("^\\S+\\s+", "", as.character(survey$type %||% "")))
+    }
+    survey$list_norm <- .codif_norm_list_name(survey$list_name)
+  }
+
+  sel_rows <- survey_ctx$type_base %in% c("select_one", "select_multiple")
+  parent_map <- tibble::tibble(
+    parent_clean = survey_ctx$name_clean[sel_rows],
+    list_norm = as.character(survey$list_norm[match(survey_ctx$name[sel_rows], as.character(survey$name))])
+  ) %>%
+    dplyr::filter(!is.na(.data$list_norm) & nzchar(.data$list_norm)) %>%
+    dplyr::distinct()
+
+  out <- vector("list", nrow(parent_map))
+  names(out) <- parent_map$parent_clean
+  for (i in seq_len(nrow(parent_map))) {
+    out[[i]] <- choices_es %>%
+      dplyr::filter(.data$list_norm == !!parent_map$list_norm[i]) %>%
+      dplyr::transmute(
+        code = as.character(.data$code),
+        label = as.character(dplyr::coalesce(.data$label_es, .data$code))
+      )
+  }
+  out
+}
+
+.codif_extract_trigger_code <- function(relevant, parent_clean){
+  if (!nzchr(parent_clean)) return(NA_character_)
+  rel <- trimws(as.character(relevant)[1] %||% "")
+  if (!nzchar(rel)) return(NA_character_)
+
+  p_rx <- .codif_regex_escape(parent_clean)
+  pats <- c(
+    paste0("selected\\s*\\(\\s*\\$\\{", p_rx, "\\}\\s*,\\s*['\"]?([^'\"\\)\\s]+)['\"]?\\s*\\)"),
+    paste0("\\$\\{", p_rx, "\\}\\s*=\\s*['\"]?([^'\"\\s\\)&|=]+)['\"]?")
+  )
+
+  for (pat in pats) {
+    hit <- regmatches(rel, regexec(pat, rel, ignore.case = TRUE, perl = TRUE))[[1]]
+    if (length(hit) >= 2 && nzchar(hit[2])) return(hit[2])
+  }
+  NA_character_
+}
+
+.codif_find_semantic_text_link <- function(parent_name,
+                                           inst,
+                                           survey_ctx = NULL,
+                                           choices_lookup = NULL){
+  survey_ctx <- survey_ctx %||% .codif_build_survey_context(inst)
+  choices_lookup <- choices_lookup %||% .codif_choices_lookup(inst, survey_ctx)
+
+  parent_clean <- janitor::make_clean_names(parent_name)
+  parent_row <- survey_ctx %>%
+    dplyr::filter(.data$name_clean == !!parent_clean,
+                  .data$type_base %in% c("select_one", "select_multiple")) %>%
+    dplyr::slice(1)
+  if (!nrow(parent_row)) {
+    return(list(text_name = NA_character_, trigger_code = NA_character_, source = NA_character_))
+  }
+
+  candidates <- survey_ctx %>%
+    dplyr::filter(.data$type_base == "text",
+                  .data$q_order > !!parent_row$q_order[[1]],
+                  .data$repeat_section == !!parent_row$repeat_section[[1]])
+  if (!nrow(candidates)) {
+    return(list(text_name = NA_character_, trigger_code = NA_character_, source = NA_character_))
+  }
+
+  same_group <- candidates$group_path == parent_row$group_path[[1]]
+  if (any(same_group, na.rm = TRUE)) {
+    candidates <- candidates[same_group, , drop = FALSE]
+  }
+
+  candidates$trigger_code <- vapply(
+    candidates$relevant,
+    .codif_extract_trigger_code,
+    FUN.VALUE = character(1),
+    parent_clean = parent_clean
+  )
+  candidates <- candidates[!is.na(candidates$trigger_code) & nzchar(candidates$trigger_code), , drop = FALSE]
+  if (!nrow(candidates)) {
+    return(list(text_name = NA_character_, trigger_code = NA_character_, source = NA_character_))
+  }
+
+  valid_codes <- choices_lookup[[parent_clean]]
+  if (!is.null(valid_codes) && nrow(valid_codes)) {
+    candidates <- candidates[candidates$trigger_code %in% as.character(valid_codes$code), , drop = FALSE]
+  }
+  if (!nrow(candidates)) {
+    return(list(text_name = NA_character_, trigger_code = NA_character_, source = NA_character_))
+  }
+
+  best <- candidates %>% dplyr::slice(1)
+  list(
+    text_name = as.character(best$name[[1]]),
+    trigger_code = as.character(best$trigger_code[[1]]),
+    source = "semantic"
+  )
+}
+
+.codif_collapse_candidates <- function(...){
+  vals <- unique(unlist(list(...), use.names = FALSE))
+  vals <- vals[!is.na(vals) & nzchar(trimws(vals))]
+  if (!length(vals)) NA_character_ else paste(vals, collapse = "; ")
+}
+
+.codif_resolve_family_links <- function(parent_name,
+                                        tipo_sugerido,
+                                        inst,
+                                        name_map,
+                                        cols_exist,
+                                        survey_ctx = NULL,
+                                        choices_lookup = NULL){
+  parent_col <- resolve_parent_col_original(parent_name, name_map)
+  survey_ctx <- survey_ctx %||% .codif_build_survey_context(inst)
+  choices_lookup <- choices_lookup %||% .codif_choices_lookup(inst, survey_ctx)
+
+  semantic <- .codif_find_semantic_text_link(parent_name, inst, survey_ctx, choices_lookup)
+  text_semantic <- if (nzchr(semantic$text_name)) {
+    resolve_parent_col_original(semantic$text_name, name_map)
+  } else {
+    NA_character_
+  }
+  text_fallback <- if (nzchr(parent_col)) find_text_other_for_parent(parent_col, name_map) else NA_character_
+  text_col <- dplyr::coalesce(text_semantic, text_fallback)
+
+  other_candidate <- NA_character_
+  other_dummy_col <- NA_character_
+  if (tolower(tipo_sugerido %||% "") == "select_multiple") {
+    if (nzchr(parent_col) && nzchr(semantic$trigger_code)) {
+      other_candidate <- paste0(parent_col, "/", semantic$trigger_code)
+      if (other_candidate %in% cols_exist) other_dummy_col <- other_candidate
+    }
+    if (!nzchr(other_dummy_col) && nzchr(parent_col)) {
+      other_dummy_col <- find_other_dummy_for_parent(parent_col, name_map)
+    }
+  }
+
+  list(
+    parent_col = parent_col,
+    text_col = text_col %||% NA_character_,
+    other_dummy_col = other_dummy_col %||% NA_character_,
+    text_col_cands = .codif_collapse_candidates(text_semantic, text_fallback),
+    other_dummy_cands = .codif_collapse_candidates(other_candidate, other_dummy_col),
+    dummy_cands = if (nzchr(parent_col)) {
+      .codif_collapse_candidates(find_dummy_cols_for_parent(parent_col, name_map))
+    } else {
+      NA_character_
+    }
+  )
+}
+
+.codif_build_family_tpl <- function(cand,
+                                    inst,
+                                    name_map,
+                                    cols_exist,
+                                    survey_ctx = NULL,
+                                    choices_lookup = NULL,
+                                    section = NULL,
+                                    hoja_datos = NULL){
+  if (!nrow(cand)) return(cand[0, , drop = FALSE])
+
+  survey_ctx <- survey_ctx %||% .codif_build_survey_context(inst)
+  choices_lookup <- choices_lookup %||% .codif_choices_lookup(inst, survey_ctx)
+
+  resolved <- lapply(seq_len(nrow(cand)), function(i){
+    .codif_resolve_family_links(
+      parent_name = cand$parent[i],
+      tipo_sugerido = cand$tipo_sugerido[i],
+      inst = inst,
+      name_map = name_map,
+      cols_exist = cols_exist,
+      survey_ctx = survey_ctx,
+      choices_lookup = choices_lookup
+    )
+  })
+
+  parent_col_sug <- vapply(resolved, `[[`, FUN.VALUE = character(1), "parent_col")
+  text_col_sug <- vapply(resolved, `[[`, FUN.VALUE = character(1), "text_col")
+  otherdum_sug <- vapply(resolved, `[[`, FUN.VALUE = character(1), "other_dummy_col")
+  text_col_cands <- vapply(resolved, `[[`, FUN.VALUE = character(1), "text_col_cands")
+  other_dummy_cands <- vapply(resolved, `[[`, FUN.VALUE = character(1), "other_dummy_cands")
+  dummy_cands <- vapply(resolved, `[[`, FUN.VALUE = character(1), "dummy_cands")
+
+  tpl <- cand %>%
+    dplyr::mutate(
+      use               = TRUE,
+      tipo              = .data$tipo_sugerido,
+      parent_col        = parent_col_sug,
+      other_dummy_col   = otherdum_sug,
+      text_col          = text_col_sug,
+      parent_col_cands  = parent_col_sug,
+      other_dummy_cands = other_dummy_cands,
+      text_col_cands    = text_col_cands,
+      dummy_cands       = dummy_cands
+    )
+
+  if (!is.null(section)) tpl$section <- section
+  if (!is.null(hoja_datos)) tpl$hoja_datos <- hoja_datos
+  tpl
+}
+
+.codif_apply_type_fill <- function(wb, sheet, tpl, idx_special, type_styles){
+  idx_all <- seq_len(ncol(tpl))
+  idx_body_fill <- setdiff(idx_all, idx_special)
+  if (!nrow(tpl) || !length(idx_body_fill) || !"tipo" %in% names(tpl)) return(invisible(NULL))
+
+  row_groups <- split(seq_len(nrow(tpl)) + 1L, tolower(as.character(tpl$tipo)))
+  for (nm in names(row_groups)) {
+    style <- type_styles[[nm]]
+    if (is.null(style)) style <- type_styles[["default"]]
+    openxlsx::addStyle(
+      wb, sheet, style,
+      rows = row_groups[[nm]], cols = idx_body_fill,
+      gridExpand = TRUE, stack = TRUE
+    )
+  }
+  invisible(NULL)
+}
+
+.codif_norm01 <- function(v){
+  vv <- suppressWarnings(as.integer(as.character(v)))
+  if (!all(is.na(vv))) return(vv)
+  ifelse(
+    tolower(as.character(v)) %in% c("true", "t", "1"), 1L,
+    ifelse(tolower(as.character(v)) %in% c("false", "f", "0"), 0L, NA_integer_)
+  )
+}
+
+.codif_interleave_recod_cols <- function(base){
+  cn <- names(base)
+  base_cols <- cn[!grepl("_recod$", cn)]
+  rec_cols  <- cn[grepl("_recod$", cn)]
+  order_cols <- c()
+  for (b in base_cols) {
+    order_cols <- c(order_cols, b)
+    r <- paste0(b, "_recod")
+    if (r %in% rec_cols) order_cols <- c(order_cols, r)
+  }
+  orphan_rec <- setdiff(rec_cols, paste0(base_cols, "_recod"))
+  base[, unique(c(order_cols, orphan_rec)), drop = FALSE]
+}
+
+.codif_append_reference_tag <- function(x){
+  x <- as.character(x)
+  needs_tag <- !is.na(x) & nzchar(trimws(x)) & !grepl("\\(referencia\\)$", trimws(x), ignore.case = TRUE)
+  x[needs_tag] <- paste0(trimws(x[needs_tag]), " (referencia)")
+  x
+}
+
+.codif_refine_label_row <- function(hdr_base, hdr_lab, tipo_hoja, sheet_name = NULL){
+  hdr_base <- as.character(hdr_base)
+  out <- as.character(hdr_lab %||% hdr_base)
+  tipo_norm <- tolower(as.character(tipo_hoja %||% "text"))
+
+  id_cols <- c("_uuid", "_index", "Código pulso", "Codigo pulso", "pulso_code")
+  base_non_recod <- hdr_base[!grepl("_recod$", hdr_base)]
+  base_value_cols <- setdiff(base_non_recod, c(id_cols, "Control"))
+  base_unpaired <- base_value_cols[!(paste0(base_value_cols, "_recod") %in% hdr_base)]
+
+  out[hdr_base == "Control"] <- "Control / notas"
+
+  if (identical(tipo_norm, "select_one")) {
+    if ("Selección (label)" %in% hdr_base) {
+      idx_sel_label <- hdr_base == "Selección (label)"
+      out[idx_sel_label] <- .codif_append_reference_tag(out[idx_sel_label])
+    }
+    if ("Recodificación (código)" %in% hdr_base) {
+      out[hdr_base == "Recodificación (código)"] <- "Recodificación (código)"
+    }
+    if ("Etiqueta nueva categoría" %in% hdr_base) {
+      out[hdr_base == "Etiqueta nueva categoría"] <- "Etiqueta del código nuevo"
+    }
+    text_ref_cols <- setdiff(
+      base_value_cols,
+      c("Selección (código)", "Selección (label)", "Recodificación (código)", "Etiqueta nueva categoría")
+    )
+    if (length(text_ref_cols)) {
+      idx_text_ref <- hdr_base %in% text_ref_cols
+      out[idx_text_ref] <- .codif_append_reference_tag(out[idx_text_ref])
+    }
+    idx_text_recod <- grepl("_recod$", hdr_base)
+    if ("Recodificación (código)" %in% hdr_base) idx_text_recod <- idx_text_recod & hdr_base != "Recodificación (código)"
+    if ("Etiqueta nueva categoría" %in% hdr_base) idx_text_recod <- idx_text_recod & hdr_base != "Etiqueta nueva categoría"
+    out[idx_text_recod] <- "Recodificación del texto"
+  } else if (identical(tipo_norm, "select_multiple")) {
+    text_ref_cols <- setdiff(base_unpaired, c("Seleccionadas", "Seleccionadas_cod"))
+    if (length(text_ref_cols)) {
+      idx_text_ref <- hdr_base %in% text_ref_cols
+      out[idx_text_ref] <- .codif_append_reference_tag(out[idx_text_ref])
+    }
+    out[grepl("_recod$", hdr_base)] <- "Recodificación de esta opción"
+  } else if (tipo_norm %in% c("integer", "text")) {
+    ref_cols <- base_value_cols
+    if (length(ref_cols)) {
+      idx_ref <- hdr_base %in% ref_cols
+      out[idx_ref] <- .codif_append_reference_tag(out[idx_ref])
+    }
+    out[grepl("_recod$", hdr_base)] <- "Recodificación"
+  }
+
+  out
+}
+
+.codif_sheet_column_roles <- function(hdr_base){
+  hdr_base <- as.character(hdr_base)
+  roles <- rep("reference", length(hdr_base))
+  roles[hdr_base %in% c("_uuid", "_index", "Código pulso", "Codigo pulso", "pulso_code")] <- "id"
+  roles[grepl("_recod$", hdr_base)] <- "editable"
+  roles[hdr_base %in% c("Recodificación (código)", "Etiqueta nueva categoría")] <- "editable"
+  roles[hdr_base == "Control"] <- "control"
+  roles
+}
+
+.codif_edit_comment_text <- function(tipo_hoja,
+                                     hdr_base,
+                                     sheet_name = NULL,
+                                     mode_so = NULL,
+                                     aux_block = NULL){
+  tipo_norm <- tolower(as.character(tipo_hoja %||% "text"))
+  mode_so <- tolower(trimws(as.character(mode_so %||% "")))
+  aux_target <- aux_block$target_col %||% "<target>_recod"
+  if (identical(hdr_base, "Control")) {
+    if (identical(tipo_norm, "select_multiple")) {
+      parent_hint <- sheet_name %||% "<parent>"
+      return(paste0(
+        "Opcional: observación o validación. ",
+        "Para agregar una opción nueva en select_multiple, inserte una columna antes de Control. ",
+        "En la fila 1 use ", parent_hint, "/<nuevo_codigo>_recod; en la fila 2 escriba la etiqueta visible; ",
+        "y en las filas de datos use 1 para marcar, 0 para desmarcar o deje vacío si no aplica. ",
+        "A la derecha encontrará una columna reservada de ejemplo que no se adapta."
+      ))
+    }
+    if (identical(tipo_norm, "select_one")) {
+      return(paste0(
+        "Opcional: observación o validación. ",
+        "Si crea un código nuevo, declárelo una sola vez en el bloque auxiliar de nuevas categorías para ",
+        aux_target, ". ",
+        "Si un mismo código nuevo tiene más de una etiqueta o no tiene ninguna, el adaptador devolverá un error claro."
+      ))
+    }
+    if (identical(tipo_norm, "integer")) {
+      return(paste0(
+        "Opcional: observación o validación. ",
+        "Si crea un código nuevo, declárelo una sola vez en el bloque auxiliar de nuevas categorías para ",
+        aux_target, "."
+      ))
+    }
+    return("Opcional: observación o validación.")
+  }
+  if (identical(tipo_norm, "select_multiple")) {
+    parent_hint <- sheet_name %||% "<parent>"
+    return(paste0(
+      "Editar aquí. Use 1 para marcar, 0 para desmarcar y deje vacío si no desea cambiar. ",
+      "Si necesita una opción nueva, agregue una columna con fila 1 = ",
+      parent_hint, "/<nuevo_codigo>_recod y fila 2 = etiqueta visible. ",
+      "La posición no importa para el adaptador; la columna ", parent_hint, "/ejemplo_recod es solo referencia y no se adapta."
+    ))
+  }
+  if (identical(tipo_norm, "select_one") && grepl("_recod$", hdr_base)) {
+    if (identical(mode_so, "padre")) {
+      return(paste0(
+        "Editar aquí el código final de la variable. ",
+        "Si usa un código nuevo, declárelo una sola vez en el bloque auxiliar de nuevas categorías."
+      ))
+    }
+    return(paste0(
+      "Editar aquí el código final del texto abierto. ",
+      "Si usa un código nuevo, declárelo una sola vez en el bloque auxiliar de nuevas categorías."
+    ))
+  }
+  if (identical(tipo_norm, "integer") && grepl("_recod$", hdr_base)) {
+    return(paste0(
+      "Editar aquí el código final. ",
+      "Si usa un código nuevo, declárelo una sola vez en el bloque auxiliar de nuevas categorías."
+    ))
+  }
+  "Editar aquí. Si no desea cambiar el valor, deje la celda vacía."
+}
+
+.codif_make_aux_block <- function(tipo,
+                                  target_col,
+                                  mode_so = NULL,
+                                  sheet_name = NULL){
+  tipo <- tolower(as.character(tipo %||% ""))
+  mode_so <- tolower(trimws(as.character(mode_so %||% "")))
+
+  title <- if (identical(tipo, "select_one") && identical(mode_so, "padre")) {
+    paste0("Modo padre: nuevas categorias para ", sheet_name %||% target_col)
+  } else if (identical(tipo, "select_one") && identical(mode_so, "hijo")) {
+    paste0("Modo hijo: nuevas categorias para ", target_col)
+  } else if (identical(tipo, "integer")) {
+    paste0("Nuevas categorias para ", target_col)
+  } else {
+    "Nuevas categorias"
+  }
+
+  code_comment <- if (identical(tipo, "select_one") && identical(mode_so, "padre")) {
+    paste0(
+      "Declare aqui cada codigo nuevo de ", target_col,
+      " una sola vez. Este bloque define las categorias nuevas de la variable principal."
+    )
+  } else if (identical(tipo, "select_one") && identical(mode_so, "hijo")) {
+    paste0(
+      "Declare aqui cada codigo nuevo de ", target_col,
+      " una sola vez. Este bloque define las categorias del texto abierto recodificado."
+    )
+  } else if (identical(tipo, "integer")) {
+    paste0(
+      "Declare aqui cada codigo nuevo de ", target_col,
+      " una sola vez. Si otra variable integer usa exactamente el mismo diccionario, el instrumento recodificado compartira la misma lista."
+    )
+  } else {
+    "Declare aqui cada codigo nuevo una sola vez."
+  }
+
+  label_comment <- paste0(
+    "Escriba la etiqueta visible del codigo nuevo. ",
+    "No repita etiquetas con el mismo codigo y no deje codigos nuevos sin etiqueta."
+  )
+
+  list(
+    raw = c("nuevo_codigo", "nueva_etiqueta"),
+    label = c("Nuevo código", "Nueva etiqueta"),
+    title = title,
+    target_col = target_col,
+    comments = c(code_comment, label_comment)
+  )
+}
+
+.codif_make_sm_example_block <- function(parent_col){
+  parent_col <- as.character(parent_col %||% "<parent>")
+  list(
+    raw = paste0(parent_col, "/ejemplo_recod"),
+    label = "Ejemplo: etiqueta visible",
+    values = c("1", "0", NA_character_),
+    comment = paste0(
+      "Columna de ejemplo. La fila 1 muestra el nombre técnico y la fila 2 la etiqueta visible. ",
+      "Use 1 para marcar, 0 para desmarcar y deje vacío si no desea cambiar. ",
+      "Esta columna reservada no se adapta; duplíquela o úsela como referencia para crear una opción real. ",
+      "La posición de la nueva columna no es obligatoria: el adaptador la reconoce por el patrón <parent>/<codigo>_recod."
+    )
+  )
+}
+
+.codif_build_select_one_sheet <- function(dat_raw,
+                                          id_base,
+                                          row,
+                                          opts,
+                                          inst,
+                                          label_pref = NULL,
+                                          label_map = NULL){
+  parent_col <- as.character(row$parent_col %||% "")
+  text_col <- as.character(row$text_col %||% "")
+  mode_so <- tolower(trimws(as.character(row$modo_so %||% "")))
+  if (!nzchar(parent_col) || !(parent_col %in% names(dat_raw))) return(NULL)
+  if (!(mode_so %in% c("padre", "hijo"))) {
+    stop(
+      "La familia select_one '", parent_col,
+      "' debe definir modo_so como 'padre' o 'hijo'.",
+      call. = FALSE
+    )
+  }
+
+  parent_code <- as.character(dat_raw[[parent_col]] %||% NA_character_)
+  parent_label_col <- paste0(parent_col, "_label")
+  parent_label <- if (nrow(opts)) as.character(opts$label[match(parent_code, as.character(opts$code))]) else parent_code
+  text_vec <- if (nzchar(text_col) && text_col %in% names(dat_raw)) as.character(dat_raw[[text_col]]) else NULL
+  target_col <- if (identical(mode_so, "padre")) paste0(parent_col, "_recod") else paste0(text_col, "_recod")
+
+  base <- id_base %>%
+    dplyr::mutate(
+      !!parent_col := parent_code,
+      !!parent_label_col := parent_label
+    )
+
+  if (identical(mode_so, "padre")) {
+    base[[target_col]] <- NA_character_
+    if (!is.null(text_vec)) {
+      base[[text_col]] <- text_vec
+    }
+  } else {
+    if (!is.null(text_vec)) {
+      base[[text_col]] <- text_vec
+    }
+    base[[target_col]] <- NA_character_
+  }
+  base[["Control"]] <- NA_character_
+
+  hdr_raw <- names(base)
+  hdr_lab <- hdr_raw
+  main_label <- label_pref %||% .codif_label_get(parent_col, label_map)
+  hdr_lab[hdr_raw == "_uuid"] <- "UUID"
+  hdr_lab[hdr_raw == "_index"] <- "Índice"
+  hdr_lab[hdr_raw == "Código pulso"] <- "Código pulso"
+  hdr_lab[hdr_raw == parent_col] <- "Selección original (código)"
+  hdr_lab[hdr_raw == parent_label_col] <- paste0(main_label, " (referencia)")
+  if (!is.null(text_vec) && nzchar(text_col) && text_col %in% names(base)) {
+    hdr_lab[hdr_raw == text_col] <- paste0(.codif_label_get(text_col, label_map), " (referencia)")
+  }
+  if (identical(mode_so, "padre")) {
+    hdr_lab[hdr_raw == target_col] <- "Código final de la variable"
+  } else {
+    hdr_lab[hdr_raw == target_col] <- "Código final del texto abierto"
+  }
+  hdr_lab[hdr_raw == "Control"] <- "Control / notas"
+
+  structure(
+    base,
+    header_raw = hdr_raw,
+    label_row = hdr_lab,
+    tipo = "select_one",
+    modo_so = mode_so,
+    layout_version = "recod_v2",
+    aux_block = .codif_make_aux_block(
+      tipo = "select_one",
+      target_col = target_col,
+      mode_so = mode_so,
+      sheet_name = parent_col
+    )
+  )
+}
+
+.codif_build_integer_sheet <- function(dat_raw,
+                                       id_base,
+                                       row,
+                                       inst,
+                                       label_map = NULL){
+  var_col <- if (!is.null(row$parent_col) && nzchar(row$parent_col)) as.character(row$parent_col) else as.character(row$parent)
+  if (!nzchar(var_col) || !(var_col %in% names(dat_raw))) return(NULL)
+
+  target_col <- paste0(var_col, "_recod")
+  base <- id_base %>%
+    dplyr::mutate(!!var_col := dat_raw[[var_col]])
+  base[[target_col]] <- NA_character_
+  base[["Control"]] <- NA_character_
+
+  hdr_raw <- names(base)
+  hdr_lab <- hdr_raw
+  hdr_lab[hdr_raw == "_uuid"] <- "UUID"
+  hdr_lab[hdr_raw == "_index"] <- "Índice"
+  hdr_lab[hdr_raw == "Código pulso"] <- "Código pulso"
+  hdr_lab[hdr_raw == var_col] <- paste0(.codif_label_get(var_col, label_map), " (referencia)")
+  hdr_lab[hdr_raw == target_col] <- "Código final"
+  hdr_lab[hdr_raw == "Control"] <- "Control / notas"
+
+  structure(
+    base,
+    header_raw = hdr_raw,
+    label_row = hdr_lab,
+    tipo = "integer",
+    layout_version = "recod_v2",
+    aux_block = .codif_make_aux_block(
+      tipo = "integer",
+      target_col = target_col,
+      sheet_name = var_col
+    )
+  )
+}
+
+.codif_validate_modo_so <- function(fam, path = NULL, repeat_aware = FALSE){
+  if (is.null(fam) || !nrow(fam) || !"tipo" %in% names(fam)) return(invisible(NULL))
+  if (!"modo_so" %in% names(fam)) fam$modo_so <- ""
+  if (!"text_col" %in% names(fam)) fam$text_col <- ""
+
+  tipo <- tolower(trimws(as.character(fam$tipo)))
+  modo <- tolower(trimws(as.character(fam$modo_so)))
+  text_col <- trimws(as.character(fam$text_col))
+  use <- if ("use" %in% names(fam)) as.logical(fam$use) else rep(TRUE, nrow(fam))
+  invalid <- which(use & tipo == "select_one" & nzchar(text_col) & !(modo %in% c("padre", "hijo")))
+  if (!length(invalid)) return(invisible(NULL))
+
+  var_col <- dplyr::coalesce(fam$parent_col %||% rep("", nrow(fam)), fam$parent %||% rep("", nrow(fam)))
+  where_col <- if (repeat_aware && "hoja_datos" %in% names(fam)) {
+    paste0(" (hoja_datos=", fam$hoja_datos, ")")
+  } else {
+    rep("", nrow(fam))
+  }
+  ejemplos <- paste0(var_col[invalid], where_col[invalid])
+  ejemplos <- ejemplos[nzchar(trimws(ejemplos))]
+  ejemplos <- utils::head(ejemplos, 5)
+
+  msg <- c(
+    "Las familias select_one deben definir 'modo_so' como 'padre' o 'hijo'.",
+    if (!is.null(path)) paste0("Archivo: ", path),
+    if (length(ejemplos)) paste0("Revisa: ", paste(ejemplos, collapse = ", "))
+  )
+  stop(paste(msg[nzchar(msg)], collapse = " "), call. = FALSE)
+}
+
+.codif_expand_sm_dummies <- function(dat_raw, parent_col, opts){
+  n <- nrow(dat_raw)
+  if (is.null(n)) n <- 0L
+  if (!nrow(opts)) {
+    out <- matrix(NA_integer_, nrow = n, ncol = 0)
+    return(tibble::as_tibble(out))
+  }
+
+  out <- matrix(NA_integer_, nrow = n, ncol = nrow(opts))
+  colnames(out) <- as.character(opts$code)
+  for (j in seq_len(nrow(opts))) {
+    slash <- paste0(parent_col, "/", opts$code[j])
+    if (slash %in% names(dat_raw)) {
+      out[, j] <- .codif_norm01(dat_raw[[slash]])
+    }
+  }
+  miss <- which(apply(out, 2, function(z) all(is.na(z))))
+  if (length(miss) && parent_col %in% names(dat_raw)) {
+    toks <- strsplit(ifelse(is.na(dat_raw[[parent_col]]), "", as.character(dat_raw[[parent_col]])), "\\s+")
+    for (j in miss) {
+      code <- as.character(opts$code[j])
+      out[, j] <- vapply(toks, function(tt) as.integer(code %in% tt), integer(1))
+    }
+  }
+  tibble::as_tibble(out)
+}
+
+.codif_build_select_multiple_sheet <- function(dat_raw,
+                                               id_base,
+                                               row,
+                                               opts,
+                                               inst,
+                                               label_pref = NULL,
+                                               label_map = NULL){
+  parent_col <- as.character(row$parent_col %||% "")
+  other_dummy_col <- as.character(row$other_dummy_col %||% "")
+  text_col <- as.character(row$text_col %||% "")
+  if (!nzchar(parent_col) || !(parent_col %in% names(dat_raw))) return(NULL)
+
+  opts <- opts %>%
+    dplyr::mutate(
+      code = as.character(.data$code),
+      label = as.character(dplyr::coalesce(.data$label, .data$code))
+    )
+
+  dmm <- .codif_expand_sm_dummies(dat_raw, parent_col, opts)
+  if (nrow(opts) && ncol(dmm)) {
+    names(dmm) <- opts$label
+  }
+
+  other_label <- NA_character_
+  if (nzchar(other_dummy_col) && other_dummy_col %in% names(dat_raw) && nrow(opts)) {
+    other_code <- sub("^.+/", "", other_dummy_col)
+    other_label <- opts$label[match(other_code, opts$code)]
+    if (is.na(other_label) || !nzchar(other_label)) other_label <- other_dummy_col
+    dmm[[other_label]] <- .codif_norm01(dat_raw[[other_dummy_col]])
+
+    ord_labels <- unique(c(setdiff(opts$label, other_label), other_label))
+    ord_labels <- ord_labels[ord_labels %in% names(dmm)]
+    if (length(ord_labels)) dmm <- dmm[, ord_labels, drop = FALSE]
+  }
+
+  nm <- names(dmm)
+  nm <- nm[!is.na(nm) & nzchar(nm)]
+  selected_cols <- nm
+
+  lab2code <- opts$code
+  names(lab2code) <- opts$label
+
+  sel_labels <- if (length(selected_cols) && nrow(opts)) {
+    apply(dmm[, selected_cols, drop = FALSE], 1, function(r){
+      idx <- which(r == 1L)
+      if (!length(idx)) "" else paste(names(r)[idx], collapse = "; ")
+    })
+  } else {
+    rep("", nrow(dat_raw))
+  }
+
+  sel_codes <- if (length(selected_cols) && nrow(opts)) {
+    apply(dmm[, selected_cols, drop = FALSE], 1, function(r){
+      idx <- which(r == 1L)
+      if (!length(idx)) return("")
+      labs <- names(r)[idx]
+      codes <- lab2code[labs]
+      codes[is.na(codes) | !nzchar(codes)] <- labs[is.na(codes) | !nzchar(codes)]
+      paste(codes, collapse = "; ")
+    })
+  } else {
+    rep("", nrow(dat_raw))
+  }
+
+  base <- id_base %>%
+    dplyr::mutate(
+      Seleccionadas = sel_labels,
+      Seleccionadas_cod = sel_codes
+    ) %>%
+    dplyr::bind_cols(dmm)
+
+  if (nzchar(text_col) && text_col %in% names(dat_raw)) {
+    base[[text_col]] <- as.character(dat_raw[[text_col]])
+  }
+
+  skip_cols <- c("_uuid", "_index", "Código pulso", "Seleccionadas", "Seleccionadas_cod")
+  if (nzchar(text_col) && text_col %in% names(base)) skip_cols <- c(skip_cols, text_col)
+  for (dc in setdiff(names(base), unique(skip_cols))) {
+    base[[paste0(dc, "_recod")]] <- NA_character_
+  }
+  base[["Control"]] <- NA_character_
+  base <- .codif_interleave_recod_cols(base)
+
+  hdr_raw <- names(base)
+  hdr_lab <- hdr_raw
+  hdr_lab[hdr_raw == "_uuid"] <- "UUID"
+  hdr_lab[hdr_raw == "_index"] <- "Índice"
+  hdr_lab[hdr_raw == "Código pulso"] <- "Código pulso"
+  hdr_lab[hdr_raw == "Seleccionadas"] <- label_pref %||% .codif_label_get(parent_col, label_map)
+  hdr_lab[hdr_raw == "Seleccionadas_cod"] <- "Seleccionadas (código)"
+  if (nzchar(text_col) && text_col %in% names(base)) {
+    hdr_lab[hdr_raw == text_col] <- .codif_label_get(text_col, label_map)
+  }
+  hdr_lab[grepl("_recod$", hdr_raw)] <- "Recodificación"
+  hdr_lab[hdr_raw == "Control"] <- "Control / notas"
+  hdr_lab <- .codif_refine_label_row(hdr_raw, hdr_lab, "select_multiple")
+
+  structure(
+    base,
+    header_raw = hdr_raw,
+    label_row = hdr_lab,
+    tipo = "select_multiple",
+    example_block = .codif_make_sm_example_block(parent_col)
+  )
+}
+
+.codif_add_classification_diagnostics <- function(fam, acc_sm, acc_so, acc_tx, acc_int = NULL, repeat_aware = FALSE){
+  if (!nrow(fam)) return(tibble::tibble())
+  if (is.null(acc_int)) acc_int <- rep(FALSE, nrow(fam))
+
+  hoja_col <- if (repeat_aware && "hoja_datos" %in% names(fam)) fam$hoja_datos else rep("main", nrow(fam))
+  other_cands <- if ("other_dummy_cands" %in% names(fam)) trimws(as.character(fam$other_dummy_cands)) else rep("", nrow(fam))
+  parent_out <- if ("parent" %in% names(fam)) as.character(fam$parent) else rep(NA_character_, nrow(fam))
+  parent_out[is.na(parent_out) | !nzchar(parent_out)] <- as.character(fam$parent_col[is.na(parent_out) | !nzchar(parent_out)])
+  estado <- ifelse(acc_sm | acc_so | acc_tx | acc_int, "aceptada", "excluida")
+  motivo <- dplyr::case_when(
+    !fam$use ~ "Fila marcada con use = FALSE",
+    fam$tipo == "select_multiple" & !fam$exists_parent_col ~ "parent_col no existe en la hoja de datos",
+    fam$tipo == "select_multiple" & !fam$exists_text_col ~ "text_col no existe en la hoja de datos",
+    fam$tipo == "select_multiple" & !fam$exists_dummy_col & nzchar(other_cands) ~ "Hay texto asociado, pero other_dummy_col no existe en la hoja de datos",
+    fam$tipo == "select_multiple" & !fam$exists_dummy_col ~ "other_dummy_col no existe en la hoja de datos",
+    fam$tipo == "select_one" & !fam$exists_parent_col ~ "parent_col no existe en la hoja de datos",
+    fam$tipo == "select_one" & !fam$exists_text_col ~ "text_col no existe en la hoja de datos",
+    fam$tipo == "integer" & !fam$exists_parent_col ~ "parent_col no existe en la hoja de datos",
+    fam$tipo == "integer" & acc_int ~ "Integer aceptado",
+    fam$tipo == "text" & acc_tx ~ "Texto huérfano aceptado",
+    TRUE ~ "Fila aceptada"
+  )
+
+  tibble::tibble(
+    tipo = fam$tipo,
+    parent = parent_out,
+    parent_col = fam$parent_col,
+    hoja_datos = hoja_col,
+    estado_clasificacion = estado,
+    motivo_clasificacion = motivo
+  )
+}
+
 #' Obtener catálogo de opciones (choices) para un parent dado
 #'
 #' Cruza \code{survey$name} → \code{list_norm} → \code{choices} y devuelve
@@ -888,6 +1736,31 @@ label_es_from_survey <- function(var_orig, survey){
     val <- as.character(survey[[labcol]][i])
     if (length(val) == 1 && !is.na(val) && nzchar(trimws(val))) val else nm
   }, FUN.VALUE = character(1))
+}
+
+.codif_label_map <- function(inst){
+  out <- character(0)
+  add_source <- function(df){
+    if (is.null(df) || !"name" %in% names(df)) return(invisible(NULL))
+    col_es <- detect_spanish_col(names(df))
+    if (is.na(col_es) || !(col_es %in% names(df))) return(invisible(NULL))
+    keys <- janitor::make_clean_names(df$name)
+    vals <- as.character(df[[col_es]])
+    vals[is.na(vals) | !nzchar(trimws(vals))] <- NA_character_
+    keep <- !is.na(vals) & nzchar(vals)
+    if (any(keep)) out[keys[keep]] <<- vals[keep]
+    invisible(NULL)
+  }
+  add_source(inst$survey)
+  add_source(inst$survey_raw)
+  out
+}
+
+.codif_label_get <- function(var, label_map = NULL){
+  key <- janitor::make_clean_names(var)
+  out <- if (is.null(label_map) || !length(label_map)) rep(NA_character_, length(key)) else unname(label_map[key])
+  out[is.na(out) | !nzchar(out)] <- key[is.na(out) | !nzchar(out)]
+  out
 }
 
 # ---- utilidades locales usadas arriba ---------------------------------------
@@ -1074,19 +1947,6 @@ escribir_plantilla_familias <- function(inst, dat, path = "familias.xlsx", inclu
   # --- auxiliares mínimos, SIN normalizar el instrumento ---
   `%||%` <- function(x, y) if (is.null(x) || (length(x) == 1 && is.na(x))) y else x
   .type_base <- function(x) sub("\\s.*$", "", as.character(x %||% ""))
-  .norm_list_name <- function(x){
-    x <- tolower(trimws(as.character(x))); x <- gsub("\\s+","_", x); gsub("[^a-z0-9_]", "_", x)
-  }
-
-  # Variante local: detectar *_other/_specify/_text/_why (+ español)
-  .find_text_for_parent <- function(parent_original, name_map){
-    if (is.null(parent_original) || is.na(parent_original) || !nzchar(parent_original)) return(NA_character_)
-    suf <- c("_other","_otra","_otro","_specify","_text","_elsewhere","_elswhere","_why")
-    rx  <- paste0("^", gsub("([\\W])","\\\\\\1", parent_original),
-                  "(", paste0(suf, collapse="|"), ")$")
-    hit <- name_map$original[grepl(rx, name_map$original, ignore.case = TRUE, perl = TRUE)]
-    hit[1] %||% NA_character_
-  }
 
   # columnas auxiliares locales (no modifican inst en disco)
   tb <- tibble::tibble(
@@ -1099,7 +1959,12 @@ escribir_plantilla_familias <- function(inst, dat, path = "familias.xlsx", inclu
   )
 
   # candidatos por tipo
-  tipos_objetivo <- c("select_one","select_multiple", if (isTRUE(incluir_text_vars)) "text" else character(0))
+  tipos_objetivo <- c(
+    "select_one",
+    "select_multiple",
+    "integer",
+    if (isTRUE(incluir_text_vars)) "text" else character(0)
+  )
   cand <- tb %>%
     dplyr::filter(.data$type_base %in% tipos_objetivo) %>%
     dplyr::transmute(
@@ -1110,32 +1975,39 @@ escribir_plantilla_familias <- function(inst, dat, path = "familias.xlsx", inclu
       list_norm    = .data$list_norm
     )
 
-  # sugerencias en nombres ORIGINALES de datos
-  parent_col_sug <- vapply(cand$parent, resolve_parent_col_original,
-                           FUN.VALUE = character(1), name_map = dat$name_map)
-  # usar la variante local (incluye _why). Si prefieres, sustituye por tu find_text_other_for_parent() ampliada.
-  text_col_sug   <- vapply(parent_col_sug, .find_text_for_parent,
-                           FUN.VALUE = character(1), name_map = dat$name_map)
-  otherdum_sug   <- vapply(parent_col_sug, find_other_dummy_for_parent,
-                           FUN.VALUE = character(1), name_map = dat$name_map)
-  # lista de dummies candidatas "Parent/Code"
-  dummy_list <- lapply(parent_col_sug, find_dummy_cols_for_parent, name_map = dat$name_map)
-  dummy_cands <- vapply(dummy_list, function(v) paste(v, collapse="; "), FUN.VALUE = character(1))
+  survey_ctx <- .codif_build_survey_context(inst)
+  choices_lookup <- .codif_choices_lookup(inst, survey_ctx)
 
-  tpl <- cand %>%
-    dplyr::mutate(
-      use               = TRUE,
-      tipo              = .data$tipo_sugerido,
-      parent_col        = parent_col_sug,
-      other_dummy_col   = otherdum_sug,
-      text_col          = text_col_sug,
-      parent_col_cands  = parent_col_sug,
-      other_dummy_cands = otherdum_sug,
-      text_col_cands    = text_col_sug,
-      dummy_cands       = dummy_cands
-    ) %>%
+  if (nrow(cand)) {
+    tpl <- .codif_build_family_tpl(
+      cand = cand,
+      inst = inst,
+      name_map = dat$name_map,
+      cols_exist = names(dat$raw),
+      survey_ctx = survey_ctx,
+      choices_lookup = choices_lookup
+    )
+  } else {
+    tpl <- tibble::tibble(
+      use = logical(),
+      q_order = integer(),
+      tipo = character(),
+      parent = character(),
+      parent_label = character(),
+      list_norm = character(),
+      parent_col = character(),
+      other_dummy_col = character(),
+      text_col = character(),
+      parent_col_cands = character(),
+      other_dummy_cands = character(),
+      text_col_cands = character(),
+      dummy_cands = character()
+    )
+  }
+  tpl$modo_so <- if (nrow(tpl)) ifelse(tpl$tipo == "select_one", "", "") else character(0)
+  tpl <- tpl %>%
     # ← q_order inmediatamente después de use (como pediste)
-    dplyr::select(use, q_order, tipo, parent, parent_label, list_norm,
+    dplyr::select(use, q_order, tipo, modo_so, parent, parent_label, list_norm,
                   parent_col, other_dummy_col, text_col,
                   parent_col_cands, other_dummy_cands, text_col_cands, dummy_cands)
 
@@ -1161,15 +2033,13 @@ escribir_plantilla_familias <- function(inst, dat, path = "familias.xlsx", inclu
     border = "TopBottomLeftRight", borderStyle = "thick"
   )
 
-  # Relleno por tipo (para el resto de columnas)
-  tipo_fill <- function(t){
-    hex <- switch(tolower(t),
-                  "select_multiple" = "#E2F0D9",  # verde suave
-                  "select_one"      = "#D9E1F2",  # azul suave
-                  "text"            = "#FFF2CC",  # amarillo suave
-                  "#EEEEEE")
-    openxlsx::createStyle(fgFill = hex)
-  }
+  type_styles <- list(
+    select_multiple = openxlsx::createStyle(fgFill = "#E2F0D9"),
+    select_one = openxlsx::createStyle(fgFill = "#D9E1F2"),
+    integer = openxlsx::createStyle(fgFill = "#E6D9F2"),
+    text = openxlsx::createStyle(fgFill = "#FFF2CC"),
+    default = openxlsx::createStyle(fgFill = "#EEEEEE")
+  )
 
   # Escribir datos y header general
   openxlsx::writeData(wb, "familias", tpl, startRow = 1, colNames = TRUE)
@@ -1180,19 +2050,7 @@ escribir_plantilla_familias <- function(inst, dat, path = "familias.xlsx", inclu
   idx_text  <- which(colnames(tpl) == "text_col")
   idx_special <- c(idx_other, idx_text)
 
-  # Columnas que se pintan por fila (todas menos las especiales)
-  idx_all <- seq_len(ncol(tpl))
-  idx_body_fill <- setdiff(idx_all, idx_special)
-
-  # 1) Relleno por tipo (por fila) solo en columnas NO especiales
-  if (nrow(tpl) && length(idx_body_fill)){
-    for (i in seq_len(nrow(tpl))){
-      openxlsx::addStyle(
-        wb, "familias", tipo_fill(tpl$tipo[i]),
-        rows = i + 1, cols = idx_body_fill, gridExpand = TRUE, stack = TRUE
-      )
-    }
-  }
+  .codif_apply_type_fill(wb, "familias", tpl, idx_special, type_styles)
 
   # 2) Aplicar estilo pastel a TODA la columna especial (encabezado + cuerpo)
   if (length(idx_special)){
@@ -1221,13 +2079,15 @@ escribir_plantilla_familias <- function(inst, dat, path = "familias.xlsx", inclu
                       "Cómo usar 'familias':
 - 'use' = TRUE/FALSE para incluir la fila.
 - 'q_order' = número de la pregunta en el cuestionario (orden del survey).
-- 'tipo' ∈ {select_one, select_multiple, text}.
+- 'tipo' ∈ {select_one, select_multiple, integer, text}.
+- 'modo_so' = obligatorio solo para select_one. Use 'padre' si el texto ayuda a recodificar la variable original, o 'hijo' si el texto se recodifica como variable independiente.
 - 'parent' = nombre de la pregunta (survey$name).
 - 'parent_label' = etiqueta en español tomada del XLSForm (survey_raw).
 - 'list_norm' = nombre normalizado de la lista de opciones (igual que en CHOICES).
 - 'parent_col' = nombre EXACTO en tus datos (columna padre).
-- 'other_dummy_col' = solo select_multiple: dummy 'Parent/Other'.
-- 'text_col' = texto related (p. ej. _other/_why/_specify/_text).
+- 'other_dummy_col' = solo select_multiple: dummy de la opción que habilita el texto asociado.
+- 'text_col' = texto asociado detectado por semántica del XLSForm (o por nombre como fallback).
+- 'integer' usa solo 'parent_col'; no requiere 'text_col' ni 'other_dummy_col'.
 Las columnas *_cands son sugerencias hechas a partir de los nombres originales del dataset.")
   openxlsx::setColWidths(wb, "ayuda", cols = 1, widths = 120)
 
@@ -1279,23 +2139,20 @@ escribir_plantilla_familias_repeat <- function(inst,
   det <- codif_detector_repeat(inst)
   if (!nrow(det)) stop("El instrumento no tiene filas en survey.")
 
-  tipos_obj <- c("select_one","select_multiple", if (isTRUE(incluir_text_vars)) "text" else character(0))
+  tipos_obj <- c(
+    "select_one",
+    "select_multiple",
+    "integer",
+    if (isTRUE(incluir_text_vars)) "text" else character(0)
+  )
   det <- det %>%
     dplyr::filter(.data$type_base %in% tipos_obj)
 
   # Secciones presentes en detector, ordenando "main" primero
   sections <- unique(det$repeat_section)
   sections <- c("main", setdiff(sections, "main"))
-
-  # Helper local: resolver *_other/_specify/_text/_why (y variantes ES)
-  .find_text_for_parent <- function(parent_original, name_map){
-    if (!nzchr(parent_original)) return(NA_character_)
-    suf <- c("_other","_otra","_otro","_specify","_text","_elsewhere","_elswhere","_why")
-    rx  <- paste0("^", gsub("([\\W])","\\\\\\1", parent_original),
-                  "(", paste0(suf, collapse="|"), ")$")
-    hit <- name_map$original[grepl(rx, name_map$original, ignore.case = TRUE, perl = TRUE)]
-    hit[1] %||% NA_character_
-  }
+  survey_ctx <- .codif_build_survey_context(inst)
+  choices_lookup <- .codif_choices_lookup(inst, survey_ctx)
 
   # --- 2) Sugerencias por sección (usando la hoja correcta de `tabs`) --------
   piezas <- list()
@@ -1341,46 +2198,32 @@ escribir_plantilla_familias_repeat <- function(inst,
     nmmap <- dat_ent$name_map
     cols_exist <- names(dat_ent$raw)
 
-    # parent_col, text_col, other_dummy_col y candidates usando NOMBRES ORIGINALES de ESTA hoja
-    parent_col_sug <- vapply(cand$parent, resolve_parent_col_original,
-                             FUN.VALUE = character(1), name_map = nmmap)
-    text_col_sug   <- vapply(parent_col_sug, .find_text_for_parent,
-                             FUN.VALUE = character(1), name_map = nmmap)
-
-    otherdum_sug <- ifelse(cand$tipo_sugerido == "select_multiple",
-                           vapply(parent_col_sug, find_other_dummy_for_parent,
-                                  FUN.VALUE = character(1), name_map = nmmap),
-                           NA_character_)
-
-    dummy_list <- lapply(parent_col_sug, find_dummy_cols_for_parent, name_map = nmmap)
-    dummy_cands <- vapply(dummy_list, function(v) paste(v, collapse = "; "), FUN.VALUE = character(1))
-
-    tpl_sec <- cand %>%
+    tpl_sec <- .codif_build_family_tpl(
+      cand = cand,
+      inst = inst,
+      name_map = nmmap,
+      cols_exist = cols_exist,
+      survey_ctx = survey_ctx,
+      choices_lookup = choices_lookup,
+      section = sec,
+      hoja_datos = sec_nm
+    )
+    tpl_sec$modo_so <- if (nrow(tpl_sec)) ifelse(tpl_sec$tipo == "select_one", "", "") else character(0)
+    tpl_sec <- tpl_sec %>%
       dplyr::mutate(
-        section           = sec,
-        hoja_datos        = sec_nm,
-        use               = TRUE,
-        tipo              = .data$tipo_sugerido,
-        parent_col        = parent_col_sug,
-        other_dummy_col   = otherdum_sug,
-        text_col          = text_col_sug,
-        parent_col_cands  = parent_col_sug,
-        other_dummy_cands = otherdum_sug,
-        text_col_cands    = text_col_sug,
-        dummy_cands       = dummy_cands,
         exists_parent_col = !is.na(parent_col) & parent_col %in% cols_exist,
         exists_text_col   = is.na(text_col) | text_col %in% cols_exist,
         exists_dummy_col  = is.na(other_dummy_col) | other_dummy_col %in% cols_exist
       ) %>%
       dplyr::select(section, hoja_datos,
-                    use, q_order, tipo, parent, parent_label, list_norm,
+                    use, q_order, tipo, modo_so, parent, parent_label, list_norm,
                     parent_col, other_dummy_col, text_col,
                     parent_col_cands, other_dummy_cands, text_col_cands, dummy_cands,
                     exists_parent_col, exists_text_col, exists_dummy_col)
 
     # Tipos robustos (evitar choques al bind_rows)
     chr_cols <- c("section","hoja_datos","tipo","parent","parent_label","list_norm",
-                  "parent_col","other_dummy_col","text_col",
+                  "modo_so","parent_col","other_dummy_col","text_col",
                   "parent_col_cands","other_dummy_cands","text_col_cands","dummy_cands")
     for (cc in intersect(chr_cols, names(tpl_sec))) {
       tpl_sec[[cc]] <- as.character(tpl_sec[[cc]])
@@ -1420,14 +2263,13 @@ escribir_plantilla_familias_repeat <- function(inst,
     border = "TopBottomLeftRight", borderStyle = "thick"
   )
 
-  tipo_fill <- function(t){
-    hex <- switch(tolower(t),
-                  "select_multiple" = "#E2F0D9",  # verde suave
-                  "select_one"      = "#D9E1F2",  # azul suave
-                  "text"            = "#FFF2CC",  # amarillo suave
-                  "#EEEEEE")
-    openxlsx::createStyle(fgFill = hex)
-  }
+  type_styles <- list(
+    select_multiple = openxlsx::createStyle(fgFill = "#E2F0D9"),
+    select_one = openxlsx::createStyle(fgFill = "#D9E1F2"),
+    integer = openxlsx::createStyle(fgFill = "#E6D9F2"),
+    text = openxlsx::createStyle(fgFill = "#FFF2CC"),
+    default = openxlsx::createStyle(fgFill = "#EEEEEE")
+  )
 
   openxlsx::writeData(wb, "familias", tpl_all, startRow = 1, colNames = TRUE)
   openxlsx::addStyle(wb, "familias", style_hdr, rows = 1, cols = 1:ncol(tpl_all), gridExpand = TRUE)
@@ -1437,18 +2279,7 @@ escribir_plantilla_familias_repeat <- function(inst,
   idx_text  <- which(colnames(tpl_all) == "text_col")
   idx_special <- c(idx_other, idx_text)
 
-  idx_all <- seq_len(ncol(tpl_all))
-  idx_body_fill <- setdiff(idx_all, idx_special)
-
-  # Relleno por tipo fila a fila (solo en columnas no especiales)
-  if (nrow(tpl_all) && length(idx_body_fill)){
-    for (i in seq_len(nrow(tpl_all))){
-      openxlsx::addStyle(
-        wb, "familias", tipo_fill(tpl_all$tipo[i]),
-        rows = i + 1, cols = idx_body_fill, gridExpand = TRUE, stack = TRUE
-      )
-    }
-  }
+  .codif_apply_type_fill(wb, "familias", tpl_all, idx_special, type_styles)
 
   # Pastel para columnas especiales (encabezado + cuerpo)
   if (length(idx_special)){
@@ -1474,13 +2305,15 @@ escribir_plantilla_familias_repeat <- function(inst,
 - 'hoja_datos' = hoja de datos en la que buscar los nombres ORIGINALES.
 - 'use' = TRUE/FALSE para incluir la fila.
 - 'q_order' = orden aproximado de la pregunta (si tienes q_order real, úsalo allí).
-- 'tipo' ∈ {select_one, select_multiple, text}.
+- 'tipo' ∈ {select_one, select_multiple, integer, text}.
+- 'modo_so' = obligatorio solo para select_one. Use 'padre' si el texto ayuda a recodificar la variable original, o 'hijo' si el texto se recodifica como variable independiente.
 - 'parent' = nombre de la pregunta (survey$name).
 - 'parent_label' = etiqueta en español (XLSForm).
 - 'list_norm' = lista de opciones normalizada (CHOICES).
 - 'parent_col' = nombre EXACTO en la hoja 'hoja_datos' (columna padre).
-- 'other_dummy_col' = solo select_multiple: dummy 'Parent/Other'.
-- 'text_col' = texto related (p. ej. _other/_why/_specify/_text).
+- 'other_dummy_col' = solo select_multiple: dummy de la opción que habilita el texto asociado.
+- 'text_col' = texto asociado detectado por semántica del XLSForm (o por nombre como fallback).
+- 'integer' usa solo 'parent_col'; no requiere 'text_col' ni 'other_dummy_col'.
 - Las columnas *_cands son sugerencias iniciales a partir de los nombres ORIGINALES en la hoja indicada.
 - Las columnas 'exists_*' indican existencia en la hoja de datos correspondiente.")
   openxlsx::setColWidths(wb, "ayuda", cols = 1, widths = 120)
@@ -1565,7 +2398,7 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
     janitor::clean_names()
 
   # === SANITIZACIÓN CRÍTICA ==========================================
-  chr_cols <- c("tipo","parent","parent_label","list_norm",
+  chr_cols <- c("tipo","modo_so","parent","parent_label","list_norm",
                 "parent_col","other_dummy_col","text_col",
                 "parent_col_cands","other_dummy_cands","text_col_cands","dummy_cands")
   for (cc in intersect(chr_cols, names(fam))) {
@@ -1588,7 +2421,7 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
   # ==========================================================================
 
   # columnas esperadas (tolerante)
-  need <- c("use","tipo","parent","parent_label","q_order","list_norm",
+  need <- c("use","tipo","modo_so","parent","parent_label","q_order","list_norm",
             "parent_col","other_dummy_col","text_col")
   for (k in need) if (!k %in% names(fam)) fam[[k]] <- NA
 
@@ -1596,8 +2429,11 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
   if (!"use" %in% names(fam)) fam$use <- TRUE
   fam$use  <- as.logical(fam$use)
   fam$tipo <- tolower(trimws(as.character(fam$tipo %||% "")))
+  fam$modo_so <- tolower(trimws(as.character(fam$modo_so %||% "")))
   fam$parent_col <- trimws(as.character(fam$parent_col))
   fam$text_col   <- trimws(as.character(fam$text_col))
+
+  .codif_validate_modo_so(fam, path = path, repeat_aware = FALSE)
 
   # existencia en datos crudos
   cols <- names(dat$raw)
@@ -1611,6 +2447,7 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
   # reglas de aceptación por tipo (igual que antes)
   acc_sm <- fam$use & fam$tipo == "select_multiple" & fam$exists_text_col & fam$exists_dummy_col
   acc_so <- fam$use & fam$tipo == "select_one"      & fam$exists_text_col
+  acc_int <- fam$use & fam$tipo == "integer"        & fam$exists_parent_col
 
   # --- NUEVO: adopciones y huérfanas ---------------------------------------
   # Columna de texto EFECTIVA: si tipo=="text" y text_col está vacío, usar parent_col
@@ -1628,8 +2465,8 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
   # TEXTO finales: solo las 'text' cuya EFECTIVA NO esté asignada como hija
   acc_tx <- fam$use & fam$tipo == "text" & !(fam$text_col_eff %in% text_cols_asignadas)
 
-  # construir fam_ok con acc_sm|acc_so|acc_tx (sin cambios en SM/SO)
-  fam_ok <- fam[acc_sm | acc_so | acc_tx, , drop = FALSE]
+  # construir fam_ok con acc_sm|acc_so|acc_tx|acc_int
+  fam_ok <- fam[acc_sm | acc_so | acc_tx | acc_int, , drop = FALSE]
 
   # Para que aguas abajo “text” lleve el nombre correcto, clona text_col = text_col_eff
   fam_ok$text_col[ fam_ok$tipo == "text" ] <- fam_ok$text_col_eff[ fam_ok$tipo == "text" ]
@@ -1689,6 +2526,7 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
   # dividir por tipo (como ya lo tienes)
   sm  <- fam_ok[fam_ok$tipo == "select_multiple", , drop = FALSE]
   so  <- fam_ok[fam_ok$tipo == "select_one",      , drop = FALSE]
+  int <- fam_ok[fam_ok$tipo == "integer",         , drop = FALSE]
   tx  <- fam_ok[fam_ok$tipo == "text",            , drop = FALSE]
 
   # catálogo de choices (igual que tu versión)
@@ -1726,15 +2564,24 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
     aceptadas_total   = nrow(fam_ok),
     aceptadas_sm      = nrow(sm),
     aceptadas_so      = nrow(so),
+    aceptadas_int     = nrow(int),
     aceptadas_text    = nrow(tx),
     excluidas         = nrow(fam) - nrow(fam_ok),
     textos_adoptados  = nrow(adopciones),
     textos_huerfanos  = nrow(textos_huerfanos)
   )
+  diagnostico_clasificacion <- .codif_add_classification_diagnostics(
+    fam = fam,
+    acc_sm = acc_sm,
+    acc_so = acc_so,
+    acc_tx = acc_tx,
+    acc_int = acc_int
+  )
 
   if (isTRUE(verbose)) {
     cat("\n[Familias] SO aceptadas:", nrow(so),
         "| SM aceptadas:", nrow(sm),
+        "| INTEGER aceptadas:", nrow(int),
         "| TEXT finales:", nrow(tx), "\n")
     cat("[Adopciones] text_col adoptadas:", nrow(adopciones), "\n")
     if (nrow(adopciones)) {
@@ -1745,12 +2592,18 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
       print(utils::head(textos_huerfanos, 5))
       cat("→ Sugerencia: asigna estas 'text' en la columna 'text_col' de alguna SO/SM y marca 'use = TRUE'.\n")
     }
+    excl_diag <- diagnostico_clasificacion %>% dplyr::filter(.data$estado_clasificacion == "excluida")
+    if (nrow(excl_diag)) {
+      cat("[Clasificación] principales motivos de exclusión:\n")
+      print(excl_diag %>% dplyr::count(.data$motivo_clasificacion, sort = TRUE))
+    }
   }
 
   list(
     familias_filtradas   = fam_ok,
     select_multiple      = sm,
     select_one           = so,
+    integer              = int,
     text                 = tx,
     familias_enriquecidas= fam_ok %>% dplyr::mutate(
       falta_dummy_sm = (.data$tipo == "select_multiple") & !.data$exists_dummy_col,
@@ -1760,7 +2613,8 @@ leer_familias_clasificar <- function(path, inst, dat, sheet = "familias", verbos
     # NUEVO:
     adopciones           = adopciones,
     textos_huerfanos     = textos_huerfanos,
-    resumen              = resumen
+    resumen              = resumen,
+    diagnostico_clasificacion = diagnostico_clasificacion
   )
 }
 
@@ -1798,7 +2652,7 @@ leer_familias_clasificar_repeat <- function(path, inst, tabs, sheet = "familias"
   }
   names(fam) <- normalize_name(names(fam))
 
-  need_chr <- c("section","hoja_datos","tipo","parent","parent_label","list_norm",
+  need_chr <- c("section","hoja_datos","tipo","modo_so","parent","parent_label","list_norm",
                 "parent_col","other_dummy_col","text_col",
                 "parent_col_cands","other_dummy_cands","text_col_cands","dummy_cands")
   for (cc in need_chr) if (!cc %in% names(fam)) fam[[cc]] <- NA_character_
@@ -1814,8 +2668,11 @@ leer_familias_clasificar_repeat <- function(path, inst, tabs, sheet = "familias"
         tolower(as.character(.data$use)) %in% c("0","false","f","no","n") ~ FALSE,
         TRUE ~ TRUE
       ),
-      tipo = tolower(trimws(as.character(.data$tipo)))
+      tipo = tolower(trimws(as.character(.data$tipo))),
+      modo_so = tolower(trimws(as.character(.data$modo_so)))
     )
+
+  .codif_validate_modo_so(fam, path = path, repeat_aware = TRUE)
 
   # hoja de datos efectiva: hoja_datos > section > "main"
   fam$hoja_datos <- ifelse(nzchar(fam$hoja_datos), fam$hoja_datos,
@@ -1849,6 +2706,7 @@ leer_familias_clasificar_repeat <- function(path, inst, tabs, sheet = "familias"
   # --- reglas de aceptación --------------------------------------------------
   acc_sm <- fam$use & fam$tipo == "select_multiple" & fam$exists_text_col & fam$exists_dummy_col
   acc_so <- fam$use & fam$tipo == "select_one"      & fam$exists_text_col
+  acc_int <- fam$use & fam$tipo == "integer"        & fam$exists_parent_col
 
   # Columna de texto EFECTIVA: si tipo text sin text_col, usar parent_col
   fam$text_col_eff <- fam$text_col
@@ -1859,7 +2717,7 @@ leer_familias_clasificar_repeat <- function(path, inst, tabs, sheet = "familias"
   # TEXT finales: huérfanas
   acc_tx <- fam$use & fam$tipo == "text" & !(fam$text_col_eff %in% text_cols_asignadas)
 
-  fam_ok <- fam[ acc_sm | acc_so | acc_tx, , drop = FALSE ]
+  fam_ok <- fam[ acc_sm | acc_so | acc_tx | acc_int, , drop = FALSE ]
   fam_ok$text_col[ fam_ok$tipo == "text" ] <- fam_ok$text_col_eff[ fam_ok$tipo == "text" ]
 
   # adopciones (solo informativo)
@@ -1907,9 +2765,10 @@ leer_familias_clasificar_repeat <- function(path, inst, tabs, sheet = "familias"
   }
 
   # dividir por tipo + ordenar por q_order (canónico)
-  fam_ok <- fam_ok |> dplyr::arrange(q_order, factor(tipo, levels = c("select_one","select_multiple","text")))
+  fam_ok <- fam_ok |> dplyr::arrange(q_order, factor(tipo, levels = c("select_one","select_multiple","integer","text")))
   sm  <- fam_ok[fam_ok$tipo == "select_multiple", , drop = FALSE]
   so  <- fam_ok[fam_ok$tipo == "select_one",      , drop = FALSE]
+  int <- fam_ok[fam_ok$tipo == "integer",         , drop = FALSE]
   tx  <- fam_ok[fam_ok$tipo == "text",            , drop = FALSE]
 
   textos_huerfanos <- fam |>
@@ -1928,19 +2787,34 @@ leer_familias_clasificar_repeat <- function(path, inst, tabs, sheet = "familias"
     aceptadas_total   = nrow(fam_ok),
     aceptadas_sm      = nrow(sm),
     aceptadas_so      = nrow(so),
+    aceptadas_int     = nrow(int),
     aceptadas_text    = nrow(tx),
     excluidas         = nrow(fam) - nrow(fam_ok),
     textos_adoptados  = nrow(adopciones),
     textos_huerfanos  = nrow(textos_huerfanos)
   )
+  diagnostico_clasificacion <- .codif_add_classification_diagnostics(
+    fam = fam,
+    acc_sm = acc_sm,
+    acc_so = acc_so,
+    acc_tx = acc_tx,
+    acc_int = acc_int,
+    repeat_aware = TRUE
+  )
 
   if (isTRUE(verbose)) {
     cat("\n[Familias-repeat] SO:", nrow(so),
         "| SM:", nrow(sm),
+        "| INTEGER:", nrow(int),
         "| TEXT:", nrow(tx),
         "| Total aceptadas:", nrow(fam_ok), "\n")
     if (nrow(textos_huerfanos)) {
       cat("  Huérfanas:\n"); print(utils::head(textos_huerfanos, 100))
+    }
+    excl_diag <- diagnostico_clasificacion %>% dplyr::filter(.data$estado_clasificacion == "excluida")
+    if (nrow(excl_diag)) {
+      cat("  Motivos de exclusión:\n")
+      print(excl_diag %>% dplyr::count(.data$motivo_clasificacion, sort = TRUE))
     }
   }
 
@@ -1948,6 +2822,7 @@ leer_familias_clasificar_repeat <- function(path, inst, tabs, sheet = "familias"
     familias_filtradas    = fam_ok,
     select_multiple       = sm,
     select_one            = so,
+    integer               = int,
     text                  = tx,
     familias_enriquecidas = fam_ok %>% dplyr::mutate(
       falta_dummy_sm = (.data$tipo == "select_multiple") & !.data$exists_dummy_col,
@@ -1956,7 +2831,8 @@ leer_familias_clasificar_repeat <- function(path, inst, tabs, sheet = "familias"
     choices_usadas        = choices_usadas,
     adopciones            = adopciones,
     textos_huerfanos      = textos_huerfanos,
-    resumen               = resumen
+    resumen               = resumen,
+    diagnostico_clasificacion = diagnostico_clasificacion
   )
 }
 
@@ -2029,6 +2905,7 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
       parent       = variable,             # nombre original de la pregunta
       parent_col   = variable,             # columna en la base (igual nombre)
       parent_label = etiqueta,             # etiqueta en español
+      modo_so      = NA_character_,
       list_name    = NA_character_,        # sin lista de opciones
       list_norm    = NA_character_,        # se completará luego solo si falta
       other_dummy_col = NA_character_,     # no aplica para integer
@@ -2049,7 +2926,7 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
     (split$integer         %||% tibble::tibble()) %>% dplyr::mutate(tipo = "integer")
   )
 
-  for (cc in c("parent","parent_label","list_name","list_norm",
+  for (cc in c("parent","parent_label","modo_so","list_name","list_norm",
                "parent_col","other_dummy_col","text_col","tipo")) {
     if (!cc %in% names(fam_all)) fam_all[[cc]] <- ""
     fam_all[[cc]] <- trimws(as.character(fam_all[[cc]]))
@@ -2062,7 +2939,7 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
   }
 
   # columnas mínimas
-  for (k in c("q_order","list_name","list_norm","parent_label","parent",
+  for (k in c("q_order","modo_so","list_name","list_norm","parent_label","parent",
               "parent_col","other_dummy_col","text_col")) {
     if (!k %in% names(fam_all)) fam_all[[k]] <- NA
   }
@@ -2107,10 +2984,14 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
   }
 
   # excluir TEXT adoptadas
+  .safe_text_col <- function(x){
+    if (is.null(x) || !("text_col" %in% names(x))) return(NULL)
+    x[["text_col"]]
+  }
   assigned_texts <- unique(na.omit(c(
-    tryCatch(split$adopciones$text_col, error = function(e) NULL),
-    tryCatch(split$select_one$text_col, error = function(e) NULL),
-    tryCatch(split$select_multiple$text_col, error = function(e) NULL)
+    .safe_text_col(split$adopciones),
+    .safe_text_col(split$select_one),
+    .safe_text_col(split$select_multiple)
   )))
   fam_all <- fam_all %>%
     dplyr::filter(!(tipo == "text" & !is.na(text_col) & nzchar(text_col) & text_col %in% assigned_texts))
@@ -2118,7 +2999,7 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
   # familias (para auditoría/export)
   familias_tbl <- fam_all %>%
     dplyr::select(
-      tipo, parent = parent_clean, parent_label, q_order,
+      tipo, modo_so, parent = parent_clean, parent_label, q_order,
       list_name, list_norm, parent_col, other_dummy_col, text_col
     )
 
@@ -2172,6 +3053,8 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
   }
 
   choices_tbl <- make_choices_tbl(familias_tbl)
+  choices_by_parent <- split(choices_tbl, choices_tbl$parent_col)
+  label_map <- .codif_label_map(inst)
 
   # --- IDs base --------------------------------------------------------------
   resolve_ids <- function(dat_raw){
@@ -2262,50 +3145,26 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
     for (i in seq_len(nrow(sel1))){
       row <- sel1[i, ]
       parent_col <- row$parent_col
-      text_col   <- row$text_col
       tipo <- "select_one"
 
-      opts <- choices_tbl %>%
-        dplyr::filter(parent_col == !!parent_col) %>%
+      opts <- choices_by_parent[[parent_col]] %||% tibble::tibble(choice_code = character(), choice_label = character())
+      opts <- opts %>%
         dplyr::distinct(choice_code, choice_label) %>%
-        dplyr::transmute(code = choice_code, label = choice_label)
+        dplyr::transmute(code = .data$choice_code, label = .data$choice_label)
 
-      parent_code  <- dat_raw[[parent_col]] %||% NA_character_
-      parent_label <- if (nrow(opts)) opts$label[match(parent_code, opts$code)] else NA_character_
-      text_vec     <- if (!is.na(text_col) && nzchar(text_col) && text_col %in% names(dat_raw)) as.character(dat_raw[[text_col]]) else NA_character_
-
-      base <- id_base %>%
-        dplyr::mutate(`Selección (código)` = as.character(parent_code),
-                      `Selección (label)`  = as.character(parent_label)) %>%
-        dplyr::mutate(!!text_col := text_vec)
-
-      if (!is.na(text_col) && nzchar(text_col)) base[[paste0(text_col,"_recod")]] <- NA_character_
-      base[["Control"]] <- NA_character_
-
-      cn <- colnames(base)
-      base_cols <- cn[!grepl("_recod$", cn)]
-      rec_cols  <- cn[grepl("_recod$", cn)]
-      order_cols <- c()
-      for (b in base_cols){
-        order_cols <- c(order_cols, b)
-        r <- paste0(b, "_recod")
-        if (r %in% rec_cols) order_cols <- c(order_cols, r)
-      }
-      orphan_rec <- setdiff(rec_cols, paste0(base_cols, "_recod"))
-      base <- base[, unique(c(order_cols, orphan_rec)), drop = FALSE]
-
-      hdr_raw <- names(base)
-      hdr_lab <- hdr_raw
-      hdr_lab[hdr_raw=="_uuid"] <- "UUID"
-      hdr_lab[hdr_raw=="_index"] <- "Índice"
-      hdr_lab[hdr_raw=="Código pulso"] <- "Código pulso"
-      hdr_lab[hdr_raw=="Selección (código)"] <- "Selección (código)"
-      hdr_lab[hdr_raw=="Selección (label)"]  <- s_lab_from_original(parent_col, inst)
-      if (!is.na(text_col) && nzchar(text_col)) hdr_lab[hdr_raw==text_col] <- s_lab_from_original(text_col, inst)
-      hdr_lab[grepl("_recod$", hdr_raw)] <- "Recodificación"
+      base <- .codif_build_select_one_sheet(
+        dat_raw = dat_raw,
+        id_base = id_base,
+        row = row,
+        opts = opts,
+        inst = inst,
+        label_pref = row$parent_label,
+        label_map = label_map
+      )
+      if (is.null(base)) next
 
       stitle <- parent_col
-      sheets_list[[stitle]] <- structure(base, header_raw = hdr_raw, label_row = hdr_lab, tipo = tipo)
+      sheets_list[[stitle]] <- base
       nav_rows[[length(nav_rows)+1]] <- tibble::tibble(hoja = stitle, tipo = tipo, n = nrow(base))
     }
   }
@@ -2318,6 +3177,29 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
       other_dummy_col <- row$other_dummy_col
       text_col        <- row$text_col
       tipo            <- "select_multiple"
+
+      opts_fast <- choices_by_parent[[parent_col]] %||% tibble::tibble(choice_code = character(), choice_label = character())
+      opts_fast <- opts_fast %>%
+        dplyr::distinct(choice_code, choice_label) %>%
+        dplyr::transmute(code = .data$choice_code, label = .data$choice_label)
+
+      base_fast <- .codif_build_select_multiple_sheet(
+        dat_raw = dat_raw,
+        id_base = id_base,
+        row = row,
+        opts = opts_fast,
+        inst = inst,
+        label_pref = row$parent_label,
+        label_map = label_map
+      )
+      if (is.null(base_fast)) next
+
+      stitle <- parent_col
+      sheets_list[[stitle]] <- base_fast
+      nav_rows[[length(nav_rows)+1]] <- tibble::tibble(
+        hoja = stitle, tipo = tipo, n = nrow(base_fast)
+      )
+      next
 
       # Opciones canónicas: código + label (fuente de verdad)
       opts <- choices_tbl %>%
@@ -2400,12 +3282,8 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
       nm <- names(dmm)
       nm <- nm[!is.na(nm) & nzchar(nm)]
 
-      # Conjunto de columnas a usar para Seleccionadas (excluye la de OTHER, si existe)
-      no_other <- if (!is.na(other_label) && nzchar(other_label)) {
-        setdiff(nm, other_label)
-      } else {
-        nm
-      }
+      # Conjunto de columnas a usar para Seleccionadas (incluye OTHER cuando está activa)
+      selected_cols <- nm
 
       # Lookup label -> código (para Seleccionadas_cod)
       lab2code <- opts$choice_code
@@ -2414,8 +3292,8 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
         opts$choice_code[is.na(opts$choice_label) | !nzchar(opts$choice_label)]
 
       # Seleccionadas (labels)
-      sel_labels <- if (length(no_other) && nrow(opts)) {
-        apply(dmm[, no_other, drop = FALSE], 1, function(r){
+      sel_labels <- if (length(selected_cols) && nrow(opts)) {
+        apply(dmm[, selected_cols, drop = FALSE], 1, function(r){
           idx <- which(r == 1L)
           if (!length(idx)) return("")
           labs <- names(r)[idx]  # ya son labels
@@ -2426,8 +3304,8 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
       }
 
       # Seleccionadas_cod (códigos crudos)
-      sel_codes <- if (length(no_other) && nrow(opts)) {
-        apply(dmm[, no_other, drop = FALSE], 1, function(r){
+      sel_codes <- if (length(selected_cols) && nrow(opts)) {
+        apply(dmm[, selected_cols, drop = FALSE], 1, function(r){
           idx <- which(r == 1L)
           if (!length(idx)) return("")
           labs  <- names(r)[idx]
@@ -2521,26 +3399,18 @@ construir_plantilla_desde_familias <- function(inst, dat, split){
   if (!is.null(sint) && nrow(sint)){
     for (i in seq_len(nrow(sint))){
       row <- sint[i, ]
-      var_col <- if (!is.null(row$parent_col) && nzchar(row$parent_col)) row$parent_col else row$parent
-      if (!nzchar(var_col) || !(var_col %in% names(dat$raw))) next
-      tipo <- "integer"
+      base <- .codif_build_integer_sheet(
+        dat_raw = dat_raw,
+        id_base = id_base,
+        row = row,
+        inst = inst,
+        label_map = label_map
+      )
+      if (is.null(base)) next
 
-      val <- dat_raw[[var_col]]
-      base <- id_base %>%
-        dplyr::mutate(!!var_col := val)
-      base[[paste0(var_col,"_recod")]] <- NA_character_
-      base[["Control"]] <- NA_character_
-
-      hdr_raw <- names(base); hdr_lab <- hdr_raw
-      hdr_lab[hdr_raw=="_uuid"]        <- "UUID"
-      hdr_lab[hdr_raw=="_index"]       <- "Índice"
-      hdr_lab[hdr_raw=="Código pulso"] <- "Código pulso"
-      hdr_lab[hdr_raw==var_col]        <- s_lab_from_original(var_col, inst)
-      hdr_lab[grepl("_recod$", hdr_raw)] <- "Recodificación"
-
-      stitle <- var_col
-      sheets_list[[stitle]] <- structure(base, header_raw = hdr_raw, label_row = hdr_lab, tipo = tipo)
-      nav_rows[[length(nav_rows)+1]] <- tibble::tibble(hoja = stitle, tipo = tipo, n = nrow(base))
+      stitle <- if (!is.null(row$parent_col) && nzchar(row$parent_col)) as.character(row$parent_col) else as.character(row$parent)
+      sheets_list[[stitle]] <- base
+      nav_rows[[length(nav_rows)+1]] <- tibble::tibble(hoja = stitle, tipo = "integer", n = nrow(base))
     }
   }
 
@@ -2650,6 +3520,13 @@ width_for <- function(ncols){
 #'   (incluye morado para integer).
 #' - Las hojas de variables tienen fila 1 (código/crudo) y fila 2 (labels),
 #'   sin `Seleccionadas_recod` en SM.
+#' - Las hojas `select_multiple` agregan a la derecha un bloque de ejemplo
+#'   para mostrar cómo declarar una opción nueva sin mezclarlo con la tabla
+#'   editable.
+#' - Agrega una hoja `INSTRUCCIONES` y resalta visualmente las columnas
+#'   editables (`*_recod`) y `Control`.
+#' - Colorea las pestañas de las hojas por tipo para distinguir rápidamente
+#'   `select_multiple`, `select_one`, `text` e `integer`.
 #'
 #' @param plantilla lista de `construir_plantilla_desde_familias()`
 #' @param path_xlsx ruta de salida (default "PPRA_Plantilla_Codificacion.xlsx")
@@ -2668,9 +3545,9 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
 
   wb <- openxlsx::createWorkbook()
   used <- character(0)
-  add_sheet <- function(title){
+  add_sheet <- function(title, tab_colour = NULL){
     nm <- safe_sheet_name(title, used); used <<- c(used, nm)
-    openxlsx::addWorksheet(wb, nm); nm
+    openxlsx::addWorksheet(wb, nm, tabColour = tab_colour); nm
   }
 
   # Estilos
@@ -2678,12 +3555,123 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
                                       border = "TopBottomLeftRight")
   style_hdr2 <- openxlsx::createStyle(textDecoration = "italic", wrapText = TRUE, halign = "center", valign = "center",
                                       border = "TopBottomLeftRight")
+  style_instr_title <- openxlsx::createStyle(textDecoration = "bold", fontSize = 13,
+                                             halign = "left", valign = "center")
+  style_instr_text <- openxlsx::createStyle(wrapText = TRUE, valign = "top")
+  style_instr_table <- openxlsx::createStyle(border = "TopBottomLeftRight", borderColour = "black",
+                                             wrapText = TRUE, valign = "top")
   fill_tipo <- function(hex) openxlsx::createStyle(fgFill = hex)
   wrap_left <- openxlsx::createStyle(wrapText = TRUE, halign = "left", valign = "top")
   border_all_black <- openxlsx::createStyle(border = "TopBottomLeftRight", borderColour = "black")
+  style_ref_hdr <- openxlsx::createStyle(fgFill = "#EDEFF2")
+  style_ref_body <- openxlsx::createStyle(fgFill = "#F7F7F8")
+  style_id_hdr <- openxlsx::createStyle(fgFill = "#DDE3EA")
+  style_id_body <- openxlsx::createStyle(fgFill = "#EFF3F7")
+  style_edit_hdr <- openxlsx::createStyle(fgFill = "#C6EFCE")
+  style_edit_body <- openxlsx::createStyle(fgFill = "#EAF7E6")
+  style_control_hdr <- openxlsx::createStyle(fgFill = "#FCE4D6")
+  style_control_body <- openxlsx::createStyle(fgFill = "#FFF2E8")
+  style_aux_hdr <- openxlsx::createStyle(fgFill = "#F4CCCC")
+  style_aux_body <- openxlsx::createStyle(fgFill = "#FCE5CD")
+  style_aux_sep <- openxlsx::createStyle(fgFill = "#FFFFFF")
+  style_example_hdr <- openxlsx::createStyle(fgFill = "#D9EAD3")
+  style_example_body <- openxlsx::createStyle(fgFill = "#F3F9F1")
+
+  # ===== 0) INSTRUCCIONES =====
+  st_instr <- add_sheet("INSTRUCCIONES", tab_colour = "#FCE4D6")
+  instr_intro <- data.frame(
+    texto = c(
+      "Como editar esta plantilla de recodificacion",
+      "1. No modifique la fila 1 ni la fila 2: la fila 1 es tecnica y la usa el paquete.",
+      "2. Edite solo las columnas *_recod y Control / notas.",
+      "3. En hojas select_multiple, use 1 para marcar, 0 para desmarcar y deje vacio si no desea cambiar.",
+      "4. En hojas select_one, text e integer, escriba la nueva recodificacion en la unica columna *_recod visible o deje vacio si no desea cambiar.",
+      "5. Para crear una opcion nueva en select_multiple, agregue una columna con fila 1 = <parent>/<nuevo_codigo>_recod y fila 2 = etiqueta visible.",
+      "6. En select_multiple, la columna nueva puede quedar antes o despues de Control / notas; el adaptador la reconoce por el nombre tecnico.",
+      "7. Las hojas select_multiple incluyen a la derecha una columna reservada de ejemplo (<parent>/ejemplo_recod); sirve de referencia y el adaptador la ignora.",
+      "8. En hojas select_one e integer, las categorias nuevas se declaran en el bloque auxiliar de la derecha, con dos columnas: nuevo_codigo y nueva_etiqueta.",
+      "9. En select_one modo padre, la columna editable recodifica la variable original; en modo hijo, la columna editable recodifica el texto abierto.",
+      "10. Las columnas _uuid, _index, Codigo pulso, Seleccionadas, Seleccionadas_cod, *_label y valores crudos son solo referencia."
+    ),
+    stringsAsFactors = FALSE
+  )
+  instr_table <- data.frame(
+    elemento = c("*_recod", "Control / notas", "Fila 1", "Fila 2", "Columnas crudas y *_label"),
+    uso = c(
+      "Campo editable de recodificacion. Complete solo si desea aplicar un cambio.",
+      "Campo opcional para observaciones, validacion o notas de revision.",
+      "Nombre tecnico que usa el paquete. No editar.",
+      "Etiqueta humana para orientar la edicion. No editar.",
+      "Valores originales para consulta. No editar."
+    ),
+    se_edita = c("Si", "Si", "No", "No", "No"),
+    stringsAsFactors = FALSE
+  )
+  instr_sm <- data.frame(
+    paso = c("Insertar columna", "Fila 1", "Fila 2", "Filas de datos"),
+    detalle = c(
+      "En una hoja select_multiple, agregue la nueva columna donde le resulte mas comodo; no tiene que ir obligatoriamente antes de Control / notas.",
+      "Use exactamente el patron <parent>/<nuevo_codigo>_recod. Ejemplo: p8/99_recod.",
+      "Escriba la etiqueta visible de la nueva opcion. Ejemplo: Otro servicio comunitario.",
+      "Use 1 para marcar la nueva opcion, 0 para desmarcar y deje vacio si no desea cambiar ese caso. La columna <parent>/ejemplo_recod es solo referencia."
+    ),
+    stringsAsFactors = FALSE
+  )
+  instr_so <- data.frame(
+    paso = c("Modo", "Codigo final", "Bloque auxiliar", "Validacion"),
+    detalle = c(
+      "Cada hoja select_one usa un unico modo: modo padre o modo hijo. El modo aparece en el bloque auxiliar de la derecha.",
+      "Complete la unica columna *_recod visible con el codigo final. Ejemplo: 3.",
+      "Declare la etiqueta del codigo nuevo una sola vez en las columnas nuevo_codigo y nueva_etiqueta del bloque auxiliar.",
+      "Si un codigo nuevo no tiene etiqueta o aparece con dos etiquetas distintas, el adaptador devolvera un error claro."
+    ),
+    stringsAsFactors = FALSE
+  )
+  instr_int <- data.frame(
+    paso = c("Codigo final", "Bloque auxiliar", "Lista compartida"),
+    detalle = c(
+      "En hojas integer, complete <var>_recod con el codigo final.",
+      "Declare cada codigo nuevo una sola vez en nuevo_codigo y nueva_etiqueta.",
+      "Si dos variables integer usan exactamente el mismo diccionario, el instrumento recodificado compartira la misma lista."
+    ),
+    stringsAsFactors = FALSE
+  )
+  openxlsx::writeData(wb, st_instr, x = instr_intro[1, , drop = FALSE], startRow = 1, colNames = FALSE)
+  openxlsx::writeData(wb, st_instr, x = instr_intro[-1, , drop = FALSE], startRow = 3, colNames = FALSE)
+  openxlsx::writeData(wb, st_instr, x = instr_table, startRow = 10, colNames = TRUE)
+  openxlsx::writeData(wb, st_instr, x = data.frame(texto = "Como agregar una opcion nueva en select_multiple", stringsAsFactors = FALSE), startRow = 18, colNames = FALSE)
+  openxlsx::writeData(wb, st_instr, x = instr_sm, startRow = 20, colNames = TRUE)
+  openxlsx::writeData(wb, st_instr, x = data.frame(texto = "Como declarar una categoria nueva en select_one", stringsAsFactors = FALSE), startRow = 27, colNames = FALSE)
+  openxlsx::writeData(wb, st_instr, x = instr_so, startRow = 29, colNames = TRUE)
+  openxlsx::writeData(wb, st_instr, x = data.frame(texto = "Como declarar una categoria nueva en integer", stringsAsFactors = FALSE), startRow = 35, colNames = FALSE)
+  openxlsx::writeData(wb, st_instr, x = instr_int, startRow = 37, colNames = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_instr_title, rows = 1, cols = 1, gridExpand = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_instr_text, rows = 3:10, cols = 1, gridExpand = TRUE, stack = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_hdr1, rows = 10, cols = 1:ncol(instr_table), gridExpand = TRUE, stack = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_instr_table,
+                     rows = 10:(nrow(instr_table) + 10), cols = 1:ncol(instr_table),
+                     gridExpand = TRUE, stack = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_instr_title, rows = 18, cols = 1, gridExpand = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_hdr1, rows = 20, cols = 1:ncol(instr_sm), gridExpand = TRUE, stack = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_instr_table,
+                     rows = 20:(nrow(instr_sm) + 20), cols = 1:ncol(instr_sm),
+                     gridExpand = TRUE, stack = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_instr_title, rows = 27, cols = 1, gridExpand = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_hdr1, rows = 29, cols = 1:ncol(instr_so), gridExpand = TRUE, stack = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_instr_table,
+                     rows = 29:(nrow(instr_so) + 29), cols = 1:ncol(instr_so),
+                     gridExpand = TRUE, stack = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_instr_title, rows = 35, cols = 1, gridExpand = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_hdr1, rows = 37, cols = 1:ncol(instr_int), gridExpand = TRUE, stack = TRUE)
+  openxlsx::addStyle(wb, st_instr, style_instr_table,
+                     rows = 37:(nrow(instr_int) + 37), cols = 1:ncol(instr_int),
+                     gridExpand = TRUE, stack = TRUE)
+  openxlsx::setColWidths(wb, st_instr, cols = 1, widths = 110)
+  openxlsx::setColWidths(wb, st_instr, cols = 2:3, widths = 28)
+  openxlsx::freezePane(wb, st_instr, firstActiveRow = 10)
 
   # ===== 1) NAVEGACION =====
-  st_nav <- add_sheet("NAVEGACION")
+  st_nav <- add_sheet("NAVEGACION", tab_colour = "#D9D9D9")
   nav <- plantilla$navegacion %>% dplyr::select(hoja, tipo, n)
   openxlsx::writeData(wb, st_nav, nav, startRow = 1, colNames = TRUE)
 
@@ -2709,7 +3697,7 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
 
 
   # ===== 2) FAMILIAS =====
-  st_fam <- add_sheet("FAMILIAS")
+  st_fam <- add_sheet("FAMILIAS", tab_colour = "#D9D9D9")
   fam_tbl <- plantilla$familias
   openxlsx::writeData(wb, st_fam, fam_tbl, startRow = 1, colNames = TRUE)
   if (nrow(fam_tbl) && "tipo" %in% names(fam_tbl)){
@@ -2725,7 +3713,7 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
                      rows = 1:(nrow(fam_tbl)+1), cols = 1:ncol(fam_tbl), gridExpand = TRUE, stack = TRUE)
 
   # ===== 3) CHOICES =====
-  st_ch <- add_sheet("CHOICES")
+  st_ch <- add_sheet("CHOICES", tab_colour = "#D9D9D9")
 
   # completar list_name SIN crear .x/.y
   choices_out <- {
@@ -2770,7 +3758,7 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
                      rows = 1:(nrow(ch)+1), cols = 1:ncol(ch), gridExpand = TRUE, stack = TRUE)
 
   # ===== 4) DICCIONARIO =====
-  st_dic <- add_sheet("DICCIONARIO")
+  st_dic <- add_sheet("DICCIONARIO", tab_colour = "#D9D9D9")
   dic <- plantilla$diccionario
 
   if (!is.null(inst) && !is.null(inst$survey_raw)) {
@@ -2818,6 +3806,10 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
 
     # encabezados
     tipo_hoja <- attr(plantilla$sheets[[nm]], "tipo") %||% "text"
+    layout_version <- attr(df, "layout_version") %||% "legacy"
+    aux_block <- attr(df, "aux_block")
+    example_block <- attr(df, "example_block")
+    modo_so <- attr(df, "modo_so") %||% NA_character_
     hdr_base  <- colnames(df)
     hdr_lab   <- attr(df, "label_row") %||% hdr_base
 
@@ -2825,7 +3817,10 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
     hdr_lab[hdr_base == "_uuid"]        <- "UUID"
     hdr_lab[hdr_base == "_index"]       <- "Índice"
     hdr_lab[hdr_base == "Código pulso"] <- "Código pulso"
-    hdr_lab[grepl("_recod$", hdr_base)] <- "Recodificación"
+    hdr_lab[hdr_base == "Control"]      <- "Control / notas"
+    if (!identical(layout_version, "recod_v2")) {
+      hdr_lab <- .codif_refine_label_row(hdr_base, hdr_lab, tipo_hoja, sheet_name = nm)
+    }
 
     # Fila 1 (crudo/código) según tipo
     especiales <- c("_uuid","_index","Código pulso","Codigo pulso",
@@ -2869,6 +3864,9 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
         }
       }, FUN.VALUE = character(1))
 
+    } else if (identical(layout_version, "recod_v2")) {
+      hdr_raw <- hdr_base
+
     } else if (identical(tolower(tipo_hoja), "select_one")) {
       parent_col <- nm
 
@@ -2876,6 +3874,8 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
         if (cc %in% c("_uuid","_index","Código pulso","Codigo pulso")) return(cc)
         if (cc == "Selección (código)") return(parent_col)
         if (cc == "Selección (label)")  return(paste0(parent_col, "_label"))
+        if (cc == "Recodificación (código)") return(paste0(parent_col, "_recod"))
+        if (cc == "Etiqueta nueva categoría") return(paste0(parent_col, "_label_recod"))
         cc
       }
 
@@ -2904,7 +3904,7 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
     }
 
     # escribir hoja
-    st <- add_sheet(nm)
+    st <- add_sheet(nm, tab_colour = tipo_hex(tipo_hoja))
     openxlsx::writeData(wb, st, t(hdr_raw), startRow = 1, colNames = FALSE)
     openxlsx::writeData(wb, st, t(hdr_lab), startRow = 2, colNames = FALSE)
     if (nrow(df)) openxlsx::writeData(wb, st, df, startRow = 3, colNames = FALSE, borders = "none")
@@ -2917,13 +3917,123 @@ exportar_plantilla_codificacion_xlsx <- function(plantilla,
     firstActiveCol <- if (length(id_cols)) (max(match(id_cols, colnames(df))) + 1L) else 1L
     if (isTRUE(congelar_encabezado)) openxlsx::freezePane(wb, st, firstActiveRow = 3, firstActiveCol = firstActiveCol)
 
-    openxlsx::addStyle(wb, st, fill_tipo(tipo_hex(tipo_hoja)), rows = 1:2, cols = 1:ncol(df), gridExpand = TRUE, stack = TRUE)
+    col_roles <- .codif_sheet_column_roles(hdr_base)
+    idx_id <- which(col_roles == "id")
+    idx_ref <- which(col_roles == "reference")
+    idx_edit <- which(col_roles == "editable")
+    idx_control <- which(col_roles == "control")
+
+    if (length(idx_id)) {
+      openxlsx::addStyle(wb, st, style_id_hdr, rows = 1:2, cols = idx_id, gridExpand = TRUE, stack = TRUE)
+      if (nrow(df)) openxlsx::addStyle(wb, st, style_id_body, rows = 3:(nrow(df) + 2L), cols = idx_id, gridExpand = TRUE, stack = TRUE)
+    }
+    if (length(idx_ref)) {
+      openxlsx::addStyle(wb, st, style_ref_hdr, rows = 1:2, cols = idx_ref, gridExpand = TRUE, stack = TRUE)
+      if (nrow(df)) openxlsx::addStyle(wb, st, style_ref_body, rows = 3:(nrow(df) + 2L), cols = idx_ref, gridExpand = TRUE, stack = TRUE)
+    }
+    if (length(idx_edit)) {
+      openxlsx::addStyle(wb, st, style_edit_hdr, rows = 1:2, cols = idx_edit, gridExpand = TRUE, stack = TRUE)
+      if (nrow(df)) openxlsx::addStyle(wb, st, style_edit_body, rows = 3:(nrow(df) + 2L), cols = idx_edit, gridExpand = TRUE, stack = TRUE)
+    }
+    if (length(idx_control)) {
+      openxlsx::addStyle(wb, st, style_control_hdr, rows = 1:2, cols = idx_control, gridExpand = TRUE, stack = TRUE)
+      if (nrow(df)) openxlsx::addStyle(wb, st, style_control_body, rows = 3:(nrow(df) + 2L), cols = idx_control, gridExpand = TRUE, stack = TRUE)
+    }
 
     nrows <- max(2, nrow(df) + 2L)
     openxlsx::addStyle(wb, st, border_all_black, rows = 1:nrows, cols = 1:ncol(df), gridExpand = TRUE, stack = TRUE)
 
     openxlsx::setColWidths(wb, st, cols = 1:ncol(df), widths = "auto")
-    openxlsx::addStyle(wb, st, wrap_left, rows = 3:(nrow(df)+3), cols = 1:ncol(df), gridExpand = TRUE, stack = TRUE)
+    if (nrow(df)) {
+      openxlsx::addStyle(wb, st, wrap_left, rows = 3:(nrow(df)+2L), cols = 1:ncol(df), gridExpand = TRUE, stack = TRUE)
+    }
+
+    for (j in c(idx_edit, idx_control)) {
+      cmt <- openxlsx::createComment(
+        comment = .codif_edit_comment_text(
+          tipo_hoja,
+          hdr_base[j],
+          sheet_name = nm,
+          mode_so = modo_so,
+          aux_block = aux_block
+        ),
+        author = "prosecnur",
+        visible = FALSE,
+        width = 4,
+        height = 3
+      )
+      openxlsx::writeComment(wb, st, col = j, row = 2, comment = cmt)
+    }
+
+    block_cursor <- ncol(df)
+
+    if (!is.null(aux_block) && length(aux_block$raw) == 2L) {
+      sep_col <- block_cursor + 1L
+      aux_cols <- (block_cursor + 2L):(block_cursor + 3L)
+      aux_nrows <- max(nrows, 3L)
+
+      openxlsx::writeData(wb, st, t(aux_block$raw), startRow = 1, startCol = aux_cols[1], colNames = FALSE)
+      openxlsx::writeData(wb, st, t(aux_block$label), startRow = 2, startCol = aux_cols[1], colNames = FALSE)
+
+      openxlsx::addStyle(wb, st, style_aux_sep, rows = 1:aux_nrows, cols = sep_col, gridExpand = TRUE, stack = TRUE)
+      openxlsx::addStyle(wb, st, style_aux_hdr, rows = 1:2, cols = aux_cols, gridExpand = TRUE, stack = TRUE)
+      if (aux_nrows >= 3L) {
+        openxlsx::addStyle(wb, st, style_aux_body, rows = 3:aux_nrows, cols = aux_cols, gridExpand = TRUE, stack = TRUE)
+      }
+      openxlsx::addStyle(wb, st, border_all_black, rows = 1:aux_nrows, cols = aux_cols, gridExpand = TRUE, stack = TRUE)
+
+      openxlsx::setColWidths(wb, st, cols = sep_col, widths = 3)
+      openxlsx::setColWidths(wb, st, cols = aux_cols, widths = 26)
+
+      if (!is.null(aux_block$comments) && length(aux_block$comments) == 2L) {
+        for (k in seq_along(aux_cols)) {
+          cmt_aux <- openxlsx::createComment(
+            comment = aux_block$comments[[k]],
+            author = "prosecnur",
+            visible = FALSE,
+            width = 4.5,
+            height = 3.5
+          )
+          openxlsx::writeComment(wb, st, col = aux_cols[k], row = 2, comment = cmt_aux)
+        }
+      }
+      block_cursor <- max(aux_cols)
+    }
+
+    if (!is.null(example_block) &&
+        length(example_block$raw) == 1L &&
+        length(example_block$label) == 1L) {
+      sep_col <- block_cursor + 1L
+      ex_col <- block_cursor + 2L
+      ex_values <- as.character(example_block$values %||% character(0))
+      ex_nrows <- max(nrows, length(ex_values) + 2L, 3L)
+
+      openxlsx::writeData(wb, st, x = example_block$raw, startRow = 1, startCol = ex_col, colNames = FALSE)
+      openxlsx::writeData(wb, st, x = example_block$label, startRow = 2, startCol = ex_col, colNames = FALSE)
+      if (length(ex_values)) {
+        openxlsx::writeData(wb, st, x = ex_values, startRow = 3, startCol = ex_col, colNames = FALSE)
+      }
+
+      openxlsx::addStyle(wb, st, style_aux_sep, rows = 1:ex_nrows, cols = sep_col, gridExpand = TRUE, stack = TRUE)
+      openxlsx::addStyle(wb, st, style_example_hdr, rows = 1:2, cols = ex_col, gridExpand = TRUE, stack = TRUE)
+      if (ex_nrows >= 3L) {
+        openxlsx::addStyle(wb, st, style_example_body, rows = 3:ex_nrows, cols = ex_col, gridExpand = TRUE, stack = TRUE)
+      }
+      openxlsx::addStyle(wb, st, border_all_black, rows = 1:ex_nrows, cols = ex_col, gridExpand = TRUE, stack = TRUE)
+      openxlsx::setColWidths(wb, st, cols = sep_col, widths = 3)
+      openxlsx::setColWidths(wb, st, cols = ex_col, widths = 28)
+
+      if (!is.null(example_block$comment) && nzchar(example_block$comment)) {
+        cmt_ex <- openxlsx::createComment(
+          comment = example_block$comment,
+          author = "prosecnur",
+          visible = FALSE,
+          width = 4.5,
+          height = 3.5
+        )
+        openxlsx::writeComment(wb, st, col = ex_col, row = 2, comment = cmt_ex)
+      }
+    }
   }
 
   openxlsx::saveWorkbook(wb, path_xlsx, overwrite = TRUE)
@@ -3221,6 +4331,7 @@ construir_plantilla_desde_familias_repeat <- function(inst, tabs, fam) {
           use             = TRUE,
           q_order         = cand_num$q_order[match(por_agregar[ok], cand_num$variable)],
           tipo            = "integer",
+          modo_so         = NA_character_,
           parent          = por_agregar[ok],
           parent_label    = s_lab_from_original(por_agregar[ok], inst),
           list_norm       = NA_character_,
@@ -3240,12 +4351,12 @@ construir_plantilla_desde_familias_repeat <- function(inst, tabs, fam) {
   }
 
   # columnas requeridas del Excel de familias
-  need_cols <- c("section","hoja_datos","use","q_order","tipo","parent","parent_label",
+  need_cols <- c("section","hoja_datos","use","q_order","tipo","modo_so","parent","parent_label",
                  "list_norm","parent_col","other_dummy_col","text_col")
   for (k in need_cols) if (!k %in% names(fam_all)) fam_all[[k]] <- NA
 
   # normalización básica
-  to_chr <- c("section","hoja_datos","tipo","parent","parent_label","list_norm",
+  to_chr <- c("section","hoja_datos","tipo","modo_so","parent","parent_label","list_norm",
               "parent_col","other_dummy_col","text_col")
   for (cc in intersect(to_chr, names(fam_all))) {
     fam_all[[cc]] <- as.character(fam_all[[cc]])
@@ -3263,14 +4374,18 @@ construir_plantilla_desde_familias_repeat <- function(inst, tabs, fam) {
   ch_map_ln <- choices_es %>% dplyr::distinct(list_norm, list_name)
   fam_all$list_norm <- ifelse(!is.na(fam_all$list_norm) & nzchar(fam_all$list_norm),
                               fam_all$list_norm,
-                              tolower(gsub("[^a-z0-9_]", "_", gsub("\\s+","_", fam_all$list_name %||% ""))))
+                              tolower(gsub("[^a-z0-9_]", "_", gsub("\\s+","_", if ("list_name" %in% names(fam_all)) fam_all$list_name else ""))))
   fam_all$list_name <- ch_map_ln$list_name[match(fam_all$list_norm, ch_map_ln$list_norm)]
 
   # excluir TEXT adoptadas
+  .safe_text_col <- function(x){
+    if (is.null(x) || !("text_col" %in% names(x))) return(NULL)
+    x[["text_col"]]
+  }
   assigned_texts <- unique(na.omit(c(
-    tryCatch(fam$adopciones$text_col, error = function(e) NULL),
-    tryCatch(so$text_col, error = function(e) NULL),
-    tryCatch(sm$text_col, error = function(e) NULL)
+    .safe_text_col(fam$adopciones),
+    .safe_text_col(so),
+    .safe_text_col(sm)
   )))
   fam_all <- fam_all %>%
     dplyr::filter(!(tipo == "text" & !is.na(text_col) & nzchar(text_col) & text_col %in% assigned_texts))
@@ -3288,7 +4403,7 @@ construir_plantilla_desde_familias_repeat <- function(inst, tabs, fam) {
   # tabla familias exportable
   familias_tbl <- fam_all %>%
     dplyr::select(
-      tipo, section, hoja_datos, parent = parent_clean, parent_label, q_order,
+      tipo, modo_so, section, hoja_datos, parent = parent_clean, parent_label, q_order,
       list_name, list_norm, parent_col, other_dummy_col, text_col
     )
 
@@ -3324,6 +4439,8 @@ construir_plantilla_desde_familias_repeat <- function(inst, tabs, fam) {
                     tipo, list_name, list_norm, choice_code, choice_label)
   }
   choices_tbl <- make_choices_tbl(familias_tbl)
+  choices_by_parent <- split(choices_tbl, choices_tbl$parent_col)
+  label_map <- .codif_label_map(inst)
 
   # -------- Construcción de hojas (respetando hoja_datos correcta) ----------
   sheets_list <- list(); nav_rows <- list()
@@ -3331,6 +4448,7 @@ construir_plantilla_desde_familias_repeat <- function(inst, tabs, fam) {
     sheets_list[[title]] <<- structure(base_df, header_raw = hdr_raw, label_row = hdr_lab, tipo = tipo)
     nav_rows[[length(nav_rows)+1]] <<- tibble::tibble(hoja = title, tipo = tipo, n = nrow(base_df))
   }
+  id_base_by_sheet <- lapply(tabs_norm, resolve_ids)
 
   fam_all$.ord <- dplyr::coalesce(fam_all$q_order, ord_val(fam_all$parent_col))
   fam_all <- fam_all %>% dplyr::arrange(.ord, factor(tipo, c("select_one","select_multiple","integer","text")), parent_col)
@@ -3344,13 +4462,31 @@ construir_plantilla_desde_familias_repeat <- function(inst, tabs, fam) {
     dat_raw <- tabs_norm[[hoja_norm]]
     if (is.null(dat_raw) || !is.data.frame(dat_raw)) next
 
-    id_base <- resolve_ids(dat_raw)
+    id_base <- id_base_by_sheet[[hoja_norm]] %||% resolve_ids(dat_raw)
     # etiqueta preferida (familia → survey fallback)
     label_pref <- if (!is.na(row$parent_label) && nzchar(row$parent_label)) row$parent_label else s_lab_from_original(row$parent_col, inst)
 
     if (identical(tipo, "select_one")) {
       parent_col <- row$parent_col; text_col <- row$text_col
       if (!nzchar(parent_col) || !(parent_col %in% names(dat_raw))) next
+
+      opts_fast <- choices_by_parent[[parent_col]] %||% tibble::tibble(choice_code = character(), choice_label = character())
+      opts_fast <- opts_fast %>%
+        dplyr::distinct(choice_code, choice_label) %>%
+        dplyr::transmute(code = .data$choice_code, label = .data$choice_label)
+      base_fast <- .codif_build_select_one_sheet(
+        dat_raw = dat_raw,
+        id_base = id_base,
+        row = row,
+        opts = opts_fast,
+        inst = inst,
+        label_pref = label_pref,
+        label_map = label_map
+      )
+      if (is.null(base_fast)) next
+      add_sheet_row(row$parent_col, "select_one", base_fast,
+                    attr(base_fast, "header_raw"), attr(base_fast, "label_row"))
+      next
 
       opts <- choices_tbl %>%
         dplyr::filter(parent_col == !!parent_col) %>%
@@ -3401,6 +4537,24 @@ construir_plantilla_desde_familias_repeat <- function(inst, tabs, fam) {
       text_col   <- row$text_col
       if (!nzchar(parent_col) || !(parent_col %in% names(dat_raw))) next
 
+      opts_fast <- choices_by_parent[[parent_col]] %||% tibble::tibble(choice_code = character(), choice_label = character())
+      opts_fast <- opts_fast %>%
+        dplyr::distinct(choice_code, choice_label) %>%
+        dplyr::transmute(code = .data$choice_code, label = .data$choice_label)
+      base_fast <- .codif_build_select_multiple_sheet(
+        dat_raw = dat_raw,
+        id_base = id_base,
+        row = row,
+        opts = opts_fast,
+        inst = inst,
+        label_pref = label_pref,
+        label_map = label_map
+      )
+      if (is.null(base_fast)) next
+      add_sheet_row(row$parent_col, "select_multiple", base_fast,
+                    attr(base_fast, "header_raw"), attr(base_fast, "label_row"))
+      next
+
       # catálogo
       opts <- choices_tbl %>%
         dplyr::filter(parent_col == !!parent_col) %>%
@@ -3444,13 +4598,13 @@ construir_plantilla_desde_familias_repeat <- function(inst, tabs, fam) {
 
       # Seleccionadas / Seleccionadas_cod
       nm <- names(dmm); nm <- nm[!is.na(nm) & nzchar(nm)]
-      no_other <- setdiff(nm, "Otro, por favor especificar")
+      selected_cols <- nm
 
-      sel_labels <- if (length(no_other)) apply(dmm[, no_other, drop = FALSE], 1, function(r){
+      sel_labels <- if (length(selected_cols)) apply(dmm[, selected_cols, drop = FALSE], 1, function(r){
         idx <- which(r == 1); if (!length(idx)) "" else paste(names(r)[idx], collapse = "; ")
       }) else rep("", nrow(dat_raw))
 
-      sel_codes <- if (length(no_other)) apply(dmm[, no_other, drop = FALSE], 1, function(r){
+      sel_codes <- if (length(selected_cols)) apply(dmm[, selected_cols, drop = FALSE], 1, function(r){
         idx <- which(r == 1)
         if (!length(idx)) "" else {
           lbs <- names(r)[idx]
@@ -3500,23 +4654,17 @@ construir_plantilla_desde_familias_repeat <- function(inst, tabs, fam) {
       add_sheet_row(row$parent_col, "select_multiple", base, hdr_raw, hdr_lab)
 
     } else if (identical(tipo, "integer")) {
+      base <- .codif_build_integer_sheet(
+        dat_raw = dat_raw,
+        id_base = resolve_ids(dat_raw),
+        row = row,
+        inst = inst,
+        label_map = label_map
+      )
+      if (is.null(base)) next
+
       var_col <- if (nzchar(row$parent_col)) row$parent_col else row$parent
-      if (!nzchar(var_col) || !(var_col %in% names(dat_raw))) next
-
-      base <- resolve_ids(dat_raw) %>% dplyr::mutate(!!var_col := dat_raw[[var_col]])
-      base[[paste0(var_col,"_recod")]] <- NA_character_
-      base[["Control"]] <- NA_character_
-
-      hdr_raw <- names(base); hdr_lab <- hdr_raw
-      hdr_lab[hdr_raw=="_uuid"]        <- "UUID"
-      hdr_lab[hdr_raw=="_index"]       <- "Índice"
-      hdr_lab[hdr_raw=="Código pulso"] <- "Código pulso"
-      # Para INTEGER el label viene del survey (o del fam si lo tuviera)
-      lbl_num <- if (!is.na(row$parent_label) && nzchar(row$parent_label)) row$parent_label else s_lab_from_original(var_col, inst)
-      hdr_lab[hdr_raw==var_col]        <- lbl_num
-      hdr_lab[grepl("_recod$", hdr_raw)] <- "Recodificación"
-
-      add_sheet_row(var_col, "integer", base, hdr_raw, hdr_lab)
+      add_sheet_row(var_col, "integer", base, attr(base, "header_raw"), attr(base, "label_row"))
 
     } else if (identical(tipo, "text")) {
       txt_col <- row$parent_col

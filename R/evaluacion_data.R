@@ -66,8 +66,8 @@ eq_num_na <- function(a, b, tol = 0) {
 #' @return lógico; TRUE cuando a==b tras `trimws` y NA==NA
 #' @export
 eq_chr_na <- function(a, b, blank_is_na = TRUE) {
-  a <- if (is.factor(a)) as.character(a) else a
-  b <- if (is.factor(b)) as.character(b) else b
+  a <- if (is.factor(a)) as.character(a) else as.character(a)
+  b <- if (is.factor(b)) as.character(b) else as.character(b)
   a <- ifelse(is.na(a), NA_character_, trimws(a))
   b <- ifelse(is.na(b), NA_character_, trimws(b))
   if (isTRUE(blank_is_na)) {
@@ -75,6 +75,40 @@ eq_chr_na <- function(a, b, blank_is_na = TRUE) {
     b[nchar(b) == 0L] <- NA_character_
   }
   (is.na(a) & is.na(b)) | (!is.na(a) & !is.na(b) & a == b)
+}
+
+#' Resolver etiquetas desde un mapa embebido code -> label
+#'
+#' @param x vector con codigos
+#' @param map named character vector con etiquetas por codigo
+#' @return character vector con etiquetas mapeadas
+#' @keywords internal
+choice_label_map <- function(x, map) {
+  codes <- as.character(x)
+  codes <- ifelse(is.na(codes), NA_character_, trimws(codes))
+  map <- as.character(map)
+
+  if (is.null(names(map)) || !length(map)) {
+    return(rep(NA_character_, length(codes)))
+  }
+
+  decode_one <- function(code) {
+    if (is.na(code) || !nzchar(code)) return(NA_character_)
+
+    if (grepl("\\s", code, perl = TRUE)) {
+      toks <- strsplit(code, "\\s+", perl = TRUE)[[1]]
+      labs <- unname(map[toks])
+      labs <- labs[!is.na(labs) & nzchar(trimws(labs))]
+      if (!length(labs)) return(NA_character_)
+      return(paste(unique(labs), collapse = ", "))
+    }
+
+    lab <- unname(map[code])
+    if (!length(lab) || is.na(lab) || !nzchar(trimws(lab))) NA_character_ else lab
+  }
+
+  out <- vapply(codes, decode_one, character(1))
+  as_char_na(out)
 }
 
 # -------------------------------------------------------------------
@@ -252,22 +286,16 @@ cargar_plan_excel <- function(path, sheet = "Plan"){
   }
   if (is.list(datos) && !is.null(datos$datos_tablas) && is.list(datos$datos_tablas)) {
     tablas_list <- Filter(is.data.frame, datos$datos_tablas)
-    principal <- if (!is.null(hoja_principal) && hoja_principal %in% names(tablas_list)) tablas_list[[hoja_principal]] else tablas_list[[1]]
-    if (!"principal" %in% names(tablas_list)) tablas_list <- c(list(principal = principal), tablas_list)
-    return(list(principal = principal, tablas = tablas_list))
+    return(.as_principal_tablas(tablas_list, hoja_principal = hoja_principal))
   }
   if (is.list(datos) && !is.null(datos$data) && is.list(datos$data)) {
     tablas_list <- Filter(is.data.frame, datos$data)
-    principal <- if (!is.null(hoja_principal) && hoja_principal %in% names(tablas_list)) tablas_list[[hoja_principal]] else tablas_list[[1]]
-    if (!"principal" %in% names(tablas_list)) tablas_list <- c(list(principal = principal), tablas_list)
-    return(list(principal = principal, tablas = tablas_list))
+    return(.as_principal_tablas(tablas_list, hoja_principal = hoja_principal))
   }
   if (is.list(datos)) {
     tablas_list <- Filter(is.data.frame, datos)
     if (length(tablas_list)) {
-      principal <- if (!is.null(hoja_principal) && hoja_principal %in% names(tablas_list)) tablas_list[[hoja_principal]] else tablas_list[[1]]
-      if (!"principal" %in% names(tablas_list)) tablas_list <- c(list(principal = principal), tablas_list)
-      return(list(principal = principal, tablas = tablas_list))
+      return(.as_principal_tablas(tablas_list, hoja_principal = hoja_principal))
     }
   }
   if (is.character(datos) && length(datos) == 1 && grepl("\\.xlsx?$", datos, ignore.case = TRUE)) {
@@ -277,6 +305,29 @@ cargar_plan_excel <- function(path, sheet = "Plan"){
     return(list(principal = df, tablas = list(principal = df)))
   }
   stop("No pude convertir 'datos'. Pásame un data.frame, una lista (con $data o $datos_tablas) o ruta .xlsx.")
+}
+
+#' Exponer la hoja principal con la clave canónica `principal`
+#' @keywords internal
+.as_principal_tablas <- function(tablas_list, hoja_principal = NULL) {
+  tablas_list <- Filter(is.data.frame, tablas_list)
+  if (!length(tablas_list)) {
+    return(list(principal = NULL, tablas = list()))
+  }
+
+  claves <- names(tablas_list)
+  main_name <- if (!is.null(hoja_principal) && hoja_principal %in% claves) {
+    hoja_principal
+  } else if ("principal" %in% claves) {
+    "principal"
+  } else {
+    claves[[1]]
+  }
+
+  principal <- tablas_list[[main_name]]
+  otras <- tablas_list[setdiff(claves, c("principal", main_name))]
+  tablas_out <- c(list(principal = principal), otras)
+  list(principal = principal, tablas = tablas_out)
 }
 
 #' Construir índice de tablas y normalizador
@@ -289,6 +340,17 @@ cargar_plan_excel <- function(path, sheet = "Plan"){
   }
   map_norm_to_key <- stats::setNames(claves, .norm_tab(claves))  # "s1" -> "S1"
   list(map_norm_to_key = map_norm_to_key, tablas = tablas_list)
+}
+
+#' Resolver una tabla del plan contra las tablas disponibles
+#' @keywords internal
+.resolve_table_key <- function(tabla, tablas) {
+  tnorm <- .norm_tab(tabla)
+  if (!nzchar(tnorm) || tnorm %in% c("principal", "main")) return("principal")
+
+  nms <- names(tablas %||% list())
+  hit <- which(.norm_tab(nms) == tnorm)
+  if (length(hit) >= 1L) nms[[hit[1]]] else NA_character_
 }
 
 #' Encontrar tabla destino para una regla del plan
@@ -356,6 +418,80 @@ cargar_plan_excel <- function(path, sheet = "Plan"){
   env
 }
 
+#' Normalizar token de variable para matching flexible
+#' @keywords internal
+.norm_var_token <- function(x) {
+  x <- as.character(x %||% "")
+  x <- iconv(x, to = "ASCII//TRANSLIT")
+  x <- tolower(trimws(x))
+  gsub("[^a-z0-9_]", "", x, perl = TRUE)
+}
+
+#' Resolver nombre real de variable en un data.frame
+#' @keywords internal
+.resolve_var_name_in_df <- function(df, var) {
+  if (!is.data.frame(df) || !length(names(df))) return(NA_character_)
+  nms <- names(df)
+  if (var %in% nms) return(var)
+  hits <- which(.norm_var_token(nms) == .norm_var_token(var))
+  if (length(hits) == 1) nms[[hits[1]]] else NA_character_
+}
+
+#' Colapsar aliases de tablas que apuntan al mismo contenido
+#' @keywords internal
+.dedupe_table_hits <- function(hits, tablas) {
+  hits <- as.character(hits %||% character(0))
+  if (length(hits) <= 1L) return(hits)
+
+  reps <- character(0)
+  for (hit in hits) {
+    if (!hit %in% names(tablas)) next
+
+    matched <- FALSE
+    for (j in seq_along(reps)) {
+      rep_hit <- reps[[j]]
+      if (!rep_hit %in% names(tablas)) next
+
+      same_tbl <- identical(tablas[[hit]], tablas[[rep_hit]])
+      if (isTRUE(same_tbl)) {
+        if (identical(hit, "principal") && !identical(rep_hit, "principal")) reps[[j]] <- "principal"
+        matched <- TRUE
+        break
+      }
+    }
+
+    if (!matched) reps <- c(reps, hit)
+  }
+
+  unique(reps)
+}
+
+#' Construir un entorno cacheado con aliases por tabla
+#' @keywords internal
+.build_alias_env <- function(df) {
+  env <- rlang::env(rlang::base_env())
+  .bind_vars_with_aliases(env, df)
+}
+
+#' Preparar tablas para evaluacion (labels + cache de aliases)
+#' @keywords internal
+.prepare_eval_tables <- function(tablas, choices = NULL, use_choice_labels = FALSE) {
+  tablas_out <- tablas
+  envs <- list()
+
+  for (nm in names(tablas_out)) {
+    df <- tablas_out[[nm]]
+    if (!is.data.frame(df)) next
+    if (isTRUE(use_choice_labels) && !is.null(choices) && length(choices)) {
+      df <- .mapear_etiquetas(df, choices)
+      tablas_out[[nm]] <- df
+    }
+    envs[[nm]] <- .build_alias_env(df)
+  }
+
+  list(tablas = tablas_out, envs = envs)
+}
+
 # -------------------------------------------------------------------
 # Rewriting de RHS para agregaciones principal ← hijo
 # -------------------------------------------------------------------
@@ -371,21 +507,47 @@ cargar_plan_excel <- function(path, sheet = "Plan"){
   excl <- c("if","else","and","or","true","false","TRUE","FALSE","paste","paste0",
             "sum","min","max","any","all","count","length","eq_num_na","eq_chr_na",
             "grepl","is.na","trimws","as","character","numeric","Sys","Date","Sys.Date",
+            "REF_VAL",
             "selected_at","selected_at_char","count_selected")
   vars <- tok[!(tolower(tok) %in% tolower(excl))]
 
   var2sheet <- list()
+  var_actual <- list()
+  local_actual <- list()
+  ambiguous_vars <- list()
   for (v in vars) {
-    if (v %in% names(tablas[[base_table_key]])) next
-    if (length(hoja_var_cols) && !is.null(hoja_var_cols[[v]]) && .nz(hoja_var_cols[[v]])) {
-      var2sheet[[v]] <- hoja_var_cols[[v]]; next
+    base_actual <- .resolve_var_name_in_df(tablas[[base_table_key]], v)
+    if (.nz(base_actual)) {
+      if (!identical(base_actual, v)) local_actual[[v]] <- base_actual
+      next
     }
-    hits <- names(Filter(function(df) v %in% names(df), tablas))
+    if (length(hoja_var_cols) && !is.null(hoja_var_cols[[v]]) && .nz(hoja_var_cols[[v]])) {
+      hoja <- .resolve_table_key(hoja_var_cols[[v]], tablas)
+      if (!.nz(hoja)) hoja <- hoja_var_cols[[v]]
+      var2sheet[[v]] <- hoja
+      actual <- .resolve_var_name_in_df(tablas[[hoja]], v)
+      var_actual[[v]] <- if (.nz(actual)) actual else v
+      next
+    }
+    hits <- names(Filter(function(df) .nz(.resolve_var_name_in_df(df, v)), tablas))
     hits <- setdiff(hits, base_table_key)
-    if (length(hits) == 1) var2sheet[[v]] <- hits[[1]]
-    if (length(hits) > 1)  var2sheet[[v]] <- hits[[1]]  # preferencia simple
+    hits <- .dedupe_table_hits(hits, tablas)
+    if (length(hits) == 1) {
+      var2sheet[[v]] <- hits[[1]]
+      actual <- .resolve_var_name_in_df(tablas[[hits[[1]]]], v)
+      var_actual[[v]] <- if (.nz(actual)) actual else v
+    }
+    if (length(hits) > 1)  ambiguous_vars[[v]] <- hits
   }
-  list(vars = vars, var2sheet = var2sheet, txt = txt, omit = FALSE)
+  list(
+    vars = vars,
+    var2sheet = var2sheet,
+    var_actual = var_actual,
+    local_actual = local_actual,
+    ambiguous_vars = ambiguous_vars,
+    txt = txt,
+    omit = FALSE
+  )
 }
 
 #' ¿Hay agregación explícita para var?
@@ -404,22 +566,57 @@ cargar_plan_excel <- function(path, sheet = "Plan"){
 .rewrite_rhs_with_aggs <- function(rhs, base_table_key, tablas,
                                    hoja_var_cols = list(), agreg_cols = list()){
   info <- .find_var_tables(rhs, base_table_key, tablas, hoja_var_cols, agreg_cols)
-  txt  <- info$txt; var2sheet <- info$var2sheet
-  if (!length(var2sheet)) return(list(rhs2 = txt, omit = FALSE))
+  txt  <- info$txt
+  var2sheet <- info$var2sheet
+  var_actual <- info$var_actual %||% list()
+  local_actual <- info$local_actual %||% list()
+  ambiguous_vars <- info$ambiguous_vars %||% list()
+
+  if (length(ambiguous_vars)) {
+    detalle <- vapply(names(ambiguous_vars), function(v) {
+      paste0(v, " -> {", paste(ambiguous_vars[[v]], collapse = ", "), "}")
+    }, FUN.VALUE = character(1))
+    return(list(
+      rhs2 = txt,
+      omit = TRUE,
+      issue_code = "cross_table_ambiguous",
+      detail = paste("Variables presentes en multiples hojas:", paste(detalle, collapse = "; "))
+    ))
+  }
+
+  if (!length(var2sheet)) {
+    if (length(local_actual)) {
+      for (v in names(local_actual)) {
+        actual <- local_actual[[v]]
+        txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
+                    actual, txt, perl = TRUE)
+      }
+    }
+    return(list(rhs2 = txt, omit = FALSE, issue_code = NA_character_, detail = NA_character_))
+  }
+
+  if (length(local_actual)) {
+    for (v in names(local_actual)) {
+      actual <- local_actual[[v]]
+      txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
+                  actual, txt, perl = TRUE)
+    }
+  }
 
   # 1) Reemplazar agregaciones explícitas (sum/paste/count) por AGG_*
   for (v in names(var2sheet)) {
     hoja <- var2sheet[[v]]
+    actual <- var_actual[[v]] %||% v
     if (is.null(hoja) || !nzchar(hoja) || hoja == base_table_key) next
 
     txt <- gsub(paste0("\\bsum\\s*\\(\\s*", v, "\\s*\\)"),
-                paste0("AGG_SUM('", hoja, "','", v, "')"), txt, perl = TRUE)
+                paste0("AGG_SUM('", hoja, "','", actual, "')"), txt, perl = TRUE)
 
     txt <- gsub(paste0("\\bpaste\\s*\\(\\s*", v, "\\s*,\\s*collapse\\s*=\\s*('|\")([^'\"]+)\\1\\s*\\)"),
-                paste0("AGG_PASTE('", hoja, "','", v, "', sep = \"\\2\")"), txt, perl = TRUE)
+                paste0("AGG_PASTE('", hoja, "','", actual, "', sep = \"\\2\")"), txt, perl = TRUE)
 
     txt <- gsub(paste0("\\bcount\\s*\\(\\s*", v, "\\s*\\)"),
-                paste0("AGG_N('", hoja, "','", v, "')"), txt, perl = TRUE)
+                paste0("AGG_N('", hoja, "','", actual, "')"), txt, perl = TRUE)
   }
 
   # 2) Variables cruzadas "crudas" sin agregación -> INFERIR agregación (NO omitir)
@@ -433,42 +630,58 @@ cargar_plan_excel <- function(path, sheet = "Plan"){
 
     if (!aparece_crudo) next
 
+    if (isTRUE(.can_lookup_parent_raw(base_table_key, hoja, tablas))) {
+      actual <- var_actual[[v]] %||% v
+      txt <- gsub(
+        paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
+        paste0("REF_VAL('", hoja, "','", actual, "')"),
+        txt,
+        perl = TRUE
+      )
+      next
+    }
+
     # ¿el plan dio agregación para ese var?
     agreg_plan <- NULL
     if (length(agreg_cols) && !is.null(agreg_cols[[v]]) && .nz(agreg_cols[[v]])) {
       agreg_plan <- tolower(trimws(agreg_cols[[v]]))
     }
 
-    if (.nz(agreg_plan)) {
-      # respetar lo que diga el plan
-      if (agreg_plan %in% c("sum")) {
-        txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
-                    paste0("AGG_SUM('", hoja, "','", v, "')"), txt, perl = TRUE)
-      } else if (agreg_plan %in% c("n","count")) {
-        txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
-                    paste0("AGG_N('", hoja, "','", v, "')"), txt, perl = TRUE)
-      } else if (agreg_plan %in% c("paste","concat","join")) {
-        txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
-                    paste0("AGG_PASTE('", hoja, "','", v, "', sep = \" \")"), txt, perl = TRUE)
-      } else {
-        # agreg desconocida: intentar inferir
-        infer_sum <- .is_num_like(tablas, hoja, v)
-        rep <- if (infer_sum)
-          paste0("AGG_SUM('", hoja, "','", v, "')") else
-            paste0("AGG_PASTE('", hoja, "','", v, "', sep = \" \")")
-        txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"), rep, txt, perl = TRUE)
-      }
+    if (!.nz(agreg_plan)) {
+      return(list(
+        rhs2 = txt,
+        omit = TRUE,
+        issue_code = "cross_table_ambiguous",
+        detail = paste0(
+          "Cruce principal-hijo sin agregacion explicita para la variable '", v,
+          "' en la hoja '", hoja, "'."
+        )
+      ))
+    }
+
+    if (agreg_plan %in% c("sum")) {
+      actual <- var_actual[[v]] %||% v
+      txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
+                  paste0("AGG_SUM('", hoja, "','", actual, "')"), txt, perl = TRUE)
+    } else if (agreg_plan %in% c("n","count")) {
+      actual <- var_actual[[v]] %||% v
+      txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
+                  paste0("AGG_N('", hoja, "','", actual, "')"), txt, perl = TRUE)
+    } else if (agreg_plan %in% c("paste","concat","join")) {
+      actual <- var_actual[[v]] %||% v
+      txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"),
+                  paste0("AGG_PASTE('", hoja, "','", actual, "', sep = \" \")"), txt, perl = TRUE)
     } else {
-      # SIN guía del plan: inferir por tipo (numérico vs texto)
-      infer_sum <- .is_num_like(tablas, hoja, v)
-      rep <- if (infer_sum)
-        paste0("AGG_SUM('", hoja, "','", v, "')") else
-          paste0("AGG_PASTE('", hoja, "','", v, "', sep = \" \")")
-      txt <- gsub(paste0("(?<![A-Za-z0-9_])", v, "(?![A-Za-z0-9_])"), rep, txt, perl = TRUE)
+      return(list(
+        rhs2 = txt,
+        omit = TRUE,
+        issue_code = "runtime_skip",
+        detail = paste0("Agregacion no soportada para la variable '", v, "': ", agreg_plan)
+      ))
     }
   }
 
-  list(rhs2 = txt, omit = FALSE)
+  list(rhs2 = txt, omit = FALSE, issue_code = NA_character_, detail = NA_character_)
 }
 
 # -------------------------------------------------------------------
@@ -481,11 +694,82 @@ cargar_plan_excel <- function(path, sheet = "Plan"){
   list(tablas = tablas, base_key = base_key, n_base = nrow(tablas[[base_key]] %||% tibble()))
 }
 
+#' Determinar si una variable cruzada puede leerse desde el padre directo
+#' @keywords internal
+.can_lookup_parent_raw <- function(base_table_key, ref_table_key, tablas) {
+  if (identical(base_table_key, "principal") || !identical(ref_table_key, "principal")) return(FALSE)
+  base <- tablas[[base_table_key]]
+  ref  <- tablas[[ref_table_key]]
+  is.data.frame(base) && is.data.frame(ref) && "_parent_index" %in% names(base)
+}
+
 #' Guardas para AGG_*
 #' @keywords internal
 .AGG_guard <- function(ctx, hoja){
   if (is.null(ctx$tablas[[hoja]]) || !is.data.frame(ctx$tablas[[hoja]])) stop("Hoja '", hoja, "' no disponible.")
   if (is.null(ctx$tablas[[hoja]][["_parent_index"]])) stop("La hoja '", hoja, "' no trae _parent_index.")
+}
+
+#' Resolver posiciones del padre para agregaciones repeat -> base
+#' @keywords internal
+.AGG_parent_locs <- function(ctx, hoja) {
+  .AGG_guard(ctx, hoja)
+
+  base  <- ctx$tablas[[ctx$base_key]]
+  child <- ctx$tablas[[hoja]]
+  raw_parent <- suppressWarnings(as.integer(child[["_parent_index"]]))
+  N <- ctx$n_base
+
+  if (!is.data.frame(base) || N <= 0) {
+    return(list(locs = rep(NA_integer_, length(raw_parent)), N = N))
+  }
+
+  if ("_index" %in% names(base)) {
+    base_ids <- suppressWarnings(as.integer(base[["_index"]]))
+    if (length(base_ids) == N && any(!is.na(base_ids))) {
+      locs <- match(raw_parent, base_ids)
+      return(list(locs = locs, N = N))
+    }
+  }
+
+  ok <- !is.na(raw_parent) & raw_parent >= 1L & raw_parent <= N
+  locs <- rep(NA_integer_, length(raw_parent))
+  locs[ok] <- raw_parent[ok]
+  list(locs = locs, N = N)
+}
+
+#' Alinear valores del padre directo a la hoja base repetida
+#' @keywords internal
+.REF_parent_vals <- function(ctx, hoja, var) {
+  base <- ctx$tablas[[ctx$base_key]]
+  ref  <- ctx$tablas[[hoja]]
+
+  if (!is.data.frame(base) || !is.data.frame(ref)) {
+    stop("No pude resolver el cruce desde '", ctx$base_key, "' hacia '", hoja, "'.")
+  }
+  if (!"_parent_index" %in% names(base)) {
+    stop("La hoja base '", ctx$base_key, "' no trae _parent_index para buscar valores del padre.")
+  }
+
+  actual <- .resolve_var_name_in_df(ref, var)
+  if (!.nz(actual)) {
+    stop("La variable '", var, "' no existe en la hoja padre '", hoja, "'.")
+  }
+
+  raw_parent <- suppressWarnings(as.integer(base[["_parent_index"]]))
+  locs <- rep(NA_integer_, length(raw_parent))
+
+  if ("_index" %in% names(ref)) {
+    ref_ids <- suppressWarnings(as.integer(ref[["_index"]]))
+    if (length(ref_ids) == nrow(ref) && any(!is.na(ref_ids))) {
+      locs <- match(raw_parent, ref_ids)
+    }
+  } else {
+    ok <- !is.na(raw_parent) & raw_parent >= 1L & raw_parent <= nrow(ref)
+    locs[ok] <- raw_parent[ok]
+  }
+
+  ref[[actual]][locs]
 }
 
 #' Suma por padre (repeat→principal)
@@ -494,11 +778,12 @@ cargar_plan_excel <- function(path, sheet = "Plan"){
 #' @return vector numérico longitud N padres
 #' @export
 AGG_SUM <- function(hoja, var){
-  ctx <- get(".AGG_CTX", envir = parent.frame()); .AGG_guard(ctx, hoja)
+  ctx <- get(".AGG_CTX", envir = parent.frame())
   child <- ctx$tablas[[hoja]]
-  idx   <- suppressWarnings(as.integer(child[["_parent_index"]]))
+  parent <- .AGG_parent_locs(ctx, hoja)
+  idx   <- parent$locs
   v     <- suppressWarnings(as.numeric(child[[var]]))
-  N     <- ctx$n_base
+  N     <- parent$N
   ok    <- !is.na(idx) & idx>=1 & idx<=N
   if (!any(ok)) return(rep(NA_real_, N))
   sums <- tapply(v[ok], idx[ok], function(x) sum(x, na.rm = TRUE))
@@ -512,10 +797,10 @@ AGG_SUM <- function(hoja, var){
 #' @return integer vector
 #' @export
 AGG_N <- function(hoja, var = NULL){
-  ctx <- get(".AGG_CTX", envir = parent.frame()); .AGG_guard(ctx, hoja)
-  child <- ctx$tablas[[hoja]]
-  idx   <- suppressWarnings(as.integer(child[["_parent_index"]]))
-  N     <- ctx$n_base
+  ctx <- get(".AGG_CTX", envir = parent.frame())
+  parent <- .AGG_parent_locs(ctx, hoja)
+  idx   <- parent$locs
+  N     <- parent$N
   ok    <- !is.na(idx) & idx>=1 & idx<=N
   if (!any(ok)) return(rep(0L, N))
   tab   <- table(idx[ok])
@@ -530,11 +815,12 @@ AGG_N <- function(hoja, var = NULL){
 #' @return character vector
 #' @export
 AGG_PASTE <- function(hoja, var, sep = " "){
-  ctx <- get(".AGG_CTX", envir = parent.frame()); .AGG_guard(ctx, hoja)
+  ctx <- get(".AGG_CTX", envir = parent.frame())
   child <- ctx$tablas[[hoja]]
-  idx   <- suppressWarnings(as.integer(child[["_parent_index"]]))
+  parent <- .AGG_parent_locs(ctx, hoja)
+  idx   <- parent$locs
   v     <- as.character(child[[var]])
-  N     <- ctx$n_base
+  N     <- parent$N
   ok    <- !is.na(idx) & idx>=1 & idx<=N
   if (!any(ok)) return(rep("", N))
   split_list <- split(v[ok], idx[ok])
@@ -543,6 +829,13 @@ AGG_PASTE <- function(hoja, var, sep = " "){
     if (!length(x)) "" else paste(x, collapse = sep)
   }, FUN.VALUE = character(1))
   out <- rep("", N); out[as.integer(names(res))] <- res; out
+}
+
+#' Leer un valor del padre directo para cada fila del repeat base
+#' @keywords internal
+REF_VAL <- function(hoja, var){
+  ctx <- get(".AGG_CTX", envir = parent.frame())
+  .REF_parent_vals(ctx, hoja, var)
 }
 
 # -------------------------------------------------------------------
@@ -562,6 +855,32 @@ AGG_PASTE <- function(hoja, var, sep = " "){
   }
   if (!nzchar(flag) || !nzchar(rhs)) return(NULL)
   list(flag = flag, rhs = rhs)
+}
+
+#' Construir una fila de resumen/diagnostico por regla
+#' @keywords internal
+.make_resumen_row <- function(r,
+                              tabla,
+                              flag = NA_character_,
+                              n_inconsistencias = NA_integer_,
+                              estado_dinamico = "correcta",
+                              issue_code = NA_character_,
+                              detalle = NA_character_,
+                              expresion_evaluada = NA_character_) {
+  tibble::tibble(
+    id_regla = r$id_regla,
+    nombre_regla = r$nombre_regla,
+    tabla = tabla %||% "principal",
+    seccion = r$seccion,
+    categoria = r$categoria,
+    tipo_observacion = r$tipo_observacion,
+    flag = flag,
+    n_inconsistencias = n_inconsistencias,
+    estado_dinamico = estado_dinamico,
+    issue_code = issue_code,
+    detalle = detalle,
+    expresion_evaluada = expresion_evaluada
+  )
 }
 
 # -------------------------------------------------------------------
@@ -610,10 +929,18 @@ evaluar_consistencia <- function(datos,
   if ("principal" %in% names(tablas)) {
     N <- nrow(tablas[["principal"]] %||% tibble())
     if (N > 0) {
+      base_index <- if ("_index" %in% names(tablas[["principal"]])) {
+        suppressWarnings(as.integer(tablas[["principal"]][["_index"]]))
+      } else {
+        NULL
+      }
       for (hoja in setdiff(names(tablas), "principal")) {
         child <- tablas[[hoja]]
         if (is.data.frame(child) && "_parent_index" %in% names(child)) {
           idxp <- suppressWarnings(as.integer(child[["_parent_index"]]))
+          if (!is.null(base_index) && length(base_index) == N && any(!is.na(base_index))) {
+            idxp <- match(idxp, base_index)
+          }
           ok   <- !is.na(idxp) & idxp >= 1 & idxp <= N
           tab  <- table(idxp[ok])
           v    <- integer(N); if (length(tab)) v[as.integer(names(tab))] <- as.integer(tab)
@@ -626,12 +953,9 @@ evaluar_consistencia <- function(datos,
     }
   }
 
-  # Hook de etiquetas (choices → *_label) en TODAS las hojas si se pide
-  if (isTRUE(use_choice_labels) && !is.null(choices) && length(choices)) {
-    for (nm in names(tablas)) {
-      if (is.data.frame(tablas[[nm]])) tablas[[nm]] <- .mapear_etiquetas(tablas[[nm]], choices)
-    }
-  }
+  prep <- .prepare_eval_tables(tablas, choices = choices, use_choice_labels = use_choice_labels)
+  tablas <- prep$tablas
+  data_env_cache <- prep$envs %||% list()
 
   # Plan interno normalizado
   plan2 <- tibble::tibble(
@@ -661,15 +985,35 @@ evaluar_consistencia <- function(datos,
 
   for (i in seq_len(nrow(plan2))) {
     r <- plan2[i,]
-
-    pr <- .parsear_regla(.sanear_regex_en_procesamiento(.normalizar_procesamiento(r$procesamiento)),
-                         r$nombre_regla)
-    if (is.null(pr)) next
-
-    # Hoja base: prioridad a "Hoja base" si existe, si no "Tabla"
     base_key <- .encontrar_tabla_para(r$hoja_base %||% r$tabla_dest, idx)
     df  <- tablas[[base_key]]
-    if (!is.data.frame(df)) next
+
+    proc_norm <- .sanear_regex_en_procesamiento(.normalizar_procesamiento(r$procesamiento))
+    pr <- .parsear_regla(proc_norm, r$nombre_regla)
+    if (is.null(pr)) {
+      resumen_rows[[i]] <- .make_resumen_row(
+        r,
+        tabla = base_key,
+        estado_dinamico = "incorrecta_ejecucion",
+        issue_code = "parse_error",
+        detalle = "No se pudo parsear la expresion de procesamiento.",
+        expresion_evaluada = proc_norm
+      )
+      next
+    }
+
+    if (!is.data.frame(df)) {
+      resumen_rows[[i]] <- .make_resumen_row(
+        r,
+        tabla = base_key,
+        flag = pr$flag,
+        estado_dinamico = "incorrecta_ejecucion",
+        issue_code = "runtime_skip",
+        detalle = paste0("No existe una tabla evaluable para la hoja base '", base_key, "'."),
+        expresion_evaluada = pr$rhs
+      )
+      next
+    }
 
     # Rewriting del RHS para agregaciones principal ← hijo
     hoja_map <- list()
@@ -683,17 +1027,34 @@ evaluar_consistencia <- function(datos,
 
     rw <- .rewrite_rhs_with_aggs(pr$rhs, base_table_key = base_key, tablas = tablas,
                                  hoja_var_cols = hoja_map, agreg_cols = agreg_map)
-    if (isTRUE(rw$omit)) next
+    if (isTRUE(rw$omit)) {
+      resumen_rows[[i]] <- .make_resumen_row(
+        r,
+        tabla = base_key,
+        flag = pr$flag,
+        estado_dinamico = if (identical(rw$issue_code, "cross_table_ambiguous")) "ambigua" else "incorrecta_ejecucion",
+        issue_code = rw$issue_code %||% "runtime_skip",
+        detalle = rw$detail %||% "La regla no pudo evaluarse.",
+        expresion_evaluada = pr$rhs
+      )
+      next
+    }
     rhs2 <- rw$rhs2 %||% pr$rhs
 
-    # Entorno de evaluación
+    data_env <- data_env_cache[[base_key]]
+    if (is.null(data_env)) {
+      data_env <- .build_alias_env(df)
+      data_env_cache[[base_key]] <- data_env
+    }
+
     eval_env <- rlang::env(
-      rlang::base_env(),
+      data_env,
       is_yes = is_yes,
       is_no  = is_no,
       grepl  = .grepl_perl,
       eq_num_na = eq_num_na,
       eq_chr_na = eq_chr_na,
+      choice_label_map = choice_label_map,
       selected_at = selected_at,
       selected_at_char = selected_at_char,   # NUEVO: reemplazo seguro as.character(selected_at())
       count_selected = count_selected,
@@ -702,15 +1063,11 @@ evaluar_consistencia <- function(datos,
       .AGG_CTX = .AGG_prepare(tablas, base_key),
       AGG_SUM   = AGG_SUM,
       AGG_N     = AGG_N,
-      AGG_PASTE = AGG_PASTE
+      AGG_PASTE = AGG_PASTE,
+      REF_VAL   = REF_VAL
     )
 
-    # Inyectar variables (y etiquetas si existen) al entorno
     df_env <- df
-    if (isTRUE(use_choice_labels) && !is.null(choices)) {
-      df_env <- .mapear_etiquetas(df_env, choices)
-    }
-    eval_env <- .bind_vars_with_aliases(eval_env, df_env)
 
     # Tapones ODK → R
     rhs2 <- gsub("\\bregex\\s*\\(", "grepl(", rhs2)
@@ -737,12 +1094,35 @@ evaluar_consistencia <- function(datos,
       rhs2 <- gsub("\\btoday\\s*\\(\\)", "Sys.Date()", rhs2)
     }
 
-    ok <- TRUE
-    expr_parsed <- tryCatch(rlang::parse_expr(rhs2), error = function(e){ ok <<- FALSE; e })
-    if (!ok) next
+    expr_parsed <- tryCatch(rlang::parse_expr(rhs2), error = function(e) e)
+    if (inherits(expr_parsed, "error")) {
+      resumen_rows[[i]] <- .make_resumen_row(
+        r,
+        tabla = base_key,
+        flag = pr$flag,
+        estado_dinamico = "incorrecta_ejecucion",
+        issue_code = "parse_error",
+        detalle = conditionMessage(expr_parsed),
+        expresion_evaluada = rhs2
+      )
+      next
+    }
 
     vals <- tryCatch(rlang::eval_bare(expr_parsed, env = eval_env),
-                     error = function(e) rep(NA, nrow(df_env)))
+                     error = function(e) e)
+
+    if (inherits(vals, "error")) {
+      resumen_rows[[i]] <- .make_resumen_row(
+        r,
+        tabla = base_key,
+        flag = pr$flag,
+        estado_dinamico = "incorrecta_ejecucion",
+        issue_code = "runtime_skip",
+        detalle = conditionMessage(vals),
+        expresion_evaluada = rhs2
+      )
+      next
+    }
 
     # Normalización de salida: vector lógico longitud nrow(df)
     if (is.logical(vals)) {
@@ -750,18 +1130,36 @@ evaluar_consistencia <- function(datos,
     } else if (is.numeric(vals)) {
       vals <- as.logical(vals)
     } else {
-      vals <- rep(NA, nrow(df_env))
+      resumen_rows[[i]] <- .make_resumen_row(
+        r,
+        tabla = base_key,
+        flag = pr$flag,
+        estado_dinamico = "incorrecta_ejecucion",
+        issue_code = "runtime_skip",
+        detalle = "La expresion no devolvio un vector logico/numerico evaluable.",
+        expresion_evaluada = rhs2
+      )
+      next
     }
     if (length(vals) == 1L) {
       vals <- rep(vals, nrow(df_env))
     } else if (length(vals) != nrow(df_env)) {
-      vals <- rep(NA, nrow(df_env))
+      resumen_rows[[i]] <- .make_resumen_row(
+        r,
+        tabla = base_key,
+        flag = pr$flag,
+        estado_dinamico = "incorrecta_ejecucion",
+        issue_code = "runtime_skip",
+        detalle = "La expresion devolvio una longitud distinta al numero de filas.",
+        expresion_evaluada = rhs2
+      )
+      next
     }
 
     # Guardar flag
     df[[pr$flag]] <- vals
-    rlang::env_bind(eval_env, !!pr$flag := vals)
     tablas[[base_key]] <- df
+    rlang::env_bind(data_env, !!pr$flag := vals)
 
     # Conteo: TRUE = inconsistencia
     flag_vals <- vals
@@ -772,15 +1170,13 @@ evaluar_consistencia <- function(datos,
     }
     n_inc <- sum(flag_vals)
 
-    resumen_rows[[i]] <- tibble::tibble(
-      id_regla          = r$id_regla,
-      nombre_regla      = r$nombre_regla,
-      tabla             = base_key,
-      seccion           = r$seccion,
-      categoria         = r$categoria,
-      tipo_observacion  = r$tipo_observacion,
-      flag              = pr$flag,
-      n_inconsistencias = n_inc
+    resumen_rows[[i]] <- .make_resumen_row(
+      r,
+      tabla = base_key,
+      flag = pr$flag,
+      n_inconsistencias = n_inc,
+      estado_dinamico = "correcta",
+      expresion_evaluada = rhs2
     )
   }
 
@@ -789,6 +1185,12 @@ evaluar_consistencia <- function(datos,
   resumen <- resumen %>% dplyr::left_join(tam, by = "tabla") %>%
     dplyr::mutate(porcentaje = ifelse(n > 0, n_inconsistencias / n, NA_real_)) %>%
     dplyr::arrange(dplyr::desc(n_inconsistencias))
+
+  diagnostico_reglas <- dplyr::select(
+    resumen,
+    id_regla, nombre_regla, tabla, flag,
+    estado_dinamico, issue_code, detalle, expresion_evaluada
+  )
 
   reglas_meta <- dplyr::select(
     plan2,
@@ -802,10 +1204,11 @@ evaluar_consistencia <- function(datos,
   ) %>% dplyr::rename(tabla = tabla_dest)
 
   list(
-    datos          = base$principal,
+    datos          = tablas[["principal"]] %||% base$principal,
     datos_tablas   = tablas,
     resumen        = resumen,
-    reglas_meta    = reglas_meta
+    reglas_meta    = reglas_meta,
+    diagnostico_reglas = diagnostico_reglas
   )
 }
 

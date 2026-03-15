@@ -106,6 +106,178 @@ ppra_resolve_template_sheet <- function(path_plantilla, parent_var){
   NA_character_
 }
 
+.ppra_blank_to_na <- function(x){
+  x <- trimws(as.character(x))
+  x[x == ""] <- NA_character_
+  x
+}
+
+.ppra_read_template_layout <- function(path_plantilla, parent_var){
+  if (!file.exists(path_plantilla)) return(NULL)
+  sheet <- ppra_resolve_template_sheet(path_plantilla, parent_var)
+  if (is.na(sheet)) return(NULL)
+
+  raw <- suppressWarnings(
+    readxl::read_excel(
+      path_plantilla,
+      sheet = sheet,
+      col_names = FALSE,
+      col_types = "text"
+    )
+  )
+  raw <- as.data.frame(raw, stringsAsFactors = FALSE, check.names = FALSE)
+  if (!nrow(raw) || !ncol(raw)) {
+    return(list(sheet = sheet, main = NULL, aux = tibble::tibble()))
+  }
+  if (nrow(raw) < 2L) {
+    raw[2, ] <- NA
+  }
+
+  hdr_raw <- .ppra_blank_to_na(unlist(raw[1, , drop = TRUE], use.names = FALSE))
+  hdr_lab <- as.character(unlist(raw[2, , drop = TRUE], use.names = FALSE))
+  nonblank <- which(!is.na(hdr_raw))
+  if (!length(nonblank)) {
+    return(list(sheet = sheet, main = NULL, aux = tibble::tibble()))
+  }
+
+  sep_idx <- which(is.na(hdr_raw))[1]
+  if (!is.na(sep_idx)) {
+    main_cols <- seq_len(sep_idx - 1L)
+    aux_cols <- nonblank[nonblank > sep_idx]
+  } else {
+    main_cols <- nonblank
+    aux_cols <- integer(0)
+  }
+
+  if (!length(aux_cols)) {
+    aux_mark <- which(tolower(as.character(hdr_raw)) %in% c("nuevo_codigo", "nueva_etiqueta"))
+    if (length(aux_mark)) {
+      aux_cols <- aux_mark
+      main_cols <- setdiff(nonblank, aux_cols)
+    }
+  }
+
+  main <- NULL
+  if (length(main_cols)) {
+    main <- raw[-c(1, 2), main_cols, drop = FALSE]
+    names(main) <- make.unique(as.character(hdr_raw[main_cols]), sep = "__")
+    main <- .ensure_unique_names(main)
+  }
+
+  aux <- tibble::tibble()
+  if (length(aux_cols)) {
+    aux_names <- tolower(as.character(hdr_raw[aux_cols]))
+    code_col <- aux_cols[match("nuevo_codigo", aux_names)]
+    label_col <- aux_cols[match("nueva_etiqueta", aux_names)]
+    if (length(code_col) && length(label_col) && !is.na(code_col) && !is.na(label_col)) {
+      aux <- tibble::tibble(
+        nuevo_codigo = .ppra_blank_to_na(raw[-c(1, 2), code_col]),
+        nueva_etiqueta = .ppra_blank_to_na(raw[-c(1, 2), label_col])
+      )
+    }
+  }
+
+  list(
+    sheet = sheet,
+    main = main,
+    aux = aux,
+    header_raw = hdr_raw,
+    header_label = hdr_lab
+  )
+}
+
+.ppra_collect_aux_codebook <- function(aux_df,
+                                       sheet_label,
+                                       target_col,
+                                       required_codes = character(0)){
+  if (is.null(aux_df) || !nrow(aux_df)) {
+    aux_df <- tibble::tibble(nuevo_codigo = character(0), nueva_etiqueta = character(0))
+  }
+
+  codes <- .ppra_blank_to_na(aux_df$nuevo_codigo)
+  labels <- .ppra_blank_to_na(aux_df$nueva_etiqueta)
+  has_code <- !is.na(codes)
+  has_label <- !is.na(labels)
+
+  if (any(has_label & !has_code)) {
+    stop(
+      "[Recodificación] En la hoja '", sheet_label,
+      "', el bloque auxiliar de nuevas categorías para '", target_col,
+      "' tiene etiquetas sin código en 'nuevo_codigo'.",
+      call. = FALSE
+    )
+  }
+  if (any(has_code & !has_label)) {
+    miss <- unique(codes[has_code & !has_label])
+    stop(
+      "[Recodificación] En la hoja '", sheet_label,
+      "', el bloque auxiliar de nuevas categorías para '", target_col,
+      "' tiene códigos sin etiqueta en 'nueva_etiqueta': ",
+      paste(shQuote(miss), collapse = ", "),
+      ".",
+      call. = FALSE
+    )
+  }
+
+  keep <- has_code & has_label
+  if (!any(keep)) {
+    required_codes <- unique(.ppra_blank_to_na(required_codes))
+    required_codes <- required_codes[!is.na(required_codes)]
+    if (length(required_codes)) {
+      stop(
+        "[Recodificación] En la hoja '", sheet_label,
+        "', los códigos nuevos de '", target_col,
+        "' deben declararse en el bloque auxiliar 'nuevo_codigo' / 'nueva_etiqueta'.",
+        call. = FALSE
+      )
+    }
+    return(character(0))
+  }
+
+  acc <- tibble::tibble(code = codes[keep], label = labels[keep])
+  out <- character(0)
+  for (code in unique(acc$code)) {
+    labs <- unique(acc$label[acc$code == code])
+    if (length(labs) > 1L) {
+      stop(
+        "[Recodificación] En la hoja '", sheet_label,
+        "', el código nuevo '", code,
+        "' para '", target_col,
+        "' tiene más de una etiqueta declarada en el bloque auxiliar: ",
+        paste(shQuote(labs), collapse = ", "),
+        ". Usa una sola etiqueta por código.",
+        call. = FALSE
+      )
+    }
+    out[code] <- labs[1]
+  }
+
+  required_codes <- unique(.ppra_blank_to_na(required_codes))
+  required_codes <- required_codes[!is.na(required_codes)]
+  missing_codes <- setdiff(required_codes, names(out))
+  if (length(missing_codes)) {
+    stop(
+      "[Recodificación] En la hoja '", sheet_label,
+      "', los códigos nuevos ",
+      paste(shQuote(missing_codes), collapse = ", "),
+      " de '", target_col,
+      "' no tienen etiqueta declarada en el bloque auxiliar 'nuevo_codigo' / 'nueva_etiqueta'.",
+      call. = FALSE
+    )
+  }
+
+  out
+}
+
+.ppra_is_sm_example_col <- function(parent, cols){
+  if (!length(cols)) return(logical(0))
+  targets <- tolower(c(
+    paste0(parent, "/ejemplo_recod"),
+    paste0(parent, "/__ejemplo__recod")
+  ))
+  tolower(as.character(cols)) %in% targets
+}
+
 # -------- localizar hoja de datos donde vive el parent -------------------------
 locate_var_sheet <- function(parent, path_datos, path_familias = NULL){
   sheets <- readxl::excel_sheets(path_datos)
@@ -211,17 +383,16 @@ insert_right_of <- function(df, anchor, cols_to_insert){
   cols_to_insert <- cols_to_insert[cols_to_insert %in% names(df)]
   if (!length(cols_to_insert)) return(df)
   nms <- names(df)
-  apos <- match(anchor, nms)
+  base <- setdiff(nms, cols_to_insert)
+  apos <- match(anchor, base)
   if (is.na(apos)) {
-    apos <- match("_index", nms)
+    apos <- match("_index", base)
     if (is.na(apos)) {
-      base <- setdiff(nms, cols_to_insert)
       return(df[, c(base, cols_to_insert), drop = FALSE])
     }
   }
-  base <- setdiff(nms, cols_to_insert)
-  left <- if (apos<=0L) character(0) else base[seq_len(apos)]
-  right<- if (apos<=0L) base else base[(apos+1):length(base)]
+  left <- if (apos <= 0L) character(0) else base[seq_len(apos)]
+  right <- if (apos >= length(base)) character(0) else base[(apos + 1L):length(base)]
   df[, c(left, cols_to_insert, right), drop = FALSE]
 }
 
@@ -242,7 +413,9 @@ ppra_sm_parent_recod <- function(df, parent, path_instrumento, path_plantilla,
   if (file.exists(path_plantilla)) {
     sheet <- ppra_resolve_template_sheet(path_plantilla, parent)
     if (!is.na(sheet)) {
-      tpl <- readxl::read_excel(path_plantilla, sheet = sheet)
+      tpl <- suppressWarnings(
+        readxl::read_excel(path_plantilla, sheet = sheet, col_types = "text")
+      )
       tpl <- .ensure_unique_names(tpl)
       names(tpl) <- trimws(names(tpl))
     }
@@ -289,6 +462,7 @@ ppra_sm_parent_recod <- function(df, parent, path_instrumento, path_plantilla,
   if (!is.null(tpl)) {
     rx_new <- paste0("^", parent, "/[^/]+_(?i:recod)$")
     new_cols <- tnames[grepl(rx_new, tnames, perl = TRUE)]
+    new_cols <- new_cols[!.ppra_is_sm_example_col(parent, new_cols)]
     if (length(new_cols)) {
       for (cc in new_cols) {
         base <- sub("^.+/", "", cc)
@@ -356,16 +530,9 @@ ppra_so_parent <- function(df, parent, path_instrumento, path_plantilla,
   cat_codes <- as.character(ch$code); cat_labs <- as.character(ch$label)
   lab_by_code <- function(code){ i <- match(code, cat_codes); ifelse(is.na(i), NA_character_, cat_labs[i]) }
 
-  # Plantilla
-  tpl <- NULL
-  if (file.exists(path_plantilla)) {
-    sheet <- ppra_resolve_template_sheet(path_plantilla, parent)
-    if (!is.na(sheet)) {
-      tpl <- readxl::read_excel(path_plantilla, sheet = sheet)
-      tpl <- .ensure_unique_names(tpl)
-      names(tpl) <- trimws(names(tpl))
-    }
-  }
+  layout <- .ppra_read_template_layout(path_plantilla, parent)
+  tpl <- layout$main %||% NULL
+  tpl_sheet <- layout$sheet %||% parent
 
   # tmp (join armonizado)
   if (!is.null(tpl)) {
@@ -387,11 +554,7 @@ ppra_so_parent <- function(df, parent, path_instrumento, path_plantilla,
     NA_character_
   }
 
-  rec_tpl  <- .pick(c(paste0(parent,"_RECOD"), paste0(parent,"_recod")))
-  labr_tpl <- .pick(c(paste0(parent,"_LABEL_RECOD"), paste0(parent,"_label_recod")))
-  lab_tpl  <- .pick(c(paste0(parent,"_LABEL"),       paste0(parent,"_label")))
-  orec_tpl <- .pick(c(paste0(parent,"_OTHER_RECOD"), paste0(parent,"_other_recod")))
-  olab_tpl <- .pick(c(paste0(parent,"_OTHER_RECOD_LABEL"), paste0(parent,"_other_recod_label")))
+  rec_tpl <- .pick(c(paste0(parent,"_RECOD"), paste0(parent,"_recod")))
 
   base_code <- as.character(df_work[[parent]]); base_code[base_code==""] <- NA_character_
   code_final <- base_code
@@ -400,48 +563,21 @@ ppra_so_parent <- function(df, parent, path_instrumento, path_plantilla,
     i <- which(!is.na(x)); if (length(i)) code_final[i] <- x[i]
   }
 
-
-  if (!is.na(orec_tpl)) {
-    y <- trimws(as.character(tmp[[orec_tpl]])); y[y==""] <- NA_character_
-    j <- which(!is.na(y))
-    if (length(j)) code_final[j] <- y[j]
-  }
-
-  # override por texto de familias
-  text_col <- ppra_get_textcol_from_familias(path_familias, parent)
-  txt_val <- rep(NA_character_, nrow(df_work))
-  if (nz(text_col) && (text_col %in% names(df_work))) {
-    txt_raw <- trimws(as.character(df_work[[text_col]])); txt_raw[txt_raw==""] <- NA_character_
-    txt_rec_nm <- paste0(text_col, "_recod")
-    txt_rec <- if (txt_rec_nm %in% tnames) {
-      trimws(as.character(tmp[[txt_rec_nm]]))
-    } else if (txt_rec_nm %in% names(df_work)) {
-      trimws(as.character(df_work[[txt_rec_nm]]))
-    } else NA_character_
-    if (length(txt_rec)) txt_rec[txt_rec==""] <- NA_character_
-    txt_val <- dplyr::coalesce(txt_rec, txt_raw)
-  }
-  if (any(nz(txt_val))) {
-    idx <- which(nz(txt_val))
-    code_final[idx] <- txt_val[idx]
-  }
+  known_code <- !is.na(code_final) & code_final %in% cat_codes
+  new_code <- !is.na(code_final) & !(code_final %in% cat_codes)
+  aux_map <- .ppra_collect_aux_codebook(
+    aux_df = layout$aux %||% tibble::tibble(),
+    sheet_label = tpl_sheet,
+    target_col = paste0(parent, "_recod"),
+    required_codes = unique(code_final[new_code])
+  )
 
   label_final <- rep(NA_character_, nrow(df_work))
-  if (!is.na(labr_tpl)) {
-    z <- trimws(as.character(tmp[[labr_tpl]])); z[z==""] <- NA_character_
-    label_final[!is.na(z)] <- z[!is.na(z)]
-  }
-  need <- is.na(label_final) & !is.na(code_final)
-  if (any(need)) label_final[need] <- lab_by_code(code_final[need])
-  need <- is.na(label_final)
-  if (any(need) && !is.na(lab_tpl)) {
-    w <- trimws(as.character(tmp[[lab_tpl]])); w[w==""] <- NA_character_
-    label_final[need & !is.na(w)] <- w[need & !is.na(w)]
-  }
-  need <- is.na(label_final)
-  if (any(need) && !is.na(olab_tpl)) {
-    q <- trimws(as.character(tmp[[olab_tpl]])); q[q==""] <- NA_character_
-    label_final[need & !is.na(q)] <- q[need & !is.na(q)]
+  if (any(known_code)) label_final[known_code] <- lab_by_code(code_final[known_code])
+  if (length(aux_map)) {
+    idx_new <- match(code_final, names(aux_map))
+    hit_new <- !is.na(idx_new)
+    label_final[hit_new] <- unname(aux_map[idx_new[hit_new]])
   }
 
   out_col <- paste0(parent, "_recod")
@@ -451,7 +587,7 @@ ppra_so_parent <- function(df, parent, path_instrumento, path_plantilla,
     df[[out_col]] <- code_final
     if (any(nz(label_final))) df[[lab_col]] <- label_final
     return(list(
-      df = df, new_col = out_col,
+      df = df, new_col = c(out_col, if (lab_col %in% names(df)) lab_col),
       repeat_sheet = NULL, repeat_df = NULL,
       repeat_cols_to_color = character(0)
     ))
@@ -496,15 +632,8 @@ ppra_so_child <- function(df, parent, path_plantilla, path_familias = NULL, path
   where   <- if (!is.null(path_datos)) locate_var_sheet(parent, path_datos, path_familias) else list(source="main", sheet=NA)
   df_work <- if (identical(where$source, "main")) df else read_sheet_ci(path_datos, where$sheet)
 
-  tpl <- NULL
-  if (file.exists(path_plantilla)) {
-    sheet <- ppra_resolve_template_sheet(path_plantilla, parent)
-    if (!is.na(sheet)) {
-      tpl <- readxl::read_excel(path_plantilla, sheet = sheet)
-      tpl <- .ensure_unique_names(tpl)
-      names(tpl) <- trimws(names(tpl))
-    }
-  }
+  layout <- .ppra_read_template_layout(path_plantilla, parent)
+  tpl <- layout$main %||% NULL
   if (is.null(tpl)) {
     message("[SO-hijo] No hay hoja para '", parent, "'. Omito.")
     return(list(df=df, new_col=character(0),
@@ -518,18 +647,17 @@ ppra_so_child <- function(df, parent, path_plantilla, path_familias = NULL, path
                 repeat_sheet=NULL, repeat_df=NULL, repeat_cols_to_color=character(0)))
   }
 
-  # --- text_col desde familias (si existe) ---
   text_col <- ppra_get_textcol_from_familias(path_familias, parent)
-
-  # --- si NO hay familias: inferir la hija desde plantilla (EVIDENCIA: 1 solo *_recod) ---
-  recod_cols <- names(tpl)[grepl("(?i)_recod$", names(tpl), perl = TRUE)]
-  if (!nz(text_col) && length(recod_cols) == 1) {
-    # la columna recod en plantilla es la "src"
+  recod_cols <- setdiff(names(tpl)[grepl("(?i)_recod$", names(tpl), perl = TRUE)], "control")
+  src <- NA_character_
+  if (nz(text_col)) {
+    src <- recod_cols[match(tolower(paste0(text_col, "_recod")), tolower(recod_cols))]
+  }
+  if (is.na(src) && length(recod_cols) == 1L) {
     src <- recod_cols[1]
-    # y el text_col es su base
+  }
+  if (!nz(text_col) && !is.na(src)) {
     text_col <- sub("(?i)_recod$", "", src, perl = TRUE)
-  } else {
-    src <- resolve_child_recod_col(parent, names(tpl), text_col = text_col)
   }
 
   if (is.na(src)) {
@@ -541,22 +669,38 @@ ppra_so_child <- function(df, parent, path_plantilla, path_familias = NULL, path
   tmp <- .safe_left_join_by(df_work[, c(kd), drop = FALSE], tpl[, c(kd, src), drop = FALSE], kd)
   val <- trimws(as.character(tmp[[src]])); val[val==""] <- NA_character_
 
+  aux_map <- .ppra_collect_aux_codebook(
+    aux_df = layout$aux %||% tibble::tibble(),
+    sheet_label = layout$sheet %||% parent,
+    target_col = src,
+    required_codes = unique(val[!is.na(val)])
+  )
+  label_final <- rep(NA_character_, length(val))
+  if (length(aux_map)) {
+    idx_map <- match(val, names(aux_map))
+    hit_map <- !is.na(idx_map)
+    label_final[hit_map] <- unname(aux_map[idx_map[hit_map]])
+  }
+
   # --- salida: siempre la columna del texto recodificado ---
   out_col <- paste0(text_col, "_recod")
+  lab_col <- paste0(out_col, "_label")
   anchor  <- if (nz(text_col) && (text_col %in% names(df_work))) text_col else parent
 
   if (identical(where$source, "main")) {
     if (!(out_col %in% names(df))) df[[out_col]] <- NA_character_
     i <- which(!is.na(val)); if (length(i)) df[[out_col]][i] <- val[i]
-    df <- insert_right_of(df, anchor, out_col)
-    return(list(df=df, new_col=out_col,
+    if (any(nz(label_final))) df[[lab_col]] <- label_final
+    df <- insert_right_of(df, anchor, c(out_col, lab_col))
+    return(list(df=df, new_col=c(out_col, if (lab_col %in% names(df)) lab_col),
                 repeat_sheet=NULL, repeat_df=NULL, repeat_cols_to_color=character(0)))
   } else {
     if (!(out_col %in% names(df_work))) df_work[[out_col]] <- NA_character_
     j <- which(!is.na(val)); if (length(j)) df_work[[out_col]][j] <- val[j]
-    df_work <- insert_right_of(df_work, anchor, out_col)
+    if (any(nz(label_final))) df_work[[lab_col]] <- label_final
+    df_work <- insert_right_of(df_work, anchor, c(out_col, lab_col))
     return(list(df=df, new_col=character(0),
-                repeat_sheet=where$sheet, repeat_df=df_work, repeat_cols_to_color=out_col))
+                repeat_sheet=where$sheet, repeat_df=df_work, repeat_cols_to_color=c(out_col, lab_col)))
   }
 }
 # ====================== INTEGER ================================================
@@ -565,15 +709,8 @@ ppra_integer_recod <- function(df, parent, path_plantilla,
   where   <- if (!is.null(path_datos)) locate_var_sheet(parent, path_datos, path_familias) else list(source="main", sheet=NA)
   df_work <- if (identical(where$source, "main")) df else read_sheet_ci(path_datos, where$sheet)
 
-  tpl <- NULL
-  if (file.exists(path_plantilla)) {
-    sheet <- ppra_resolve_template_sheet(path_plantilla, parent)
-    if (!is.na(sheet)) {
-      tpl <- readxl::read_excel(path_plantilla, sheet = sheet)
-      tpl <- .ensure_unique_names(tpl)
-      names(tpl) <- trimws(names(tpl))
-    }
-  }
+  layout <- .ppra_read_template_layout(path_plantilla, parent)
+  tpl <- layout$main %||% NULL
 
   if (is.null(tpl)) {
     out_col <- paste0(parent, "_recod")
@@ -635,26 +772,41 @@ ppra_integer_recod <- function(df, parent, path_plantilla,
   }
 
   tmp <- .safe_left_join_by(df_work[, c(kd), drop = FALSE], tpl[, c(kd, src), drop = FALSE], kd)
-  val <- tmp[[src]]
-  val[val==""] <- NA
+  val <- trimws(as.character(tmp[[src]]))
+  val[val==""] <- NA_character_
+
+  aux_map <- .ppra_collect_aux_codebook(
+    aux_df = layout$aux %||% tibble::tibble(),
+    sheet_label = layout$sheet %||% parent,
+    target_col = src,
+    required_codes = unique(val[!is.na(val)])
+  )
+  label_final <- rep(NA_character_, length(val))
+  if (length(aux_map)) {
+    idx_map <- match(val, names(aux_map))
+    hit_map <- !is.na(idx_map)
+    label_final[hit_map] <- unname(aux_map[idx_map[hit_map]])
+  }
 
   out_col <- paste0(parent, "_recod")
+  lab_col <- paste0(out_col, "_label")
 
   if (identical(where$source, "main")) {
     if (!(out_col %in% names(df))) df[[out_col]] <- NA
     i <- which(!is.na(val)); if (length(i)) df[[out_col]][i] <- val[i]
-    df <- insert_right_of(df, parent, out_col)
+    if (any(nz(label_final))) df[[lab_col]] <- label_final
     return(list(
-      df = df, new_col = out_col,
+      df = df, new_col = c(out_col, if (lab_col %in% names(df)) lab_col),
       repeat_sheet = NULL, repeat_df = NULL, repeat_cols_to_color = out_col
     ))
   } else {
     if (!(out_col %in% names(df_work))) df_work[[out_col]] <- NA
     j <- which(!is.na(val)); if (length(j)) df_work[[out_col]][j] <- val[j]
-    df_work <- insert_right_of(df_work, parent, out_col)
+    if (any(nz(label_final))) df_work[[lab_col]] <- label_final
+    df_work <- insert_right_of(df_work, parent, c(out_col, lab_col))
     return(list(
       df = df, new_col = character(0),
-      repeat_sheet = where$sheet, repeat_df = df_work, repeat_cols_to_color = out_col
+      repeat_sheet = where$sheet, repeat_df = df_work, repeat_cols_to_color = c(out_col, lab_col)
     ))
   }
 }

@@ -30,5 +30,12 @@ reforzar labels en DICCIONARIO si aplica.}
 (incluye morado para integer).
 \item Las hojas de variables tienen fila 1 (código/crudo) y fila 2 (labels),
 sin \code{Seleccionadas_recod} en SM.
+\item Las hojas \code{select_multiple} agregan a la derecha un bloque de ejemplo
+para mostrar cómo declarar una opción nueva sin mezclarlo con la tabla
+editable.
+\item Agrega una hoja \code{INSTRUCCIONES} y resalta visualmente las columnas
+editables (\verb{*_recod}) y \code{Control}.
+\item Colorea las pestañas de las hojas por tipo para distinguir rápidamente
+\code{select_multiple}, \code{select_one}, \code{text} e \code{integer}.
 }
 }

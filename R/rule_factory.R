@@ -188,10 +188,10 @@ wrap_numeric_tokens <- function(rhs, survey){
 
 # Envuelve con as.numeric() únicamente las variables que participan en comparaciones numéricas
 wrap_numeric_in_comparisons <- function(rhs, survey){
-  if (!nz1(rhs) || !is.data.frame(survey) || !"name" %in% names(survey)) return(rhs)
+  if (!nz1(rhs) || !is.data.frame(survey) || !"name" %in% names(survey) || !"type" %in% names(survey)) return(rhs)
 
-  # Lista de nombres de variables válidas del formulario
-  vars <- unique(as.character(survey$name))
+  type_base <- tolower(trimws(sub("\\s.*$", "", as.character(survey$type))))
+  vars <- unique(as.character(survey$name[type_base %in% c("integer", "decimal", "calculate")]))
   if (!length(vars)) return(rhs)
 
   # Construimos un OR de variables escapadas para regex
@@ -316,25 +316,8 @@ hoja_de_variable <- function(var, survey, section_map, main_name = "(principal)"
 
 # --- NUEVO: heurística mínima de agregación para cruces principal → hijo ----
 inferir_agreg <- function(var1, varN, hoja_base, hoja_varN) {
-  # Sólo aplica cuando hoja_base es principal y varN está en hoja hija
-  if (!identical(hoja_base, "(principal)") && !identical(hoja_base, as_chr1(hoja_base))) {
-    # Si decides usar el nombre real del main en Hoja base, igual tratamos principal como "principal"
-  }
-  if (!identical(hoja_base, "(principal)")) return(NA_character_)
-  if (is.na(hoja_varN) || is.na(hoja_base) || identical(hoja_varN, hoja_base)) return(NA_character_)
-
-  v1 <- as_chr1(var1); vN <- as_chr1(varN)
-
-  # 1) Si la Variable 1 pide explícitamente un conteo (n_)
-  if (nzchar(v1) && grepl("^n[_]", v1)) return("n")
-
-  # 2) Si Variable 1 sugiere suma (sufijo _sum)
-  if (nzchar(v1) && grepl("_sum$", v1)) return("sum")
-
-  # 3) Heurística simple para flags 0/1: nombres que suelen ser indicadores
-  if (nzchar(vN) && grepl("(?:_r$|^adult0?1$|^below[0-9]+_?r?$|_count$)", vN, perl = TRUE)) return("sum")
-
-  # 4) Ambiguo: que avise el evaluador
+  # La guía de agregación sólo debe venir del plan explícito, no de heurísticas.
+  # Dejamos estas columnas vacías cuando el plan se genera automáticamente.
   NA_character_
 }
 
@@ -443,6 +426,7 @@ relevant_a_r_y_humano <- function(rel_raw, survey, choices, meta){
   human_out <- repl_bin(human_out,"\\bnot\\b", "no")
 
   expr_out <- gsub("(?<![!<>=])=(?!=)", "==", expr_out, perl = TRUE)
+  expr_out <- wrap_numeric_in_comparisons(expr_out, survey)
   expr_out <- gsub("\\s+", " ", trimws(expr_out))
   human_out<- gsub("\\s+", " ", trimws(human_out))
 
@@ -450,6 +434,65 @@ relevant_a_r_y_humano <- function(rel_raw, survey, choices, meta){
   drivers <- if (length(mdrv) && nrow(mdrv[[1]]) > 0) unique(mdrv[[1]][,2]) else character(0)
 
   list(expr_r = as_chr1(expr_out), human = as_chr1(human_out), vars = drivers)
+}
+
+.combine_gate_exprs <- function(parts) {
+  parts <- unique(as.character(parts %||% character(0)))
+  parts <- parts[nzchar(trimws(parts))]
+  if (!length(parts)) return("")
+  if (length(parts) == 1L) return(as_chr1(parts))
+  paste(paste0("(", parts, ")"), collapse = " & ")
+}
+
+.combine_gate_humans <- function(parts) {
+  parts <- unique(as.character(parts %||% character(0)))
+  parts <- parts[nzchar(trimws(parts))]
+  if (!length(parts)) return("")
+  paste(parts, collapse = " y ")
+}
+
+.group_parent_lookup <- function(groups_detail) {
+  if (is.null(groups_detail) || !nrow(groups_detail)) {
+    return(stats::setNames(character(0), character(0)))
+  }
+
+  gd <- groups_detail %>%
+    dplyr::transmute(
+      gname = as.character(gname),
+      begin_row = as.integer(begin_row),
+      end_row = as.integer(end_row),
+      depth = as.integer(depth)
+    )
+
+  parent <- rep(NA_character_, nrow(gd))
+
+  for (i in seq_len(nrow(gd))) {
+    cand <- which(
+      gd$begin_row < gd$begin_row[i] &
+        gd$end_row >= gd$end_row[i] &
+        gd$depth == (gd$depth[i] - 1L)
+    )
+    if (length(cand)) {
+      cand <- cand[which.max(gd$begin_row[cand])]
+      parent[i] <- gd$gname[cand]
+    }
+  }
+
+  stats::setNames(parent, gd$gname)
+}
+
+.group_lineage <- function(group_name, parent_lookup) {
+  cur <- as_chr1(group_name)
+  out <- character(0)
+  seen <- character(0)
+
+  while (nzchar(cur) && !cur %in% seen) {
+    out <- c(cur, out)
+    seen <- c(seen, cur)
+    cur <- as_chr1(parent_lookup[[cur]] %||% "")
+  }
+
+  out
 }
 
 .make_gmap <- function(inst){
@@ -461,7 +504,26 @@ relevant_a_r_y_humano <- function(rel_raw, survey, choices, meta){
   if (!"group_relevant" %in% names(sm)) sm$group_relevant <- ""
   sm$group_name     <- trimws(as.character(sm$group_name))
   sm$group_relevant <- as.character(sm$group_relevant); sm$group_relevant[is.na(sm$group_relevant)] <- ""
-  parsed <- purrr::map(sm$group_relevant, ~ relevant_a_r_y_humano(.x, survey, choices, meta))
+  parsed_direct <- purrr::map(sm$group_relevant, ~ relevant_a_r_y_humano(.x, survey, choices, meta))
+  names(parsed_direct) <- sm$group_name
+  parent_lookup <- .group_parent_lookup(meta$groups_detail %||% tibble())
+
+  parsed <- purrr::map(sm$group_name, function(gname) {
+    lineage <- .group_lineage(gname, parent_lookup)
+    lineage <- lineage[lineage %in% names(parsed_direct)]
+    parts <- parsed_direct[lineage]
+
+    exprs <- vapply(parts, function(p) as_chr1(p$expr_r), "")
+    humans <- vapply(parts, function(p) as_chr1(p$human), "")
+    vars <- unique(unlist(lapply(parts, function(p) p$vars), use.names = FALSE))
+
+    list(
+      expr_r = .combine_gate_exprs(exprs),
+      human = .combine_gate_humans(humans),
+      vars = vars
+    )
+  })
+
   tibble(
     group_name = sm$group_name,
     G_expr     = vapply(parsed, function(p) as_chr1(p$expr_r), ""),
@@ -481,7 +543,7 @@ relevant_a_r_y_humano <- function(rel_raw, survey, choices, meta){
   vars <- if (m2[[1]][1] != -1) regmatches(txt, m2)[[1]] else character(0)
   excl <- c("if","else","and","or","true","false","TRUE","FALSE","today","now","position","indexed","repeat",
             "selected","count","sum","regex","min","max","round","int","join","concat","paste","paste0",
-            "selected_at","count_selected","INDEXED_REPEAT","position_dot","as","character","numeric","Date")
+            "selected_at","count_selected","INDEXED_REPEAT","position_dot","choice_label_map","as","character","numeric","Date","c")
   vars <- vars[!(tolower(vars) %in% tolower(excl))]
   vars[vars %in% as.character(survey_names)]
 }
@@ -504,7 +566,7 @@ build_required_g <- function(survey, section_map, meta, gmap){
            !.data$type_base %in% c("note","begin_group","end_group","acknowledge","calculate"))
   if (!nrow(dat)) return(tibble())
 
-  pmap_dfr(dat, function(...){
+  purrr::pmap_dfr(dat, function(...){
     row <- list(...)
     var  <- row$name
     lab1 <- lab_pregunta(survey, meta, var)
@@ -579,6 +641,11 @@ build_relevant_g <- function(survey, section_map, meta, choices, gmap) {
     var  <- row$name
     lab1 <- lab_pregunta(survey, meta, var)
     tipo <- as_chr1(row$type_base)
+    req_flag <- {
+      s <- tolower(trimws(as.character(row$required %||% "")))
+      s <- ifelse(is.na(s), "", s)
+      s %in% c("true", "true()", "1", "t")
+    }
 
     gname <- as_chr1(row$group_name)
     secc  <- gname
@@ -662,28 +729,39 @@ build_relevant_g <- function(survey, section_map, meta, choices, gmap) {
     proc1 <- paste0(nom1, " <- ( (", cond_r, ") & ", es_vacio(var), " )")
     proc2 <- paste0(nom2, " <- ( !(", cond_r, ") & ", no_vacio(var), " )")
 
+    nombres <- nom2
+    objetivos <- obj2
+    procesos <- proc2
+    if (isTRUE(req_flag)) {
+      nombres <- c(nom1, nombres)
+      objetivos <- c(obj1, objetivos)
+      procesos <- c(proc1, procesos)
+    }
+
+    n_rules <- length(nombres)
+
     tibble::tibble(
       ID = NA_character_,
       Tabla = tabla,
       `Sección` = secc,
       Categoría = "Saltos de preguntas",
       Tipo = tipo,
-      `Nombre de regla` = c(nom1, nom2),
-      Objetivo         = c(obj1, obj2),
-      `Variable 1` = var,
-      `Variable 1 - Etiqueta` = lab1,
-      `Variable 2` = drs$v2,
-      `Variable 2 - Etiqueta` = if (!is.na(drs$v2)) lab_pregunta(survey, meta, drs$v2) else NA_character_,
-      `Variable 3` = drs$v3,
-      `Variable 3 - Etiqueta` = if (!is.na(drs$v3)) lab_pregunta(survey, meta, drs$v3) else NA_character_,
-      `Procesamiento` = c(proc1, proc2),
+      `Nombre de regla` = nombres,
+      Objetivo         = objetivos,
+      `Variable 1` = rep(var, n_rules),
+      `Variable 1 - Etiqueta` = rep(lab1, n_rules),
+      `Variable 2` = rep(drs$v2, n_rules),
+      `Variable 2 - Etiqueta` = rep(if (!is.na(drs$v2)) lab_pregunta(survey, meta, drs$v2) else NA_character_, n_rules),
+      `Variable 3` = rep(drs$v3, n_rules),
+      `Variable 3 - Etiqueta` = rep(if (!is.na(drs$v3)) lab_pregunta(survey, meta, drs$v3) else NA_character_, n_rules),
+      `Procesamiento` = procesos,
       .grp = gname
     )
   })
 }
 
 # ---- Constraint --------------------------------------------------------------
-constraint_a_r <- function(txt, var_name = NULL){
+constraint_a_r <- function(txt, var_name = NULL, survey = NULL){
   if (!nz1(txt %||% "")) return(list(expr = NA_character_))
   x <- as.character(txt)
   x <- gsub("\u201C|\u201D", "\"", x, perl = TRUE)
@@ -698,6 +776,7 @@ constraint_a_r <- function(txt, var_name = NULL){
   # jr:choice-name(...) en constraints no aporta: lo forzamos a as.character(var)
   x <- gsub("jr:choice-name\\s*\\(\\s*([^,]+)\\s*,\\s*'[^']+'\\s*\\)", "as.character(\\1)", x, perl = TRUE)
   x <- gsub("\\$\\{([A-Za-z0-9_]+)\\}", "\\1", x, perl = TRUE)
+  x <- wrap_numeric_in_comparisons(x, survey)
   x <- gsub("\\s+", " ", trimws(x))
   list(expr = as_chr1(x))
 }
@@ -710,7 +789,7 @@ build_constraint_g <- function(survey, section_map, meta, gmap){
            !.data$type_base %in% c("note","begin_group","end_group","acknowledge","calculate"))
   if (!nrow(dat)) return(tibble())
 
-  pmap_dfr(dat, function(...){
+  purrr::pmap_dfr(dat, function(...){
     row <- list(...)
     var  <- row$name
     lab1 <- lab_pregunta(survey, meta, var)
@@ -726,7 +805,7 @@ build_constraint_g <- function(survey, section_map, meta, gmap){
     REL_r <- as_chr1(rel_parsed$expr_r); REL_h <- as_chr1(rel_parsed$human)
     cond_expr <- if (nz1(G_r) && nz1(REL_r)) paste0("(", G_r, ") & (", REL_r, ")") else if (nz1(G_r)) G_r else if (nz1(REL_r)) REL_r else ""
 
-    ca <- constraint_a_r(as_chr1(row$constraint), var_name = var)
+    ca <- constraint_a_r(as_chr1(row$constraint), var_name = var, survey = survey)
     rhs_r <- as_chr1(ca$expr); if (!nz1(rhs_r)) return(tibble())
 
     drivers <- unique(c(.drivers_from_expr(rhs_r, survey$name), .drivers_from_expr(REL_r, survey$name)))
@@ -773,7 +852,10 @@ eq_num_na <- function(a, b){
   ( (is.na(aa) & is.na(bb)) | (aa == bb) )
 }
 eq_chr_na <- function(a, b){
-  aa <- as.character(a); bb <- as.character(b)
+  aa <- ifelse(is.na(as.character(a)), NA_character_, trimws(as.character(a)))
+  bb <- ifelse(is.na(as.character(b)), NA_character_, trimws(as.character(b)))
+  aa[nchar(aa) == 0L] <- NA_character_
+  bb[nchar(bb) == 0L] <- NA_character_
   ( (is.na(aa) & is.na(bb)) | (aa == bb) )
 }
 
@@ -930,8 +1012,104 @@ calc_comparacion_por_tipo <- function(kind, var, rhs_r){
   else             paste0("!eq_num_na(", var, ", ", rhs_r, ")")
 }
 
+.calc_list_name_from_question <- function(var, survey) {
+  if (!nz1(var) || !is.data.frame(survey) || !nrow(survey)) return(NA_character_)
+  i <- match(var, as.character(survey$name))
+  if (is.na(i)) return(NA_character_)
+
+  if ("list_name" %in% names(survey) && nz1(as_chr1(survey$list_name[i] %||% ""))) {
+    return(as_chr1(survey$list_name[i]))
+  }
+
+  type_txt <- as_chr1(survey$type[i] %||% "")
+  if (!grepl("^select_(one|multiple)\\s+", type_txt)) return(NA_character_)
+  trimws(sub("^select_(one|multiple)\\s+", "", type_txt))
+}
+
+.r_string_literal <- function(x) {
+  x <- as.character(x %||% "")
+  x <- gsub("\\\\", "\\\\\\\\", x, perl = TRUE)
+  x <- gsub("\"", "\\\\\"", x, perl = TRUE)
+  paste0("\"", x, "\"")
+}
+
+.r_named_char_vector <- function(keys, vals) {
+  if (!length(keys)) return("c()")
+  pairs <- paste0(.r_string_literal(keys), " = ", .r_string_literal(vals))
+  paste0("c(", paste(pairs, collapse = ", "), ")")
+}
+
+.calc_choice_label_rhs <- function(raw, survey, choices, meta) {
+  txt <- as_chr1(raw %||% "")
+  if (!nz1(txt)) return(list(ok = FALSE))
+
+  m <- regexec(
+    "jr:choice-name\\s*\\(\\s*([^,]+?)\\s*,\\s*(['\"])(.*?)\\2\\s*\\)",
+    txt,
+    perl = TRUE
+  )
+  mm <- regmatches(txt, m)[[1]]
+  if (!length(mm)) return(list(ok = FALSE))
+
+  value_expr <- gsub("\\$\\{([A-Za-z0-9_]+)\\}", "\\1", mm[2], perl = TRUE)
+  value_expr <- trimws(value_expr)
+  value_var <- if (grepl("^[A-Za-z][A-Za-z0-9_]*$", value_expr)) value_expr else NA_character_
+
+  ref_raw <- trimws(mm[4])
+  ref_var <- if (grepl("^\\$\\{[A-Za-z0-9_]+\\}$", ref_raw)) {
+    sub("^\\$\\{([A-Za-z0-9_]+)\\}$", "\\1", ref_raw)
+  } else if (ref_raw %in% as.character(survey$name)) {
+    ref_raw
+  } else {
+    NA_character_
+  }
+
+  list_name <- .calc_list_name_from_question(ref_var, survey)
+  if (!nz1(list_name)) list_name <- .calc_list_name_from_question(value_var, survey)
+
+  if (!nz1(list_name) && is.data.frame(choices) && nrow(choices)) {
+    list_names <- tolower(trimws(as.character(choices$list_name %||% "")))
+    list_norms <- if ("list_norm" %in% names(choices)) tolower(trimws(as.character(choices$list_norm %||% ""))) else rep("", nrow(choices))
+    ref_norm <- tolower(trimws(ref_raw))
+    if (ref_norm %in% c(list_names, list_norms)) list_name <- ref_raw
+  }
+
+  if (!nz1(list_name) || !is.data.frame(choices) || !nrow(choices)) {
+    return(list(ok = FALSE))
+  }
+
+  label_col <- as_chr1(meta$label_col_choices %||% meta$label_col_survey %||% "label")
+  if (!label_col %in% names(choices)) return(list(ok = FALSE))
+
+  list_norm_target <- tolower(trimws(list_name))
+  list_names <- tolower(trimws(as.character(choices$list_name %||% "")))
+  list_norms <- if ("list_norm" %in% names(choices)) tolower(trimws(as.character(choices$list_norm %||% ""))) else rep("", nrow(choices))
+
+  ch_ln <- choices[list_names == list_norm_target | list_norms == list_norm_target, , drop = FALSE]
+  if (!nrow(ch_ln)) return(list(ok = FALSE))
+
+  mapping <- ch_ln %>%
+    dplyr::transmute(
+      code = as.character(.data$name),
+      label = as.character(.data[[label_col]])
+    ) %>%
+    dplyr::filter(!is.na(.data$code) & nzchar(trimws(.data$code))) %>%
+    dplyr::group_by(.data$code) %>%
+    dplyr::slice(1) %>%
+    dplyr::ungroup()
+
+  if (!nrow(mapping)) return(list(ok = FALSE))
+
+  mapping$label[is.na(mapping$label) | !nzchar(trimws(mapping$label))] <- mapping$code[is.na(mapping$label) | !nzchar(trimws(mapping$label))]
+
+  list(
+    ok = TRUE,
+    rhs_r = paste0("choice_label_map(", value_expr, ", ", .r_named_char_vector(mapping$code, mapping$label), ")")
+  )
+}
+
 # --- Builder maestro de calculate ---
-build_calculate_g <- function(survey, section_map, meta, gmap){
+build_calculate_g <- function(survey, section_map, meta, gmap, choices = tibble()){
   dat <- survey %>%
     dplyr::filter(!is.na(.data$name)) %>%
     dplyr::mutate(type_base = tolower(trimws(sub("\\s.*$", "", .data$type)))) %>%
@@ -960,6 +1138,12 @@ build_calculate_g <- function(survey, section_map, meta, gmap){
     det   <- calc_detect_type(as_chr1(row$calculation))
     if (!isTRUE(det$ejecutable)) return(tibble::tibble())
     rhs_r <- as_chr1(det$rhs_r); if (!nz1(rhs_r)) return(tibble::tibble())
+
+    if (identical(det$kind, "choice_label")) {
+      choice_rhs <- .calc_choice_label_rhs(as_chr1(row$calculation), survey, choices, meta)
+      if (!isTRUE(choice_rhs$ok)) return(tibble::tibble())
+      rhs_r <- as_chr1(choice_rhs$rhs_r)
+    }
 
     # (a) Corregir comparaciones numéricas incluso si el cálculo global es textual
     rhs_r <- wrap_numeric_in_comparisons(rhs_r, survey)
@@ -1274,6 +1458,25 @@ normalizar_proc <- function(x){
 # Export principal
 # =============================================================================
 
+.drop_today_rule_for_window <- function(plan, survey, incluir, rango_fecha, campo_fecha) {
+  if (!is.data.frame(plan) || !nrow(plan)) return(plan)
+  if (!isTRUE(incluir$tiempo_ventana) || !nz1(rango_fecha)) return(plan)
+
+  campo_fecha_eff <- as_chr1(campo_fecha)
+  if (!nz1(campo_fecha_eff)) {
+    cand <- survey %>% filter(type_base %in% c("date", "datetime")) %>% slice(1)
+    campo_fecha_eff <- as_chr1(if (nrow(cand)) cand$name else "")
+  }
+  if (!nz1(campo_fecha_eff)) return(plan)
+
+  regla_form_fecha <- .norm_rule_name(paste0("cons_", sanitize_id(campo_fecha_eff), "_form"))
+  mask <- plan$`Variable 1` == campo_fecha_eff &
+    plan$`Nombre de regla` == regla_form_fecha &
+    grepl("Sys\\.Date\\s*\\(", plan$Procesamiento, perl = TRUE)
+
+  plan[!replace(mask, is.na(mask), FALSE), , drop = FALSE]
+}
+
 #' Generar plan de limpieza (G-aware) desde un XLSForm ya leído
 #' @param x lista con $survey, $choices y $meta (de tu lector)
 #' @param incluir lista de banderas lógicas para incluir bloques
@@ -1306,7 +1509,7 @@ generar_plan_limpieza <- function(
     mutate(
       across(any_of(c("type","name","relevant","constraint","calculation","group_name","required","list_name","choice_filter")),
              ~{ if (is.function(.x)) NA_character_ else suppressWarnings(as.character(.x)) }),
-      .qord     = row_number(),
+      .qord     = dplyr::row_number(),
       type_base = tolower(trimws(sub("\\s.*$", "", .data$type))),
       required  = {
         s <- tolower(trimws(as.character(.data$required)))
@@ -1314,34 +1517,16 @@ generar_plan_limpieza <- function(
         s <- iconv(s, from = "", to = "ASCII//TRANSLIT")
         s %in% c("true()", "true", "yes", "si", "s")
       },
-      relevant = gsub("\\s+", " ", trimws(coalesce(.data$relevant, "")))
+      relevant = gsub("\\s+", " ", trimws(dplyr::coalesce(.data$relevant, "")))
     )
 
-  dbg_before <- survey %>%
-    dplyr::filter(.data$name %in% c("ExpOpinion","Satisfactionqualication")) %>%
-    dplyr::select(name, q_order, .qord, type, group_name)
-
   survey <- .recompute_group_name_from_meta(survey, x$meta$groups_detail)
-
-  dbg_after <- survey %>%
-    dplyr::filter(.data$name %in% c("ExpOpinion","Satisfactionqualication")) %>%
-    dplyr::select(name, q_order, .qord, type, group_name) %>%
-    dplyr::rename(group_name_after = group_name)
-
-  dbg_join <- dbg_before %>%
-    dplyr::rename(group_name_before = group_name) %>%
-    dplyr::left_join(dbg_after, by = c("name","q_order",".qord","type"))
-
-  if (any(dbg_join$group_name_before != dbg_join$group_name_after, na.rm = TRUE)) {
-    message("[DEBUG] group_name cambió en variables críticas:")
-    print(dbg_join, n = Inf)
-  }
 
   section_map <- (x$meta$section_map %||% tibble(group_name=character(), group_label=character(), prefix=character(), is_repeat=logical())) %>%
     mutate(group_name = as.character(group_name),
            prefix     = as.character(prefix %||% "GEN_"),
            is_repeat  = as.logical(is_repeat),
-           .gord      = row_number())
+           .gord      = dplyr::row_number())
 
   inst2 <- list(survey = survey, choices = x$choices %||% tibble(), meta = x$meta %||% list())
   gmap  <- tryCatch(.make_gmap(inst2), error = function(e) tibble())
@@ -1350,7 +1535,7 @@ generar_plan_limpieza <- function(
   if (isTRUE(incluir$required))       bloques$required      <- build_required_g(survey, section_map, x$meta, gmap)
   if (isTRUE(incluir$relevant))       bloques$relevant      <- build_relevant_g(survey, section_map, x$meta, x$choices %||% tibble(), gmap)
   if (isTRUE(incluir$constraint))     bloques$constraint    <- build_constraint_g(survey, section_map, x$meta, gmap)
-  if (isTRUE(incluir$calculate))      bloques$calculate     <- build_calculate_g(survey, section_map, x$meta, gmap)
+  if (isTRUE(incluir$calculate))      bloques$calculate     <- build_calculate_g(survey, section_map, x$meta, gmap, x$choices %||% tibble())
   if (isTRUE(incluir$choice_filter))  bloques$choicefilter  <- build_choice_filter_g(inst2, gmap)
   if (isTRUE(incluir$repeat_min1))    bloques$rep_min1      <- build_repeat_min1(inst2)
   if (isTRUE(incluir$tiempo_ventana)) bloques$tiempo        <- build_time_window(inst2, rango_fecha = rango_fecha, campo_fecha = campo_fecha)
@@ -1366,6 +1551,8 @@ generar_plan_limpieza <- function(
       `Procesamiento`=character()
     ))
   }
+
+  plan <- .drop_today_rule_for_window(plan, survey, incluir, rango_fecha, campo_fecha)
 
 
   # === NUEVO: enriquecimiento con hojas por variable y agregación ============
@@ -1430,7 +1617,7 @@ generar_plan_limpieza <- function(
             factor(`Sección`, levels = section_map$group_name),
             `Categoría`, `Nombre de regla`) %>%
     group_by(Tabla, `Sección`) %>%
-    mutate(.row = row_number(),
+    mutate(.row = dplyr::row_number(),
            .pref = .pref_de(`Sección`, section_map)) %>%
     ungroup() %>%
     mutate(ID = paste0(.pref, sprintf("%03d", .row))) %>%
@@ -1455,55 +1642,7 @@ generar_plan_limpieza <- function(
     plan$Procesamiento, perl = TRUE
   )
 
-  # --- FILTRO FINAL: omitir calculate principal→hijo sin agregación explícita ---
-  if (nrow(plan)) {
-    main_name <- "(principal)"
-
-    # Mapa: variable -> group_name -> tabla (para detectar si es hijo)
-    var2grp <- setNames(as.character(survey$group_name %||% NA_character_), survey$name)
-    hoja_de_var <- function(v){
-      if (is.na(v) || !nzchar(v)) return(NA_character_)
-      gv <- as.character(var2grp[[v]] %||% NA_character_)
-      tabla_destino_de(gv, section_map, main_name = main_name)
-    }
-
-    # Extrae drivers (posibles Var2/Var3) desde el RHS
-    drivers_from_proc <- function(txt){
-      .drivers_from_expr(as.character(txt %||% ""), survey$name)
-    }
-
-    # Heurística de agregación inequívoca en el RHS
-    tiene_agregacion <- function(rhs){
-      r <- as.character(rhs %||% "")
-      grepl("\\b(sum|any|all|min|max)\\s*\\(", r) ||
-        grepl("\\bpaste\\s*\\([^)]*collapse\\s*=", r, perl = TRUE) ||
-        grepl("\\bn_[A-Za-z0-9_]+\\b", r)
-    }
-
-    # ¿Es una regla ambigua?
-    es_ambigua <- function(row){
-      if (!identical(row[["Categoría"]], "Valores calculados")) return(FALSE)
-      if (!identical(row[["Tabla"]], main_name)) return(FALSE)
-
-      rhs <- row[["Procesamiento"]]
-      if (tiene_agregacion(rhs)) return(FALSE)
-
-      # Detectar Var2/Var3 (o cualquier driver) y ver si alguno está en hoja hija
-      drs <- unique(drivers_from_proc(rhs))
-      if (!length(drs)) return(FALSE)
-
-      hojas <- vapply(drs, hoja_de_var, character(1))
-      any(!is.na(hojas) & hojas != main_name)
-    }
-
-    keep <- !apply(plan, 1, es_ambigua)
-    n_drop <- sum(!keep)
-
-    if (n_drop > 0) {
-      message(sprintf("[rule_factory] Omitidas %d reglas calculate principal→hijo sin agregación explícita.", n_drop))
-      plan <- plan[keep, , drop = FALSE]
-    }
-  }
+  plan <- .drop_today_rule_for_window(plan, survey, incluir, rango_fecha, campo_fecha)
 
   # --- SALIDA: exactas columnas solicitadas ----------------------------------
   plan %>%
