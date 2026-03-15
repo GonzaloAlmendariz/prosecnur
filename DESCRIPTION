@@ -33,6 +33,7 @@ Imports:
     DT, 
     ggplot2,
     haven, 
+    hms,
     cowplot
 Suggests:
     testthat (>= 3.0.0),

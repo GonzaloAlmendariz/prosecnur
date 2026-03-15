@@ -36,7 +36,8 @@ archivo \code{.sps}.
 A partir de una base de reporte (típicamente devuelta por
 \code{\link[=reporte_data]{reporte_data()}}), la función identifica las variables que tienen el
 atributo \code{measure} y genera un archivo \code{.sps} con instrucciones
-\verb{VARIABLE LEVEL} para SPSS.
+\verb{VARIABLE LEVEL} para SPSS. Esta es la misma lógica que
+\code{\link[=reporte_spss]{reporte_spss()}} puede invocar opcionalmente mediante \code{path_sps}.
 }
 \details{
 En particular:

@@ -93,7 +93,9 @@ guess_spss_measure <- function(x,
 #' La función no escribe ningún archivo ni crea objetos `labelled_spss`. La
 #' conversión final a objetos SPSS (por ejemplo con [haven::labelled_spss()])
 #' debe realizarse en una etapa posterior (por ejemplo, en una función
-#' `reporte_spss()`).
+#' `reporte_spss()`). Si además se requiere un archivo `.sps` complementario
+#' para aplicar niveles de medida o formatos en SPSS, ese paso puede resolverse
+#' con `reporte_spss(path_sps = ...)` o con [generar_spss_niveles()].
 #'
 #' @param data Un `data.frame` o `tibble` que contenga la base de datos ya
 #'   adaptada (nombres finales de variables) tras las fases de consistencia y

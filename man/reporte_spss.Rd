@@ -2,9 +2,17 @@
 % Please edit documentation in R/generalidad_export_spss.R
 \name{reporte_spss}
 \alias{reporte_spss}
-\title{Exportar una base de reporte a formato SPSS (.sav)}
+\title{Exportar una base de reporte a formato SPSS (.sav) y sintaxis complementaria}
 \usage{
-reporte_spss(data, path_sav, compress = TRUE, ...)
+reporte_spss(
+  data,
+  path_sav,
+  compress = TRUE,
+  path_sps = NULL,
+  decimales_2 = NULL,
+  verbose_sps = TRUE,
+  ...
+)
 }
 \arguments{
 \item{data}{Un \code{data.frame} o \code{tibble}, preferentemente el objeto devuelto
@@ -15,19 +23,35 @@ por ejemplo \code{"estudio_final.sav"}.}
 
 \item{compress}{Lógico; se pasa a \code{\link[haven:read_spss]{haven::write_sav()}}. Por defecto \code{TRUE}.}
 
+\item{path_sps}{Ruta opcional del archivo \code{.sps} complementario a generar.
+Si es \code{NULL} (por defecto), no se genera sintaxis adicional.}
+
+\item{decimales_2}{Vector opcional con nombres de variables que deben quedar
+con formato \code{F8.2} en el \code{.sps}. Solo se usa si \code{path_sps} no es \code{NULL}.}
+
+\item{verbose_sps}{Lógico; si \code{TRUE} imprime un mensaje al generar el
+archivo \code{.sps}. Solo se usa si \code{path_sps} no es \code{NULL}.}
+
 \item{...}{Argumentos adicionales que se pasan directamente a
 \code{\link[haven:read_spss]{haven::write_sav()}}.}
 }
 \value{
 Invisiblemente, el \code{data.frame} ya transformado (con clases
 \code{labelled_spss}, tipos de fecha/hora ajustados, etc.). Como efecto
-secundario, se escribe el archivo \code{.sav} en \code{path_sav} y se imprime en
-consola un breve resumen sobre la aplicación de labels.
+secundario, se escribe el archivo \code{.sav} en \code{path_sav}; si corresponde,
+también el archivo \code{.sps} en \code{path_sps}; y se imprime en consola un breve
+resumen sobre la aplicación de labels.
 }
 \description{
 \code{reporte_spss()} toma una base ya adaptada para reporte (típicamente el
 resultado de \code{\link[=reporte_data]{reporte_data()}}) y la convierte a un objeto compatible con
-SPSS, aplicando:
+SPSS. El entregable principal es un archivo \code{.sav} y, opcionalmente, puede
+generar también un archivo \code{.sps} complementario cuando se necesite aplicar
+en SPSS niveles de medida o formatos de decimales que no siempre quedan
+resueltos solo con el \code{.sav}.
+}
+\details{
+En particular, la función aplica:
 \itemize{
 \item Conversión de variables con etiquetas de valor (\code{attr(, "labels")})
 a objetos \code{haven::labelled_spss()}, usando códigos numéricos y
@@ -37,9 +61,10 @@ manteniendo los \code{label} de variable y el nivel de medición
 metadatos del instrumento (\code{vars_fecha}, \code{vars_hora}, \code{vars_datetime}).
 \item Renombrado de \verb{_uuid} a \code{uuid} si fuese necesario.
 \item Escritura a disco en formato \code{.sav} mediante \code{\link[haven:read_spss]{haven::write_sav()}}.
+\item Generación opcional de un archivo \code{.sps} mediante
+\code{\link[=generar_spss_niveles]{generar_spss_niveles()}} para aplicar \verb{VARIABLE LEVEL} y \code{FORMATS}.
 }
-}
-\details{
+
 La lógica asume que la base de entrada ya pasó por las etapas de:
 \enumerate{
 \item Evaluación de consistencia.
@@ -53,13 +78,21 @@ Además, la función realiza una comprobación básica de la aplicación de
 etiquetas: cuenta cuántas variables con \code{labels} fueron convertidas a
 \code{labelled_spss}, e identifica posibles problemas al convertir el contenido
 a numérico (por ejemplo, si todo quedó en \code{NA}).
+
+Cuando se proporciona \code{path_sps}, la sintaxis generada se basa en el
+atributo \code{measure} y en \code{decimales_2}, de modo que el flujo completo de
+entrega a SPSS puede resolverse desde una sola llamada.
 }
 \examples{
 \dontrun{
   rp_inst <- reporte_instrumento("instrumento.xlsx", ...)
   rp_data <- reporte_data(data_cruda_adaptada, rp_inst)
 
-  reporte_spss(rp_data, path_sav = "estudio_2025.sav")
+  reporte_spss(
+    rp_data,
+    path_sav = "estudio_2025.sav",
+    path_sps = "estudio_2025_niveles.sps"
+  )
 }
 
 }

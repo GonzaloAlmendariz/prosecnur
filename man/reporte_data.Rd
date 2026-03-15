@@ -92,5 +92,7 @@ solo queden las dummies.
 La función no escribe ningún archivo ni crea objetos \code{labelled_spss}. La
 conversión final a objetos SPSS (por ejemplo con \code{\link[haven:labelled_spss]{haven::labelled_spss()}})
 debe realizarse en una etapa posterior (por ejemplo, en una función
-\code{reporte_spss()}).
+\code{reporte_spss()}). Si además se requiere un archivo \code{.sps} complementario
+para aplicar niveles de medida o formatos en SPSS, ese paso puede resolverse
+con \code{reporte_spss(path_sps = ...)} o con \code{\link[=generar_spss_niveles]{generar_spss_niveles()}}.
 }

@@ -1,8 +1,13 @@
-#' Exportar una base de reporte a formato SPSS (.sav)
+#' Exportar una base de reporte a formato SPSS (.sav) y sintaxis complementaria
 #'
 #' `reporte_spss()` toma una base ya adaptada para reporte (típicamente el
 #' resultado de [reporte_data()]) y la convierte a un objeto compatible con
-#' SPSS, aplicando:
+#' SPSS. El entregable principal es un archivo `.sav` y, opcionalmente, puede
+#' generar también un archivo `.sps` complementario cuando se necesite aplicar
+#' en SPSS niveles de medida o formatos de decimales que no siempre quedan
+#' resueltos solo con el `.sav`.
+#'
+#' En particular, la función aplica:
 #' \itemize{
 #'   \item Conversión de variables con etiquetas de valor (`attr(, "labels")`)
 #'         a objetos `haven::labelled_spss()`, usando códigos numéricos y
@@ -12,6 +17,8 @@
 #'         metadatos del instrumento (`vars_fecha`, `vars_hora`, `vars_datetime`).
 #'   \item Renombrado de `_uuid` a `uuid` si fuese necesario.
 #'   \item Escritura a disco en formato `.sav` mediante [haven::write_sav()].
+#'   \item Generación opcional de un archivo `.sps` mediante
+#'         [generar_spss_niveles()] para aplicar `VARIABLE LEVEL` y `FORMATS`.
 #' }
 #'
 #' La lógica asume que la base de entrada ya pasó por las etapas de:
@@ -28,31 +35,49 @@
 #' `labelled_spss`, e identifica posibles problemas al convertir el contenido
 #' a numérico (por ejemplo, si todo quedó en `NA`).
 #'
+#' Cuando se proporciona `path_sps`, la sintaxis generada se basa en el
+#' atributo `measure` y en `decimales_2`, de modo que el flujo completo de
+#' entrega a SPSS puede resolverse desde una sola llamada.
+#'
 #' @param data Un `data.frame` o `tibble`, preferentemente el objeto devuelto
 #'   por [reporte_data()] (clase `"prosecnur_reporte_tbl"`).
 #' @param path_sav Ruta del archivo `.sav` a generar. Debe incluir la extensión,
 #'   por ejemplo `"estudio_final.sav"`.
 #' @param compress Lógico; se pasa a [haven::write_sav()]. Por defecto `TRUE`.
+#' @param path_sps Ruta opcional del archivo `.sps` complementario a generar.
+#'   Si es `NULL` (por defecto), no se genera sintaxis adicional.
+#' @param decimales_2 Vector opcional con nombres de variables que deben quedar
+#'   con formato `F8.2` en el `.sps`. Solo se usa si `path_sps` no es `NULL`.
+#' @param verbose_sps Lógico; si `TRUE` imprime un mensaje al generar el
+#'   archivo `.sps`. Solo se usa si `path_sps` no es `NULL`.
 #' @param ... Argumentos adicionales que se pasan directamente a
 #'   [haven::write_sav()].
 #'
 #' @return Invisiblemente, el `data.frame` ya transformado (con clases
 #'   `labelled_spss`, tipos de fecha/hora ajustados, etc.). Como efecto
-#'   secundario, se escribe el archivo `.sav` en `path_sav` y se imprime en
-#'   consola un breve resumen sobre la aplicación de labels.
+#'   secundario, se escribe el archivo `.sav` en `path_sav`; si corresponde,
+#'   también el archivo `.sps` en `path_sps`; y se imprime en consola un breve
+#'   resumen sobre la aplicación de labels.
 #'
 #' @examples
 #' \dontrun{
 #'   rp_inst <- reporte_instrumento("instrumento.xlsx", ...)
 #'   rp_data <- reporte_data(data_cruda_adaptada, rp_inst)
 #'
-#'   reporte_spss(rp_data, path_sav = "estudio_2025.sav")
+#'   reporte_spss(
+#'     rp_data,
+#'     path_sav = "estudio_2025.sav",
+#'     path_sps = "estudio_2025_niveles.sps"
+#'   )
 #' }
 #'
 #' @export
 reporte_spss <- function(data,
                          path_sav,
                          compress = TRUE,
+                         path_sps = NULL,
+                         decimales_2 = NULL,
+                         verbose_sps = TRUE,
                          ...) {
 
   if (!requireNamespace("haven", quietly = TRUE)) {
@@ -67,6 +92,9 @@ reporte_spss <- function(data,
   if (missing(path_sav) || !nzchar(path_sav)) {
     stop("Debe especificarse `path_sav` (ruta al archivo .sav a generar).",
          call. = FALSE)
+  }
+  if (!is.null(path_sps) && !nzchar(path_sps)) {
+    stop("Si se usa `path_sps`, debe ser una ruta no vacia.", call. = FALSE)
   }
 
   if (!is.data.frame(data)) {
@@ -218,6 +246,15 @@ reporte_spss <- function(data,
 
   message("Archivo SPSS guardado en: ", normalizePath(path_sav, winslash = "/"))
 
+  if (!is.null(path_sps)) {
+    generar_spss_niveles(
+      data = df,
+      path_sps = path_sps,
+      verbose = verbose_sps,
+      decimales_2 = decimales_2
+    )
+  }
+
   # ---------------------------------------------------------------------------
   # 6) Resumen sobre la aplicación de labels
   # ---------------------------------------------------------------------------
@@ -259,7 +296,8 @@ reporte_spss <- function(data,
 #' A partir de una base de reporte (típicamente devuelta por
 #' [reporte_data()]), la función identifica las variables que tienen el
 #' atributo `measure` y genera un archivo `.sps` con instrucciones
-#' `VARIABLE LEVEL` para SPSS.
+#' `VARIABLE LEVEL` para SPSS. Esta es la misma lógica que
+#' [reporte_spss()] puede invocar opcionalmente mediante `path_sps`.
 #'
 #' En particular:
 #'
