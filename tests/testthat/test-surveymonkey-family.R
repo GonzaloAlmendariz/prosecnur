@@ -1048,3 +1048,66 @@ test_that("ppra_adaptar_instrumento reutiliza listas iguales para integer", {
   expect_identical(type_score, "select_one lst_age_recod")
   expect_identical(unique(choices_out$list_name), "lst_age_recod")
 })
+
+test_that("reporte_cruces excluye categorias tambien en la variable de cruce", {
+  path_cross <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(path_cross), add = TRUE)
+
+  dat <- data.frame(
+    v_cat = c("1", "1", "2", "2"),
+    v_num = c(10, 20, 30, 40),
+    estr = c("1", "99", "1", "99"),
+    stringsAsFactors = FALSE
+  )
+
+  attr(dat$v_cat, "label") <- "Variable categorica"
+  attr(dat$v_cat, "labels") <- stats::setNames(c("Si", "No"), c("1", "2"))
+  attr(dat$v_num, "label") <- "Variable numerica"
+  attr(dat$estr, "label") <- "Estrato"
+  attr(dat$estr, "labels") <- stats::setNames(
+    c("Grupo A", "Valor perdido por el sistema"),
+    c("1", "99")
+  )
+
+  inst <- list(
+    survey = data.frame(
+      name = c("v_cat", "v_num", "estr"),
+      label = c("Variable categorica", "Variable numerica", "Estrato"),
+      type = c("select_one si_no", "integer", "select_one estrato"),
+      stringsAsFactors = FALSE
+    ),
+    orders_list = list(
+      v_cat = list(
+        names = c("1", "2"),
+        labels = c("Si", "No"),
+        label = "Variable categorica"
+      ),
+      estr = list(
+        names = c("1", "99"),
+        labels = c("Grupo A", "Valor perdido por el sistema"),
+        label = "Estrato"
+      )
+    )
+  )
+
+  expect_no_error(
+    prosecnur::reporte_cruces(
+      data = dat,
+      instrumento = inst,
+      SECCIONES = list(Principal = c("v_cat", "v_num")),
+      cruces = c("estr"),
+      path_xlsx = path_cross,
+      opciones_excluir = c("Valor perdido por el sistema"),
+      numericas = c("v_num"),
+      show_sig = FALSE
+    )
+  )
+
+  expect_true(file.exists(path_cross))
+
+  wb_vals <- openxlsx::read.xlsx(path_cross, sheet = 1, colNames = FALSE)
+  wb_chr <- as.character(unlist(wb_vals, use.names = FALSE))
+  wb_chr <- wb_chr[!is.na(wb_chr)]
+
+  expect_false(any(wb_chr == "Valor perdido por el sistema"))
+})

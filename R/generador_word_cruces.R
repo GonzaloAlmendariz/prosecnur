@@ -252,7 +252,7 @@ reporte_word_cruces <- function(
       data             = data,
       survey           = survey,
       orders_list      = orders_list,
-      opciones_excluir = NULL
+      opciones_excluir = opciones_excluir
     )
     estr_codes  <- cats_est$codes
     estr_labels <- cats_est$labels

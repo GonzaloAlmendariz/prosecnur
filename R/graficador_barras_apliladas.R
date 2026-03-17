@@ -252,8 +252,14 @@
 #' @param colores_grupos Vector de colores opcional (idealmente nombrado por etiqueta final).
 #' @param mostrar_valores Si `TRUE`, dibuja etiquetas internas de porcentaje.
 #' @param decimales Decimales para etiquetas de porcentaje internas.
-#' @param umbral_etiqueta Umbral mínimo de proporción para mostrar etiqueta “grande”.
-#' @param umbral_etiqueta_peq Umbral mínimo de proporción para mostrar etiqueta “pequeña” (si es `NULL`, usa `umbral_etiqueta`).
+#' @param umbral_etiqueta Umbral mínimo de proporción para usar una etiqueta de tamano normal.
+#'   Se mantiene por compatibilidad y actúa como alias de `umbral_etiqueta_normal`.
+#' @param umbral_etiqueta_peq Umbral mínimo de proporción para mostrar una etiqueta pequena.
+#'   Se mantiene por compatibilidad y actúa como alias de `umbral_mostrar_etiqueta`.
+#' @param umbral_mostrar_etiqueta Umbral mínimo de proporción para mostrar cualquier etiqueta interna.
+#'   Los valores por debajo de este umbral no se etiquetan.
+#' @param umbral_etiqueta_normal Umbral mínimo de proporción para usar una etiqueta de tamano normal.
+#'   Los valores entre `umbral_mostrar_etiqueta` y este umbral se muestran como etiquetas pequenas.
 #'
 #' @param mostrar_barra_extra Si `TRUE`, dibuja una columna extra a la derecha (por defecto, basada en `var_n`).
 #' @param barra_extra_preset Tipo de barra/indicador extra: `"ninguno"`, `"totales"`, `"top2box"`, `"top3box"` o `"bottom2box"`.
@@ -356,6 +362,8 @@ graficar_barras_apiladas <- function(
     decimales             = 0,
     umbral_etiqueta       = 0.001,
     umbral_etiqueta_peq   = NULL,
+    umbral_mostrar_etiqueta = NULL,
+    umbral_etiqueta_normal  = NULL,
     mostrar_barra_extra   = TRUE,
     barra_extra_preset    = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
     prefijo_barra_extra   = NULL,
@@ -476,6 +484,17 @@ graficar_barras_apiladas <- function(
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
   hjust_from_pos <- function(x) switch(x, "izquierda" = 0, "centro" = 0.5, "derecha" = 1, 0.5)
+  normalizar_umbral_prop <- function(x, nombre, default = NULL) {
+    if (is.null(x)) return(default)
+    x_num <- suppressWarnings(as.numeric(x)[1])
+    if (!is.finite(x_num) || is.na(x_num)) {
+      stop(sprintf("`%s` debe ser numerico finito.", nombre), call. = FALSE)
+    }
+    if (x_num < 0 || x_num > 1) {
+      stop(sprintf("`%s` debe estar en escala 0-1.", nombre), call. = FALSE)
+    }
+    x_num
+  }
 
   # deps
   if (!requireNamespace("ggplot2", quietly = TRUE)) stop("Requiere ggplot2.", call. = FALSE)
@@ -500,7 +519,41 @@ graficar_barras_apiladas <- function(
   if (!is.finite(desplazamiento_max_etiquetas_peq) || is.na(desplazamiento_max_etiquetas_peq) || desplazamiento_max_etiquetas_peq < 0) {
     desplazamiento_max_etiquetas_peq <- 0.05
   }
-  if (is.null(umbral_etiqueta_peq)) umbral_etiqueta_peq <- umbral_etiqueta
+  umbral_etiqueta_legacy <- normalizar_umbral_prop(
+    if (missing(umbral_etiqueta)) NULL else umbral_etiqueta,
+    "umbral_etiqueta",
+    default = NULL
+  )
+  umbral_etiqueta_peq_legacy <- normalizar_umbral_prop(
+    if (missing(umbral_etiqueta_peq)) NULL else umbral_etiqueta_peq,
+    "umbral_etiqueta_peq",
+    default = NULL
+  )
+  umbral_mostrar_etiqueta <- normalizar_umbral_prop(
+    if (missing(umbral_mostrar_etiqueta)) NULL else umbral_mostrar_etiqueta,
+    "umbral_mostrar_etiqueta",
+    default = NULL
+  )
+  umbral_etiqueta_normal <- normalizar_umbral_prop(
+    if (missing(umbral_etiqueta_normal)) NULL else umbral_etiqueta_normal,
+    "umbral_etiqueta_normal",
+    default = NULL
+  )
+
+  usa_umbrales_explicitos <- !is.null(umbral_mostrar_etiqueta) || !is.null(umbral_etiqueta_normal)
+  if (usa_umbrales_explicitos) {
+    umbral_mostrar_etiqueta_eff <- umbral_mostrar_etiqueta %||% umbral_etiqueta_peq_legacy %||% 0.001
+    umbral_etiqueta_normal_eff  <- umbral_etiqueta_normal %||% umbral_etiqueta_legacy %||% umbral_mostrar_etiqueta_eff
+  } else {
+    umbral_etiqueta_normal_eff  <- umbral_etiqueta_legacy %||% 0.001
+    umbral_mostrar_etiqueta_eff <- umbral_etiqueta_peq_legacy %||% umbral_etiqueta_normal_eff
+  }
+  if (umbral_mostrar_etiqueta_eff > umbral_etiqueta_normal_eff) {
+    stop(
+      "`umbral_mostrar_etiqueta`/`umbral_etiqueta_peq` no puede ser mayor que `umbral_etiqueta_normal`/`umbral_etiqueta`.",
+      call. = FALSE
+    )
+  }
 
   hjust_titulo  <- hjust_from_pos(pos_titulo)
   hjust_caption <- hjust_from_pos(pos_nota_pie)
@@ -775,9 +828,9 @@ graficar_barras_apiladas <- function(
       dplyr::ungroup() |>
       dplyr::mutate(
         .tamano_etq = dplyr::case_when(
-          .valor_plot >= umbral_etiqueta     ~ "grande",
-          .valor_plot >= umbral_etiqueta_peq ~ "peq",
-          TRUE                               ~ "ninguna"
+          .valor_plot >= umbral_etiqueta_normal_eff  ~ "grande",
+          .valor_plot >= umbral_mostrar_etiqueta_eff ~ "peq",
+          TRUE                                        ~ "ninguna"
         ),
         .size_label = dplyr::if_else(.tamano_etq == "grande", size_texto_barras, size_texto_barras_peq),
         x_label = x_center

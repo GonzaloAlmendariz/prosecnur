@@ -17,6 +17,8 @@ graficar_barras_apiladas(
   decimales = 0,
   umbral_etiqueta = 0.001,
   umbral_etiqueta_peq = NULL,
+  umbral_mostrar_etiqueta = NULL,
+  umbral_etiqueta_normal = NULL,
   mostrar_barra_extra = TRUE,
   barra_extra_preset = c("ninguno", "totales", "top2box", "top3box", "bottom2box"),
   prefijo_barra_extra = NULL,
@@ -123,9 +125,17 @@ Sus \code{names()} deben coincidir con \code{cols_porcentaje}.}
 
 \item{decimales}{Decimales para etiquetas de porcentaje internas.}
 
-\item{umbral_etiqueta}{Umbral mínimo de proporción para mostrar etiqueta “grande”.}
+\item{umbral_etiqueta}{Umbral mínimo de proporción para usar una etiqueta de tamano normal.
+Se mantiene por compatibilidad y actúa como alias de \code{umbral_etiqueta_normal}.}
 
-\item{umbral_etiqueta_peq}{Umbral mínimo de proporción para mostrar etiqueta “pequeña” (si es \code{NULL}, usa \code{umbral_etiqueta}).}
+\item{umbral_etiqueta_peq}{Umbral mínimo de proporción para mostrar una etiqueta pequena.
+Se mantiene por compatibilidad y actúa como alias de \code{umbral_mostrar_etiqueta}.}
+
+\item{umbral_mostrar_etiqueta}{Umbral mínimo de proporción para mostrar cualquier etiqueta interna.
+Los valores por debajo de este umbral no se etiquetan.}
+
+\item{umbral_etiqueta_normal}{Umbral mínimo de proporción para usar una etiqueta de tamano normal.
+Los valores entre \code{umbral_mostrar_etiqueta} y este umbral se muestran como etiquetas pequenas.}
 
 \item{mostrar_barra_extra}{Si \code{TRUE}, dibuja una columna extra a la derecha (por defecto, basada en \code{var_n}).}
 

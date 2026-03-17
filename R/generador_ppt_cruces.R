@@ -160,8 +160,9 @@
 #'   estratos en barras agrupadas (se mantiene como respaldo si sus nombres
 #'   coinciden con las etiquetas de serie).
 #'
-#' @param opciones_excluir Vector de labels de opciones a excluir de la
-#'   variable de interés (por ejemplo, categorías de no respuesta).
+#' @param opciones_excluir Vector de labels de opciones a excluir tanto de la
+#'   variable de interés como del estrato/cruce
+#'   (por ejemplo, categorías de no respuesta).
 #'
 #' @param template_pptx Ruta a una plantilla PPTX (por ejemplo, en formato 16:9).
 #'   Si es \code{NULL}, se intentará usar una plantilla interna del paquete
@@ -372,7 +373,7 @@ reporte_ppt_cruces <- function(
       data             = data,
       survey           = survey,
       orders_list      = orders_list,
-      opciones_excluir = NULL
+      opciones_excluir = opciones_excluir
     )
     estr_codes  <- cats_est$codes
     estr_labels <- cats_est$labels

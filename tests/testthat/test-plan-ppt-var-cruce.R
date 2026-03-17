@@ -825,6 +825,89 @@ test_that("graficar_barras_apiladas permite desactivar repulsion de etiquetas pe
   expect_equal(peq_layers[[1]]$data$x_label, peq_layers[[1]]$data$x_center)
 })
 
+test_that("graficar_barras_apiladas admite umbrales explicitos de mostrar y tamano normal", {
+  df <- data.frame(
+    categoria = "Item",
+    N = 100,
+    pct_1 = 0.009,
+    pct_2 = 0.02,
+    pct_3 = 0.06,
+    pct_4 = 0.911,
+    stringsAsFactors = FALSE
+  )
+
+  p <- prosecnur::graficar_barras_apiladas(
+    data = df,
+    var_categoria = "categoria",
+    var_n = "N",
+    cols_porcentaje = c("pct_1", "pct_2", "pct_3", "pct_4"),
+    etiquetas_grupos = c(
+      pct_1 = "0.9",
+      pct_2 = "2.0",
+      pct_3 = "6.0",
+      pct_4 = "91.1"
+    ),
+    mostrar_valores = TRUE,
+    decimales = 1,
+    umbral_mostrar_etiqueta = 0.01,
+    umbral_etiqueta_normal = 0.05
+  )
+
+  text_layers <- Filter(function(layer) inherits(layer$geom, "GeomText"), p$layers)
+  labels_por_layer <- lapply(text_layers, function(layer) sort(as.character(layer$data$lab)))
+  todas_las_labels <- sort(unlist(labels_por_layer, use.names = FALSE))
+
+  expect_equal(todas_las_labels, c("2.0%", "6.0%", "91.1%"))
+  expect_false(any(todas_las_labels == "0.9%"))
+  expect_true(any(vapply(labels_por_layer, identical, logical(1), c("2.0%"))))
+  expect_true(any(vapply(labels_por_layer, identical, logical(1), c("6.0%", "91.1%"))))
+})
+
+test_that("graficar_barras_apiladas repela etiquetas pequenas con umbrales explicitos", {
+  df <- data.frame(
+    categoria = "Item",
+    N = 100,
+    pct_1 = 0.01,
+    pct_2 = 0.02,
+    pct_3 = 0.03,
+    pct_4 = 0.94,
+    stringsAsFactors = FALSE
+  )
+
+  p <- prosecnur::graficar_barras_apiladas(
+    data = df,
+    var_categoria = "categoria",
+    var_n = "N",
+    cols_porcentaje = c("pct_1", "pct_2", "pct_3", "pct_4"),
+    etiquetas_grupos = c(
+      pct_1 = "1",
+      pct_2 = "2",
+      pct_3 = "3",
+      pct_4 = "94"
+    ),
+    mostrar_valores = TRUE,
+    decimales = 0,
+    umbral_mostrar_etiqueta = 0.01,
+    umbral_etiqueta_normal = 0.05
+  )
+
+  text_layers <- Filter(function(layer) inherits(layer$geom, "GeomText"), p$layers)
+  peq_layers <- Filter(function(layer) {
+    "lab" %in% names(layer$data) &&
+      identical(sort(as.character(layer$data$lab)), c("1%", "2%", "3%"))
+  }, text_layers)
+
+  expect_length(peq_layers, 1)
+
+  peq_data <- peq_layers[[1]]$data[order(peq_layers[[1]]$data$x_center), , drop = FALSE]
+  x_orig <- peq_data$x_center
+  x_adj <- peq_data$x_label
+
+  expect_true(any(abs(x_adj - x_orig) > 1e-6))
+  expect_gt(min(diff(x_adj)), min(diff(x_orig)))
+  expect_true(all(x_adj >= 0 & x_adj <= 1))
+})
+
 test_that("slide_1 agrega subtitulo y base automatica multi-fuente en orden de data", {
   skip_if_not_installed("officer")
   skip_if_not_installed("rvg")

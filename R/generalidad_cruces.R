@@ -427,6 +427,7 @@ write_one_numeric_cross <- function(wb, sheet, data, var, dic_vars,
                                     survey = NULL,
                                     orders_list = NULL,
                                     weight_col = "peso",
+                                    opciones_excluir = NULL,
                                     digits = 1) {
 
   st   <- mk_styles_cruces()
@@ -478,7 +479,7 @@ write_one_numeric_cross <- function(wb, sheet, data, var, dic_vars,
       data             = data,
       survey           = survey,
       orders_list      = orders_list,
-      opciones_excluir = NULL
+      opciones_excluir = opciones_excluir
     )
     estr_codes  <- cats_s$codes
     estr_labels <- cats_s$labels
@@ -852,6 +853,7 @@ exportar_cruces_multi <- function(data,
           survey        = survey,
           orders_list   = orders_list,
           weight_col    = weight_col,
+          opciones_excluir = opciones_excluir,
           digits        = digits
         )
         fila <- fila + 1
@@ -968,7 +970,7 @@ exportar_cruces_multi <- function(data,
           data             = data,
           survey           = survey,
           orders_list      = orders_list,
-          opciones_excluir = NULL
+          opciones_excluir = opciones_excluir
         )
         estr_codes  <- cats_s$codes
         estr_labels <- cats_s$labels
@@ -1418,8 +1420,9 @@ exportar_cruces_multi <- function(data,
 #'   no puede detectarse automáticamente desde el instrumento.
 #' @param weight_col Nombre de la variable de pesos. Si no existe o es NULL,
 #'   se asume peso 1 para todos los casos.
-#' @param opciones_excluir Vector de labels de opciones a excluir de las
-#'   tablas categóricas (por ejemplo, categorías de no respuesta).
+#' @param opciones_excluir Vector de labels de opciones a excluir tanto de las
+#'   variables tabuladas como de las variables usadas como cruce
+#'   (por ejemplo, categorías de no respuesta).
 #' @param show_sig Lógico; si \code{TRUE}, genera tablas adicionales con
 #'   letras de significancia (comparaciones de proporciones por columna).
 #' @param alpha Nivel de significancia para las pruebas z con corrección
