@@ -55,8 +55,9 @@ no puede detectarse automáticamente desde el instrumento.}
 \item{weight_col}{Nombre de la variable de pesos. Si no existe o es NULL,
 se asume peso 1 para todos los casos.}
 
-\item{opciones_excluir}{Vector de labels de opciones a excluir de las
-tablas categóricas (por ejemplo, categorías de no respuesta).}
+\item{opciones_excluir}{Vector de labels de opciones a excluir tanto de las
+variables tabuladas como de las variables usadas como cruce
+(por ejemplo, categorías de no respuesta).}
 
 \item{show_sig}{Lógico; si \code{TRUE}, genera tablas adicionales con
 letras de significancia (comparaciones de proporciones por columna).}

@@ -146,8 +146,9 @@ directamente a \code{graficar_barras_apiladas()}.}
 estratos en barras agrupadas (se mantiene como respaldo si sus nombres
 coinciden con las etiquetas de serie).}
 
-\item{opciones_excluir}{Vector de labels de opciones a excluir de la
-variable de interés (por ejemplo, categorías de no respuesta).}
+\item{opciones_excluir}{Vector de labels de opciones a excluir tanto de la
+variable de interés como del estrato/cruce
+(por ejemplo, categorías de no respuesta).}
 
 \item{template_docx}{Ruta a una plantilla DOCX. Si es \code{NULL}, se intentará
 usar una plantilla interna del paquete llamada
