@@ -109,9 +109,6 @@ mk_styles_cruces <- function() {
       halign   = "center",
       valign   = "center",
       fontName = "Arial"
-    ),
-    fill_sig = openxlsx::createStyle(
-      fgFill = "#f1d6b3"
     )
   )
 }
@@ -123,11 +120,55 @@ mk_styles_cruces <- function() {
 .calc_row_height <- function(text, col_width = 60, font_size = 10,
                               min_h = 15, max_h = 120) {
   if (is.null(text) || is.na(text) || !nzchar(as.character(text)))
-    return(min_h)
+    return(as.integer(min_h))
   n <- nchar(as.character(text))
   n_lines <- ceiling(n / max(col_width, 1))
   h <- n_lines * font_size * 1.5
   as.integer(pmin(pmax(h, min_h), max_h))
+}
+
+.merge_runs <- function(v) {
+  if (!length(v)) return(list())
+  res <- list()
+  s <- 1L
+  for (i in seq_along(v)) {
+    if (i == length(v) || v[i] != v[i + 1]) {
+      res[[length(res) + 1L]] <- c(s, i)
+      s <- i + 1L
+    }
+  }
+  res
+}
+
+.header_row_height <- function(values,
+                               runs = NULL,
+                               col_offset = 0L,
+                               first_col_width = 60,
+                               other_col_width = 16,
+                               font_size = 10,
+                               min_h = 15,
+                               max_h = 120) {
+  if (!length(values)) return(as.integer(min_h))
+
+  if (is.null(runs)) {
+    runs <- lapply(seq_along(values), function(i) c(i, i))
+  }
+  if (!length(runs)) return(as.integer(min_h))
+
+  heights <- vapply(runs, function(r) {
+    rel_cols <- seq.int(r[1], r[2])
+    abs_cols <- col_offset + rel_cols
+    col_width <- sum(ifelse(abs_cols == 1L, first_col_width, other_col_width))
+    .calc_row_height(
+      text      = values[r[1]],
+      col_width = col_width,
+      font_size = font_size,
+      min_h     = min_h,
+      max_h     = max_h
+    )
+  }, integer(1))
+
+  as.integer(max(heights, na.rm = TRUE))
 }
 
 # =============================================================================
@@ -571,17 +612,7 @@ write_one_numeric_cross <- function(wb, sheet, data, var, dic_vars,
   }
 
   # Merge runs en header1 (estratos)
-  merge_runs <- function(v) {
-    res <- list(); s <- 1
-    for (i in seq_along(v)) {
-      if (i == length(v) || v[i] != v[i + 1]) {
-        res[[length(res) + 1]] <- c(s, i); s <- i + 1
-      }
-    }
-    res
-  }
-
-  runs1 <- merge_runs(h1)
+  runs1 <- .merge_runs(h1)
   for (r in runs1) {
     if ((r[2] - r[1] + 1) > 1) {
       openxlsx::mergeCells(wb, sheet,
@@ -589,6 +620,29 @@ write_one_numeric_cross <- function(wb, sheet, data, var, dic_vars,
                            cols = (start_col + r[1] - 1):(start_col + r[2] - 1))
     }
   }
+
+  openxlsx::setRowHeights(
+    wb, sheet, rows = fila,
+    heights = .header_row_height(
+      values = h1,
+      runs = runs1,
+      col_offset = as.integer(start_col - 1L),
+      font_size = 10,
+      min_h = 18,
+      max_h = 100
+    )
+  )
+  openxlsx::setRowHeights(
+    wb, sheet, rows = fila + 1,
+    heights = .header_row_height(
+      values = h2,
+      runs = NULL,
+      col_offset = as.integer(start_col - 1L),
+      font_size = 10,
+      min_h = 18,
+      max_h = 100
+    )
+  )
 
   fila <- fila + 2
 
@@ -810,30 +864,53 @@ exportar_cruces_multi <- function(data,
                          gridExpand = TRUE)
     }
 
-    merge_runs <- function(v) {
-      if (!length(v)) return(list())
-      res <- list(); s <- 1
-      for (i in seq_along(v)) {
-        if (i == length(v) || v[i] != v[i + 1]) {
-          res[[length(res) + 1]] <- c(s, i); s <- i + 1
-        }
-      }
-      res
-    }
-
-    runs1 <- merge_runs(h1)
+    runs1 <- .merge_runs(h1)
     for (r in runs1) if ((r[2] - r[1] + 1) > 1) {
       openxlsx::mergeCells(wb, hoja,
                            rows = row0,
                            cols = (col0 + r[1] - 1):(col0 + r[2] - 1))
     }
 
-    runs2 <- merge_runs(h2)
+    runs2 <- .merge_runs(h2)
     for (r in runs2) if ((r[2] - r[1] + 1) > 1) {
       openxlsx::mergeCells(wb, hoja,
                            rows = row0 + 1,
                            cols = (col0 + r[1] - 1):(col0 + r[2] - 1))
     }
+
+    openxlsx::setRowHeights(
+      wb, hoja, rows = row0,
+      heights = .header_row_height(
+        values = h1,
+        runs = runs1,
+        col_offset = as.integer(col0 - 1L),
+        font_size = 10,
+        min_h = 18,
+        max_h = 100
+      )
+    )
+    openxlsx::setRowHeights(
+      wb, hoja, rows = row0 + 1,
+      heights = .header_row_height(
+        values = h2,
+        runs = runs2,
+        col_offset = as.integer(col0 - 1L),
+        font_size = 10,
+        min_h = 18,
+        max_h = 100
+      )
+    )
+    openxlsx::setRowHeights(
+      wb, hoja, rows = row0 + 2,
+      heights = .header_row_height(
+        values = h3,
+        runs = NULL,
+        col_offset = as.integer(col0 - 1L),
+        font_size = 10,
+        min_h = 15,
+        max_h = 80
+      )
+    )
 
     invisible(NULL)
   }
@@ -1282,22 +1359,35 @@ exportar_cruces_multi <- function(data,
                              cols  = 1:ncols_sig,
                              gridExpand = TRUE)
 
-          merge_runs <- function(v) {
-            if (!length(v)) return(list())
-            res <- list(); s <- 1
-            for (i in seq_along(v)) {
-              if (i == length(v) || v[i] != v[i + 1]) {
-                res[[length(res) + 1]] <- c(s, i); s <- i + 1
-              }
-            }
-            res
-          }
-          runs1 <- merge_runs(sig_h1)
+          runs1 <- .merge_runs(sig_h1)
           for (r in runs1) if ((r[2] - r[1] + 1) > 1) {
             openxlsx::mergeCells(wb, hoja,
                                  rows = fila,
                                  cols = r[1]:r[2])
           }
+
+          openxlsx::setRowHeights(
+            wb, hoja, rows = fila,
+            heights = .header_row_height(
+              values = sig_h1,
+              runs = runs1,
+              col_offset = 0L,
+              font_size = 10,
+              min_h = 18,
+              max_h = 100
+            )
+          )
+          openxlsx::setRowHeights(
+            wb, hoja, rows = fila + 1,
+            heights = .header_row_height(
+              values = sig_h2,
+              runs = NULL,
+              col_offset = 0L,
+              font_size = 10,
+              min_h = 18,
+              max_h = 100
+            )
+          )
 
           fila_datos <- fila + 2
 
@@ -1314,7 +1404,6 @@ exportar_cruces_multi <- function(data,
 
             for (j in seq_along(bl$estr_labels)) {
               col_let <- character(length(opciones))
-              col_sig <- logical(length(opciones))
 
               rr <- match(opciones, bl$opciones)
               cc <- j
@@ -1322,7 +1411,6 @@ exportar_cruces_multi <- function(data,
               ok <- which(!is.na(rr))
               if (length(ok)) {
                 col_let[ok] <- bl$letras[cbind(rr[ok], cc)]
-                col_sig[ok] <- bl$sig[cbind(rr[ok], cc)]
               }
 
               openxlsx::writeData(
