@@ -117,6 +117,20 @@ mk_styles_cruces <- function() {
 }
 
 # =============================================================================
+# Helper: altura de fila dinámica según longitud de texto
+# =============================================================================
+
+.calc_row_height <- function(text, col_width = 60, font_size = 10,
+                              min_h = 15, max_h = 120) {
+  if (is.null(text) || is.na(text) || !nzchar(as.character(text)))
+    return(min_h)
+  n <- nchar(as.character(text))
+  n_lines <- ceiling(n / max(col_width, 1))
+  h <- n_lines * font_size * 1.5
+  as.integer(pmin(pmax(h, min_h), max_h))
+}
+
+# =============================================================================
 # Helpers básicos
 # =============================================================================
 
@@ -440,6 +454,8 @@ write_one_numeric_cross <- function(wb, sheet, data, var, dic_vars,
   # ---------------------------
   openxlsx::writeData(wb, sheet, qlab, startRow = fila, startCol = start_col, colNames = FALSE)
   openxlsx::addStyle(wb, sheet, st$q_title, rows = fila, cols = start_col, gridExpand = TRUE)
+  openxlsx::setRowHeights(wb, sheet, rows = fila,
+                          heights = .calc_row_height(qlab, col_width = 60, font_size = 11))
   fila <- fila + 1
 
   w <- get_pesos(data, weight_col)
@@ -921,6 +937,8 @@ exportar_cruces_multi <- function(data,
         openxlsx::writeData(wb, hoja, qlab, startRow = fila, startCol = 1)
         openxlsx::addStyle(wb, hoja, st$q_title, rows = fila, cols = 1, gridExpand = TRUE)
         openxlsx::mergeCells(wb, hoja, rows = fila, cols = 1:6)
+        openxlsx::setRowHeights(wb, hoja, rows = fila,
+                                heights = .calc_row_height(qlab, col_width = 60, font_size = 11))
         fila <- fila + 1
         openxlsx::writeData(wb, hoja, "Sin datos válidos para cruzar.", startRow = fila, startCol = 1)
         openxlsx::addStyle(wb, hoja, st$body_txt, rows = fila, cols = 1, gridExpand = TRUE)
@@ -1066,6 +1084,8 @@ exportar_cruces_multi <- function(data,
       openxlsx::writeData(wb, hoja, qlab, startRow = fila, startCol = 1)
       openxlsx::addStyle(wb, hoja, st$q_title, rows = fila, cols = 1, gridExpand = TRUE)
       openxlsx::mergeCells(wb, hoja, rows = fila, cols = 1:ncols_tbl)
+      openxlsx::setRowHeights(wb, hoja, rows = fila,
+                              heights = .calc_row_height(qlab, col_width = 60, font_size = 11))
       openxlsx::addStyle(wb, hoja, st$table_end,
                          rows = fila, cols = 1:ncols_tbl,
                          gridExpand = TRUE, stack = TRUE)
@@ -1316,15 +1336,6 @@ exportar_cruces_multi <- function(data,
                 cols  = col_cursor,
                 gridExpand = TRUE
               )
-              if (any(col_sig)) {
-                openxlsx::addStyle(
-                  wb, hoja, st$fill_sig,
-                  rows = fila_datos - 1 + which(col_sig),
-                  cols  = col_cursor,
-                  gridExpand = TRUE, stack = TRUE
-                )
-              }
-
               col_cursor <- col_cursor + 1
             }
           }
@@ -1353,7 +1364,9 @@ exportar_cruces_multi <- function(data,
             gridExpand = TRUE, stack = TRUE
           )
 
-          openxlsx::setRowHeights(wb, hoja, rows = fila_note, heights = 80)
+          openxlsx::setRowHeights(wb, hoja, rows = fila_note,
+                                  heights = .calc_row_height(pie_sig, col_width = 60,
+                                                             font_size = 9, max_h = 150))
 
           fila <- fila_note + 2
         } else {
@@ -1367,8 +1380,8 @@ exportar_cruces_multi <- function(data,
     fila <- fila + 1
   }
 
-  openxlsx::setColWidths(wb, hoja, cols = 1, widths = 52)
-  openxlsx::setColWidths(wb, hoja, cols = 2:200, widths = 12)
+  openxlsx::setColWidths(wb, hoja, cols = 1, widths = 60)
+  openxlsx::setColWidths(wb, hoja, cols = 2:200, widths = 16)
 
   openxlsx::saveWorkbook(wb, path_xlsx, overwrite = TRUE)
   message("Cruces exportados a: ", normalizePath(path_xlsx))
