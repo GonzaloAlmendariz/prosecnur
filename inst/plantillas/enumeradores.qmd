@@ -1,0 +1,61 @@
+---
+title: ""
+subtitle: ""
+date: today
+lang: es
+format:
+  typst:
+    papersize: a4
+    margin:
+      x: 1.8cm
+      y: 2.2cm
+    fontsize: 10pt
+    include-in-header:
+      text: |
+        #set text(font: "Arial", size: 10pt)
+        #set par(justify: false)
+
+        #show heading.where(level: 1): it => {
+          v(0.8em)
+          block(width: 100%, fill: rgb("#1a4a7a"), inset: (x: 10pt, y: 7pt), radius: 3pt)[
+            #text(fill: white, weight: "bold", size: 12pt)[#it.body]
+          ]
+          v(0.4em)
+        }
+        #show heading.where(level: 2): it => {
+          v(0.6em)
+          block(width: 100%, fill: rgb("#2e5b9e"), inset: (x: 8pt, y: 5pt), radius: 2pt)[
+            #text(fill: white, weight: "bold", size: 10.5pt)[#it.body]
+          ]
+          v(0.3em)
+        }
+        #show heading.where(level: 3): it => {
+          v(0.4em)
+          block(width: 100%, fill: rgb("#1a4a7a"), inset: (x: 7pt, y: 4pt), radius: 2pt)[
+            #text(fill: white, weight: "bold", size: 9.8pt)[#it.body]
+          ]
+          v(0.2em)
+        }
+execute:
+  echo: false
+  warning: false
+  message: false
+params:
+  path_rds: null
+---
+
+```{r, results='asis'}
+if (is.null(params$path_rds) || !file.exists(params$path_rds)) {
+  stop("No se encontro `params$path_rds` para renderizar el reporte.", call. = FALSE)
+}
+
+bundle <- readRDS(params$path_rds)
+doc <- as.character(bundle$typst_doc)[1]
+if (is.na(doc) || !nzchar(trimws(doc))) {
+  stop("`bundle$typst_doc` esta vacio.", call. = FALSE)
+}
+
+cat("```{=typst}\n")
+cat(doc)
+cat("\n```\n")
+```

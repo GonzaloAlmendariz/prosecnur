@@ -2,22 +2,21 @@
 % Please edit documentation in R/plan_word.R
 \name{w_presets}
 \alias{w_presets}
-\title{Definir presets para Word (PNG + estilos de párrafo)}
+\title{Definir presets para Word (imagen + estilos de párrafo)}
 \usage{
 w_presets(
   image = list(width_in = 6.6, height_in = 3.9, dpi = 300, bg = "white"),
-  title_style = list(style_name = NULL, font = "Calibri", size = 12, bold = TRUE, italic
-    = FALSE, color = "000000"),
-  base_style = list(style_name = NULL, font = "Calibri", size = 9, bold = FALSE, italic =
-    FALSE, color = "404040", formato = "Base: \%s", sufijo_auto = NULL),
-  footer_style = list(style_name = NULL, font = "Calibri", size = 9, bold = FALSE, italic
-    = FALSE, color = "404040"),
-  figure_numbering = list(enabled = TRUE, prefix = "Gráfico", sep = ". ",
-    prepend_on_manual = FALSE),
+  title_style = list(font = "Arial", size = 12, bold = TRUE, italic = FALSE, color =
+    "#39588B"),
+  base_style = list(font = "Arial", size = 9, bold = FALSE, italic = TRUE, color =
+    "#39588B", formato = "Base: \%s", sufijo_auto = NULL),
+  section_style = list(font = "Arial", size = 14, bold = TRUE, italic = FALSE, color =
+    "#39588B"),
+  figure_numbering = list(enabled = TRUE, prefix = "Gráfico", sep = ". "),
   pagebreak_between = FALSE,
   pagebreak_after_title = TRUE
 )
 }
 \description{
-Definir presets para Word (PNG + estilos de párrafo)
+Definir presets para Word (imagen + estilos de párrafo)
 }

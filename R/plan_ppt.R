@@ -61,16 +61,17 @@
 #' @export
 reporte_ppt_plan <- function(
     data,
-    instrumento       = NULL,
-    path_ppt          = "reporte_ppt_plan.pptx",
-    presets           = NULL,
-    plan              = NULL,
-    env_diapos        = parent.frame(),
-    strict_diapos     = FALSE,
-    template_pptx     = getOption("prosecnur.template_pptx", NA_character_),
-    master            = "Office Theme",
-    mensajes_progreso = TRUE,
-    solo_lista        = FALSE
+    instrumento        = NULL,
+    path_ppt           = "reporte_ppt_plan.pptx",
+    presets            = NULL,
+    plan               = NULL,
+    env_diapos         = parent.frame(),
+    strict_diapos      = FALSE,
+    template_pptx      = getOption("prosecnur.template_pptx", NA_character_),
+    master             = "Office Theme",
+    mensajes_progreso  = TRUE,
+    solo_lista         = FALSE,
+    build_render_meta  = FALSE
 ) {
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
@@ -827,7 +828,34 @@ reporte_ppt_plan <- function(
     if (!length(srcs_used)) return(NULL)
 
     if (length(srcs_used) == 1L) {
-      first_ref <- refs[match(srcs_used[1], vapply(ctxs, `[[`, character(1), "source"))]
+      src <- srcs_used[1]
+      first_ref <- refs[match(src, vapply(ctxs, `[[`, character(1), "source"))]
+
+      # Si el reporte completo usa múltiples BBDD, la base automática debe
+      # rotularse por fuente (igual que en PPT), incluso cuando el gráfico
+      # particular use solo una.
+      if (length(data_sources) > 1L) {
+        tab <- .tab_freq(first_ref, filtros = filtros, source = src)
+        if (is.null(tab) || !nrow(tab)) return(NULL)
+
+        N_total <- NA_real_
+        if ("Opciones" %in% names(tab) && "n" %in% names(tab)) {
+          idx_tot <- which(tab$Opciones == "Total")
+          if (length(idx_tot)) N_total <- suppressWarnings(as.numeric(tab$n[idx_tot[1]]))
+        }
+
+        tab2 <- tab |>
+          dplyr::filter(.data$Opciones != "Total") |>
+          dplyr::filter(!is.na(.data$n) & .data$n > 0)
+
+        if (!nrow(tab2)) return(NULL)
+        if (!is.finite(N_total)) N_total <- sum(tab2$n, na.rm = TRUE)
+        if (!is.finite(N_total)) return(NULL)
+
+        N_pretty <- format(N_total, big.mark = ",", scientific = FALSE)
+        return(sprintf(formato, paste(N_pretty, src)))
+      }
+
       return(.base_auto_from_var(
         var = first_ref,
         filtros = filtros,
@@ -1073,6 +1101,166 @@ reporte_ppt_plan <- function(
   # 5) Renders
   # ---------------------------------------------------------------------------
 
+  # ---------------------------------------------------------------------------
+  # Helper: acumula render_meta para uso externo (Word, etc.)
+  # - Para multilista: renderiza cada bloque por separado (sin título en el chart).
+  # - Para el resto: re-renderiza sin overrides de título para que el título
+  #   vaya fuera del gráfico en Word.
+  # Solo se llama cuando build_render_meta = TRUE.
+  # ---------------------------------------------------------------------------
+  .push_render_meta_for_element <- function(el, plot) {
+    if (is.null(el) || !inherits(el, "ppt_element")) return(invisible(NULL))
+
+    etype <- el$.element_type %||% ""
+
+    .is_multi_source_element <- function(el_src) {
+      refs <- c(
+        .extract_ref_values(el_src$var %||% NULL),
+        .extract_ref_values(el_src$vars %||% NULL)
+      )
+      refs <- refs[!is.na(refs) & nzchar(trimws(refs))]
+      if (!length(refs)) return(FALSE)
+
+      srcs <- tryCatch(
+        unique(vapply(lapply(refs, .resolve_ref, arg_name = "var"), `[[`, character(1), "source")),
+        error = function(e) character(0)
+      )
+      length(srcs) > 1L
+    }
+
+    # Constantes de preset usadas en todos los sub-renders
+    pm  <- presets$multi_apiladas$args  %||% list()
+    ps  <- presets$barras_apiladas$args %||% list()
+    suf <- presets$base$args$sufijo_auto %||% NULL
+    fmt <- presets$base$args$formato     %||% "Base: %s"
+
+    # Helper: renderiza un sub-bloque multiapiladas y agrega a render_meta
+    .push_multi_block <- function(block_data, title_word) {
+      block_clean <- block_data
+      block_clean$overrides <- block_clean$overrides %||% list()
+      block_clean$overrides$titulo    <- NULL
+      block_clean$overrides$subtitulo <- NULL
+      # Flag para renderizado Word: omite columna de grupo en var_cruce
+      block_clean$.word_sin_grupo <- TRUE
+      # Compensar que sin columna de grupo las barras se perciben algo mas delgadas
+      if (is.null(block_clean$overrides$grosor_barras_mult))
+        block_clean$overrides$grosor_barras_mult <- 2.30
+
+      p_b <- tryCatch(
+        .render_barras_multiapiladas(block_clean, preset_args_multi = pm, preset_args_single = ps),
+        error = function(e) NULL
+      )
+      if (is.null(p_b)) return(invisible(NULL))
+
+      block_el <- structure(
+        c(block_clean, list(.element_type = "barras_multiapiladas")),
+        class = "ppt_element"
+      )
+      base_b <- tryCatch(
+        .base_auto_from_element(block_el, sufijo_auto = suf, formato = fmt),
+        error = function(e) NULL
+      )
+
+      render_meta[[length(render_meta) + 1]] <<- list(
+        kind      = "chart",
+        plot_word = p_b,
+        title     = title_word,
+        base      = base_b,
+        base_multi_source = .is_multi_source_element(block_el),
+        etype     = "barras_multiapiladas_block"
+      )
+    }
+
+    # Helper: divide un bloque var_cruce/var en un entry por grupo/variable
+    .split_multi_block <- function(block_data) {
+      modo_b <- block_data$modo %||% "var"
+
+      if (identical(modo_b, "var_cruce")) {
+        # Un chart por grupo (dim): título va fuera como párrafo Word
+        vars_list     <- block_data$vars          %||% list()
+        titulos_grupo <- block_data$titulos_grupo %||% list()
+        for (nm in names(vars_list)) {
+          sub               <- block_data
+          sub$vars          <- vars_list[nm]
+          sub$titulos_grupo <- NULL   # no mostrar en el chart; sale como título Word
+          title_g <- as.character(titulos_grupo[[nm]] %||% nm)[1]
+          .push_multi_block(sub, title_g)
+        }
+
+      } else if (identical(modo_b, "var")) {
+        # Un chart por variable individual; título va fuera como párrafo Word
+        vars_vec <- block_data$vars %||% character(0)
+        if (is.list(vars_vec)) vars_vec <- unlist(vars_vec, use.names = FALSE)
+        for (v in vars_vec) {
+          sub               <- block_data
+          sub$vars          <- v
+          sub$titulos_grupo <- NULL
+          title_v <- tryCatch(.title_of_var(v), error = function(e) v)
+          if (is.null(title_v) || !nzchar(trimws(as.character(title_v)[1]))) title_v <- v
+          .push_multi_block(sub, as.character(title_v)[1])
+        }
+
+      } else {
+        # Modo desconocido: renderizar como bloque único
+        title_b <- block_data$title_slide %||% block_data$overrides$titulo %||% NULL
+        .push_multi_block(block_data, title_b)
+      }
+    }
+
+    # --- MULTILISTA: un entry por grupo dentro de cada bloque ---
+    if (identical(etype, "barras_multiapiladas") && identical(el$modo %||% "", "multilista")) {
+      for (block in el$bloques %||% list()) .split_multi_block(block)
+      return(invisible(NULL))
+    }
+
+    # --- MULTIAPILADAS var_cruce / var: un entry por grupo/variable ---
+    if (identical(etype, "barras_multiapiladas")) {
+      .split_multi_block(el)
+      return(invisible(NULL))
+    }
+
+    # --- ELEMENTO NORMAL ---
+    title <- el$title_slide %||% el$overrides$titulo %||% NULL
+
+    el_for_word <- el
+    el_for_word$overrides <- el_for_word$overrides %||% list()
+    el_for_word$overrides$titulo    <- NULL
+    el_for_word$overrides$subtitulo <- NULL
+    p_word <- tryCatch(.render_element(el_for_word), error = function(e) plot)
+
+    base <- tryCatch(
+      .base_auto_from_element(el, sufijo_auto = suf, formato = fmt),
+      error = function(e) NULL
+    )
+
+    render_meta[[length(render_meta) + 1]] <<- list(
+      kind      = "chart",
+      plot_word = p_word,
+      title     = title,
+      base      = base,
+      base_multi_source = .is_multi_source_element(el),
+      etype     = etype
+    )
+    invisible(NULL)
+  }
+
+  # Inyecta title_slide como overrides$titulo en slides multi-gráfico
+  # (donde no hay placeholder PPT individual por gráfico)
+  .inject_title_override <- function(el) {
+    ts <- el$title_slide %||% NULL
+    if (is.null(ts) || !nzchar(trimws(as.character(ts)[1]))) return(el)
+    el$overrides <- el$overrides %||% list()
+    if (is.null(el$overrides$titulo)) {
+      el$overrides$titulo <- as.character(ts)[1]
+    }
+    el
+  }
+
+  .force_canvas_args <- function(fun, args) {
+    fml <- tryCatch(names(formals(fun)), error = function(e) character(0))
+    if ("usar_canvas" %in% fml) args$usar_canvas <- TRUE
+    args
+  }
 
   # Dispatcher genérico: renderiza cualquier ppt_element
   .render_element <- function(el) {
@@ -1223,6 +1411,7 @@ reporte_ppt_plan <- function(
 
     args <- .merge_args(base_args, preset_args, overrides)
     fun  <- graficar_barras_apiladas
+    args <- .force_canvas_args(fun, args)
     args <- .keep_formals(fun, args)
     suppressWarnings(do.call(fun, args))
   }
@@ -1532,17 +1721,25 @@ reporte_ppt_plan <- function(
 
       duplicated_labels <- duplicated(labels_by_v) | duplicated(labels_by_v, fromLast = TRUE)
 
+      # En Word con una sola variable, el label es el título de arriba → suprimir
+      # y colapsar el placeholder de etiquetas para que las barras ocupen todo el ancho
+      single_word_var <- isTRUE(el$.word_sin_grupo) && length(vars) == 1L
+
       for (v in vars) {
         tab <- tabs_by_v[[v]]
         if (is.null(tab)) next
 
         ctx_v <- .resolve_ref(v, arg_name = "vars")
-        label_v <- labels_by_v[[v]] %||% .title_of_var(v)
-        if (isTRUE(duplicated_labels[match(v, names(labels_by_v))])) {
-          label_v <- .pretty_source_label(ctx_v$source)
-        }
-        if (requireNamespace("stringr", quietly = TRUE)) {
-          label_v <- stringr::str_wrap(label_v, width = wrap_y_eff)
+        if (single_word_var) {
+          label_v <- ""
+        } else {
+          label_v <- labels_by_v[[v]] %||% .title_of_var(v)
+          if (isTRUE(duplicated_labels[match(v, names(labels_by_v))])) {
+            label_v <- .pretty_source_label(ctx_v$source)
+          }
+          if (requireNamespace("stringr", quietly = TRUE)) {
+            label_v <- stringr::str_wrap(label_v, width = wrap_y_eff)
+          }
         }
 
         pct_int <- .pct_enteros_100(tab$n)
@@ -1577,8 +1774,31 @@ reporte_ppt_plan <- function(
 
       base_args <- .apply_top2box_alias(base_args)
 
+      # Word, una sola variable: activar canvas para que el layout de columnas
+      # sea idéntico al resto (misma posición inicial de barras, sin expand ggplot).
+      # NO se colapsa canvas_w_etiquetas para que las barras arranquen al mismo nivel.
+      if (single_word_var) {
+        overrides$usar_canvas <- TRUE
+
+        # En split Word, no heredamos anchos "ad hoc" del bloque original (pensados
+        # para etiquetas largas en PPT), para que 1 barra y 2+ barras compartan
+        # el mismo punto de inicio y placeholders.
+        width_keys <- c(
+          "canvas_w_etiquetas",
+          "canvas_w_buf_etq_bars",
+          "canvas_w_bars",
+          "canvas_w_buf_bars_extra",
+          "canvas_w_extra"
+        )
+        for (k in width_keys) {
+          val <- preset_args_single[[k]] %||% preset_args_multi[[k]] %||% NULL
+          if (!is.null(val)) overrides[[k]] <- val
+        }
+      }
+
       args <- .merge_args(base_args, preset_args_single, preset_args_multi, overrides)
       fun  <- graficar_barras_apiladas
+      args <- .force_canvas_args(fun, args)
       args <- .keep_formals(fun, args)
       return(suppressWarnings(do.call(fun, args)))
     }
@@ -1726,6 +1946,7 @@ reporte_ppt_plan <- function(
 
       args <- .merge_args(base_args, preset_args_single, preset_args_multi, overrides)
       fun  <- graficar_barras_apiladas
+      args <- .force_canvas_args(fun, args)
       args <- .keep_formals(fun, args)
       return(suppressWarnings(do.call(fun, args)))
     }
@@ -1735,7 +1956,8 @@ reporte_ppt_plan <- function(
       vars  <- el$vars
       cruce <- el$cruce %||% NULL
 
-      titulos_grupo <- el$titulos_grupo %||% character(0)
+      titulos_grupo  <- el$titulos_grupo %||% character(0)
+      sin_grupo_word <- isTRUE(el$.word_sin_grupo)  # TRUE al renderizar para Word
 
       if (is.list(vars) && !is.character(vars)) {
         group_refs <- vars
@@ -1837,10 +2059,12 @@ reporte_ppt_plan <- function(
             row <- tibble::tibble(
               .categoria_id = paste0(group_id, "__", filas_var + 1L, "__", ctx_v$source),
               categoria     = cat_label,
-              N             = N_total,
-              .grupo_id     = group_id,
-              .grupo_titulo = group_title
+              N             = N_total
             )
+            if (!sin_grupo_word) {
+              row$.grupo_id     <- group_id
+              row$.grupo_titulo <- group_title
+            }
             for (k in seq_along(all_opts)) {
               opt <- all_opts[k]
               row[[cols_pct[k]]] <- (pct_int[opt] %||% 0) / 100
@@ -1972,10 +2196,12 @@ reporte_ppt_plan <- function(
             row <- tibble::tibble(
               .categoria_id = paste0(ctx_v$raw_ref, "__", filas_var + 1L, "__", key_j),
               categoria     = cat_label,
-              N             = N_total,
-              .grupo_id     = ctx_v$raw_ref,
-              .grupo_titulo = group_title
+              N             = N_total
             )
+            if (!sin_grupo_word) {
+              row$.grupo_id     <- ctx_v$raw_ref
+              row$.grupo_titulo <- group_title
+            }
             for (k in seq_along(all_opts)) {
               opt <- all_opts[k]
               row[[cols_pct[k]]] <- (pct_int[opt] %||% 0) / 100
@@ -1994,8 +2220,8 @@ reporte_ppt_plan <- function(
         data                   = df_block,
         var_categoria          = ".categoria_id",
         var_etiqueta_categoria = "categoria",
-        var_grupo_id           = ".grupo_id",
-        var_grupo_titulo       = ".grupo_titulo",
+        var_grupo_id           = if (!sin_grupo_word) ".grupo_id"    else NULL,
+        var_grupo_titulo       = if (!sin_grupo_word) ".grupo_titulo" else NULL,
         var_n                  = "N",
         cols_porcentaje        = cols_pct,
         etiquetas_grupos       = etiquetas_grupos,
@@ -2005,15 +2231,16 @@ reporte_ppt_plan <- function(
         subtitulo              = NULL,
         nota_pie               = NULL,
         usar_canvas            = TRUE,
-        canvas_w_grupo         = 0.24,
-        canvas_w_buf_grupo_etq = 0.03,
-        canvas_gap_grupos      = 0.35
+        canvas_w_grupo         = if (!sin_grupo_word) 0.24 else 0,
+        canvas_w_buf_grupo_etq = if (!sin_grupo_word) 0.03 else 0,
+        canvas_gap_grupos      = if (!sin_grupo_word) 0.35 else 0
       )
       base_args <- .apply_top2box_alias(base_args)
 
       args <- .merge_args(base_args, preset_args_single, preset_args_multi, overrides)
       args$usar_canvas <- TRUE
       fun  <- graficar_barras_apiladas
+      args <- .force_canvas_args(fun, args)
       args <- .keep_formals(fun, args)
       return(suppressWarnings(do.call(fun, args)))
     }
@@ -2082,6 +2309,7 @@ reporte_ppt_plan <- function(
 
     args <- .merge_args(base_args, preset_args, overrides)
     fun  <- graficar_barras_agrupadas
+    args <- .force_canvas_args(fun, args)
     args <- .keep_formals(fun, args)
 
     suppressWarnings(do.call(fun, args))
@@ -2133,6 +2361,7 @@ reporte_ppt_plan <- function(
     args <- .merge_args(base_args, preset_args, overrides)
 
     fun  <- graficar_pie
+    args <- .force_canvas_args(fun, args)
     args <- .keep_formals(fun, args)
 
     suppressWarnings(do.call(fun, args))
@@ -2328,6 +2557,7 @@ reporte_ppt_plan <- function(
 
     fun  <- graficar_barras_numericas
     args <- .merge_args(base_args, preset_args, overrides)
+    args <- .force_canvas_args(fun, args)
     args <- .keep_formals(fun, args)
 
     tryCatch(
@@ -2593,6 +2823,7 @@ reporte_ppt_plan <- function(
 
     args <- .merge_args(base_args, preset_args, overrides)
     fun  <- graficar_radar
+    args <- .force_canvas_args(fun, args)
     args <- .keep_formals(fun, args)
 
     suppressWarnings(do.call(fun, args))
@@ -2625,6 +2856,7 @@ reporte_ppt_plan <- function(
     )
 
     args <- .merge_args(base_args, preset_args %||% list(), el$overrides %||% list())
+    args <- .force_canvas_args(graficar_heatmap_dimensiones, args)
     args <- .keep_formals(graficar_heatmap_dimensiones, args)
     suppressWarnings(do.call(graficar_heatmap_dimensiones, args))
   }
@@ -2656,6 +2888,7 @@ reporte_ppt_plan <- function(
     )
 
     args <- .merge_args(base_args, preset_args %||% list(), el$overrides %||% list())
+    args <- .force_canvas_args(graficar_radar_dimensiones, args)
     args <- .keep_formals(graficar_radar_dimensiones, args)
     suppressWarnings(do.call(graficar_radar_dimensiones, args))
   }
@@ -2688,6 +2921,7 @@ reporte_ppt_plan <- function(
     )
 
     args <- .merge_args(base_args, preset_args %||% list(), el$overrides %||% list())
+    args <- .force_canvas_args(graficar_radar_tabla_dimensiones, args)
     args <- .keep_formals(graficar_radar_tabla_dimensiones, args)
     suppressWarnings(do.call(graficar_radar_tabla_dimensiones, args))
   }
@@ -2825,8 +3059,9 @@ reporte_ppt_plan <- function(
   # ---------------------------------------------------------------------------
   # 8) Render + export (estricto con .PPT_CONTRACT)
   # ---------------------------------------------------------------------------
-  log_rows <- list()
-  rendered <- list()
+  log_rows   <- list()
+  rendered   <- list()
+  render_meta <- list()
 
   for (i in seq_along(plan)) {
 
@@ -2887,6 +3122,15 @@ reporte_ppt_plan <- function(
         }
       }
 
+      if (isTRUE(build_render_meta)) {
+        render_meta[[length(render_meta) + 1]] <- list(
+          kind     = "title_doc",
+          title    = ttl,
+          subtitle = sub,
+          date     = dt
+        )
+      }
+
       log_rows[[length(log_rows) + 1]] <- tibble::tibble(
         slide_i    = i,
         slide_type = "title_slide",
@@ -2909,6 +3153,14 @@ reporte_ppt_plan <- function(
         if (!is.null(subtitle) && nzchar(subtitle)) {
           doc <- .ph_with_strict(doc, subtitle, contract$slots$subtitle)
         }
+      }
+
+      if (isTRUE(build_render_meta)) {
+        render_meta[[length(render_meta) + 1]] <- list(
+          kind     = "section",
+          title    = slide$title    %||% "",
+          subtitle = slide$subtitle %||% NULL
+        )
       }
 
       if (isTRUE(mensajes_progreso)) {
@@ -2953,6 +3205,8 @@ reporte_ppt_plan <- function(
       }
 
       rendered[[length(rendered) + 1]] <- p
+
+      if (isTRUE(build_render_meta)) .push_render_meta_for_element(el_plot, p)
 
       # Resolver título del slide si no viene
       if (is.null(title_slide)) {
@@ -3041,6 +3295,11 @@ reporte_ppt_plan <- function(
       rendered[[length(rendered) + 1]] <- pL
       rendered[[length(rendered) + 1]] <- pR
 
+      if (isTRUE(build_render_meta)) {
+        .push_render_meta_for_element(el_left,  pL)
+        .push_render_meta_for_element(el_right, pR)
+      }
+
       if (!isTRUE(solo_lista)) {
 
         doc <- .add_slide_strict(doc, contract$layout)
@@ -3108,10 +3367,10 @@ reporte_ppt_plan <- function(
       if (!inherits(el_bl, "ppt_element")) stop("poblacion_4: `bottom_left` debe ser `ppt_element`.", call. = FALSE)
       if (!inherits(el_br, "ppt_element")) stop("poblacion_4: `bottom_right` debe ser `ppt_element`.", call. = FALSE)
 
-      pUL <- .render_element(el_ul)
-      pUR <- .render_element(el_ur)
-      pBL <- .render_element(el_bl)
-      pBR <- .render_element(el_br)
+      pUL <- .render_element(.inject_title_override(el_ul))
+      pUR <- .render_element(.inject_title_override(el_ur))
+      pBL <- .render_element(.inject_title_override(el_bl))
+      pBR <- .render_element(.inject_title_override(el_br))
 
       if (is.null(pUL)) stop("poblacion_4: no se pudo renderizar up_left (",      el_ul$.element_type %||% "<NA>", ").", call. = FALSE)
       if (is.null(pUR)) stop("poblacion_4: no se pudo renderizar up_right (",     el_ur$.element_type %||% "<NA>", ").", call. = FALSE)
@@ -3122,6 +3381,13 @@ reporte_ppt_plan <- function(
       rendered[[length(rendered) + 1]] <- pUR
       rendered[[length(rendered) + 1]] <- pBL
       rendered[[length(rendered) + 1]] <- pBR
+
+      if (isTRUE(build_render_meta)) {
+        .push_render_meta_for_element(el_ul, pUL)
+        .push_render_meta_for_element(el_ur, pUR)
+        .push_render_meta_for_element(el_bl, pBL)
+        .push_render_meta_for_element(el_br, pBR)
+      }
 
       if (!isTRUE(solo_lista)) {
 
@@ -3207,6 +3473,8 @@ reporte_ppt_plan <- function(
         stop("text_r: no se pudo renderizar plot (", el_plot$.element_type %||% "<NA>", " | ", vv, ").", call. = FALSE)
       }
       rendered[[length(rendered) + 1]] <- p
+
+      if (isTRUE(build_render_meta)) .push_render_meta_for_element(el_plot, p)
 
       # inferir título si no viene
       if (is.null(title_slide)) {
@@ -3297,6 +3565,8 @@ reporte_ppt_plan <- function(
       }
       rendered[[length(rendered) + 1]] <- p
 
+      if (isTRUE(build_render_meta)) .push_render_meta_for_element(el_plot, p)
+
       if (is.null(title_slide)) {
         title_slide <- el_plot$title_slide %||% {
           if (!is.null(el_plot$var)) .title_of_var(el_plot$var) else {
@@ -3382,6 +3652,11 @@ reporte_ppt_plan <- function(
       rendered[[length(rendered) + 1]] <- p1
       rendered[[length(rendered) + 1]] <- p2
 
+      if (isTRUE(build_render_meta)) {
+        .push_render_meta_for_element(el1, p1)
+        .push_render_meta_for_element(el2, p2)
+      }
+
       # inferir título si no viene
       if (is.null(title_slide)) {
         title_slide <- el1$title_slide %||% if (!is.null(el1$var)) .title_of_var(el1$var) else NULL
@@ -3453,6 +3728,11 @@ reporte_ppt_plan <- function(
       rendered[[length(rendered) + 1]] <- p1
       rendered[[length(rendered) + 1]] <- p2
 
+      if (isTRUE(build_render_meta)) {
+        .push_render_meta_for_element(el1, p1)
+        .push_render_meta_for_element(el2, p2)
+      }
+
       if (is.null(title_slide)) {
         title_slide <- el1$title_slide %||% if (!is.null(el1$var)) .title_of_var(el1$var) else NULL
       }
@@ -3516,14 +3796,19 @@ reporte_ppt_plan <- function(
       if (!inherits(el_left, "ppt_element"))  stop("poblacion_2: `left` debe ser `ppt_element`.", call. = FALSE)
       if (!inherits(el_right, "ppt_element")) stop("poblacion_2: `right` debe ser `ppt_element`.", call. = FALSE)
 
-      pL <- .render_element(el_left)
-      pR <- .render_element(el_right)
+      pL <- .render_element(.inject_title_override(el_left))
+      pR <- .render_element(.inject_title_override(el_right))
 
       if (is.null(pL)) stop("poblacion_2: no se pudo renderizar left.", call. = FALSE)
       if (is.null(pR)) stop("poblacion_2: no se pudo renderizar right.", call. = FALSE)
 
       rendered[[length(rendered) + 1]] <- pL
       rendered[[length(rendered) + 1]] <- pR
+
+      if (isTRUE(build_render_meta)) {
+        .push_render_meta_for_element(el_left,  pL)
+        .push_render_meta_for_element(el_right, pR)
+      }
 
       if (!isTRUE(solo_lista)) {
 
@@ -3554,10 +3839,14 @@ reporte_ppt_plan <- function(
       pics <- lapply(1:5, function(i) slots[[paste0("pic", i)]] %||% NULL)
       for (i in 1:5) if (!inherits(pics[[i]], "ppt_element")) stop("poblacion_5: `pic", i, "` debe ser `ppt_element`.", call. = FALSE)
 
-      plots <- lapply(pics, .render_element)
+      plots <- lapply(pics, function(pic) .render_element(.inject_title_override(pic)))
       for (i in 1:5) if (is.null(plots[[i]])) stop("poblacion_5: no se pudo renderizar pic", i, ".", call. = FALSE)
 
       rendered <- c(rendered, plots)
+
+      if (isTRUE(build_render_meta)) {
+        for (j in seq_along(pics)) .push_render_meta_for_element(pics[[j]], plots[[j]])
+      }
 
       if (!isTRUE(solo_lista)) {
 
@@ -3599,10 +3888,14 @@ reporte_ppt_plan <- function(
       pics <- lapply(1:6, function(i) slots[[paste0("pic", i)]] %||% NULL)
       for (i in 1:6) if (!inherits(pics[[i]], "ppt_element")) stop("poblacion_6: `pic", i, "` debe ser `ppt_element`.", call. = FALSE)
 
-      plots <- lapply(pics, .render_element)
+      plots <- lapply(pics, function(pic) .render_element(.inject_title_override(pic)))
       for (i in 1:6) if (is.null(plots[[i]])) stop("poblacion_6: no se pudo renderizar pic", i, ".", call. = FALSE)
 
       rendered <- c(rendered, plots)
+
+      if (isTRUE(build_render_meta)) {
+        for (j in seq_along(pics)) .push_render_meta_for_element(pics[[j]], plots[[j]])
+      }
 
       if (!isTRUE(solo_lista)) {
 
@@ -3651,10 +3944,12 @@ reporte_ppt_plan <- function(
   }
 
   invisible(list(
-    doc      = if (isTRUE(solo_lista)) NULL else doc,
-    plan     = plan,
-    rendered = rendered,
-    log      = log
+    doc             = if (isTRUE(solo_lista)) NULL else doc,
+    plan            = plan,
+    rendered        = rendered,
+    render_meta     = render_meta,
+    .render_element = .render_element,
+    log             = log
   ))
 }
 

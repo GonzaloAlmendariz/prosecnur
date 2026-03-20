@@ -307,6 +307,9 @@
 #'   Anchos relativos de columnas del canvas (etiquetas, buffers, panel, extra).
 #' @param canvas_h_header_in,canvas_h_legend_in,canvas_h_caption_in,canvas_h_panel_in,canvas_h_toprow_in
 #'   Alturas relativas (en pulgadas “virtuales”) para encabezado, panel, leyenda, caption y fila superior.
+#' @param canvas_min_filas Mínimo de filas virtuales cuando `usar_canvas = TRUE`.
+#'   Sirve para mantener alineación y grosor visual consistente entre gráficos
+#'   con una sola barra y gráficos con múltiples barras.
 #' @param canvas_pad_bars_y_in Padding vertical (in) dentro del placeholder del panel de barras (top/bottom).
 #'
 #' @param grosor_modo `"manual"` o `"auto"` para ajustar grosor según número de categorías.
@@ -437,8 +440,10 @@ graficar_barras_apiladas <- function(
     canvas_h_legend_in    = 0.75,
     canvas_h_caption_in   = 0.40,
     canvas_h_panel_in     = NULL,
+    canvas_h_panel_in_min = 0,
     canvas_h_toprow_in    = 0.18,
-    canvas_pad_bars_y_in  = 0.12,   #  NUEVO
+    canvas_min_filas      = 2L,
+    canvas_pad_bars_y_in  = 0.12,
 
     # ==========================
     # CONTROL DE GROSOR
@@ -680,9 +685,15 @@ graficar_barras_apiladas <- function(
   n_categorias <- length(cat_lvls)
   plot_cat_lvls <- cat_lvls
 
-  usar_y_numerico <- isTRUE(usar_canvas) && isTRUE(usar_grupos_canvas)
+  min_filas_canvas <- suppressWarnings(as.integer(canvas_min_filas)[1])
+  if (!is.finite(min_filas_canvas) || is.na(min_filas_canvas) || min_filas_canvas < 1L) {
+    min_filas_canvas <- 1L
+  }
+
+  usar_y_numerico <- isTRUE(usar_canvas)
+  y_axis_max <- max(1, n_categorias)
   if (usar_y_numerico) {
-    gap_grupos_eff <- suppressWarnings(as.numeric(canvas_gap_grupos))
+    gap_grupos_eff <- if (isTRUE(usar_grupos_canvas)) suppressWarnings(as.numeric(canvas_gap_grupos)) else 0
     if (!is.finite(gap_grupos_eff) || is.na(gap_grupos_eff) || gap_grupos_eff < 0) gap_grupos_eff <- 0
 
     y_from_top <- numeric(n_categorias)
@@ -696,8 +707,15 @@ graficar_barras_apiladas <- function(
         if (!identical(grp_i, grp_n)) offset_top <- offset_top + gap_grupos_eff
       }
     }
-    max_from_top <- if (length(y_from_top)) max(y_from_top) else 0
-    cat_layout$.y_plot <- (max_from_top - y_from_top) + 1
+    max_from_top_obs <- if (length(y_from_top)) max(y_from_top) else 0
+    filas_obs <- max_from_top_obs + 1
+    if (!is.finite(filas_obs) || is.na(filas_obs) || filas_obs < 1) filas_obs <- 1
+
+    # Reservar al menos `canvas_min_filas` filas virtuales evita que un gráfico
+    # con una sola categoría se vea desalineado o demasiado delgado.
+    y_axis_max <- max(filas_obs, if (isTRUE(usar_canvas)) min_filas_canvas else 1)
+    y_shift <- (y_axis_max - filas_obs) / 2
+    cat_layout$.y_plot <- ((max_from_top_obs - y_from_top) + 1) + y_shift
     df_long$.y_plot <- cat_layout$.y_plot[match(as.character(df_long[[var_categoria]]), cat_layout$.cat_id)]
   } else {
     cat_chr  <- as.character(df_long[[var_categoria]])
@@ -707,14 +725,16 @@ graficar_barras_apiladas <- function(
     plot_cat_lvls <- rev(cat_lvls)
     df_long[[var_categoria]] <- factor(cat_chr, levels = plot_cat_lvls)
     cat_layout$.y_plot <- match(cat_layout$.cat_id, plot_cat_lvls)
+    y_axis_max <- max(1, n_categorias)
   }
 
   # ---------------------------------------------------------------------------
   # 1.5) Grosor de barras
   # ---------------------------------------------------------------------------
+  n_categorias_grosor <- if (isTRUE(usar_canvas)) max(n_categorias, min_filas_canvas) else n_categorias
   if (grosor_modo == "auto") {
     grosor_eff <- .auto_bar_width_apiladas(
-      n_categorias = n_categorias,
+      n_categorias = n_categorias_grosor,
       grosor_barras_mult = grosor_barras_mult,
       usar_grupos_canvas = usar_grupos_canvas
     )
@@ -749,7 +769,8 @@ graficar_barras_apiladas <- function(
         ggplot2::scale_y_continuous(
           breaks = cat_layout$.y_plot,
           labels = rep("", n_categorias),
-          expand = ggplot2::expansion(mult = c(0, 0), add = c(0.5, 0.5))
+          limits = c(0.5, y_axis_max + 0.5),
+          expand = ggplot2::expansion(mult = c(0, 0), add = c(0, 0))
         )
       } else {
         ggplot2::scale_y_discrete(
@@ -760,7 +781,7 @@ graficar_barras_apiladas <- function(
     } +
     ggplot2::coord_cartesian(
       xlim = c(0, x_max_bars),
-      clip = if (usar_canvas) "on" else "off"
+      clip = "off"
     ) +
     ggplot2::theme_minimal(base_size = 9) +
     ggplot2::theme(
@@ -1122,7 +1143,8 @@ graficar_barras_apiladas <- function(
       legend.position  = "none",
       plot.background  = ggplot2::element_rect(fill = color_fondo, color = NA),
       panel.background = ggplot2::element_rect(fill = color_fondo, color = NA),
-      plot.margin      = ggplot2::margin(0,0,0,0)
+      # Margen lateral para que etiquetas al borde no se corten visualmente.
+      plot.margin      = ggplot2::margin(0, 4, 0, 4)
     )
 
   .ph_border <- function(x, y, w, h) {
@@ -1139,11 +1161,17 @@ graficar_barras_apiladas <- function(
 
   # alturas en pulgadas
   alto_por_cat_eff <- alto_por_categoria %||% 0.42
-  n_filas_virtuales <- if (usar_y_numerico) max(cat_layout$.y_plot, na.rm = TRUE) else max(1L, n_categorias)
+  n_filas_virtuales <- if (isTRUE(usar_canvas)) y_axis_max else max(1L, n_categorias)
   h_panel_in <- if (!is.null(canvas_h_panel_in) && is.finite(canvas_h_panel_in) && canvas_h_panel_in > 0) {
     canvas_h_panel_in
   } else {
     n_filas_virtuales * alto_por_cat_eff
+  }
+
+  # Mínimo configurable del panel (para Word, donde charts con 1 barra quedan muy chicos)
+  panel_min <- suppressWarnings(as.numeric(canvas_h_panel_in_min))
+  if (is.finite(panel_min) && panel_min > 0) {
+    h_panel_in <- max(h_panel_in, panel_min)
   }
 
   has_header  <- (!is.null(titulo) && nzchar(titulo)) || (!is.null(subtitulo) && nzchar(subtitulo))
@@ -1198,6 +1226,10 @@ graficar_barras_apiladas <- function(
   # top row (título del extra)
   top_in <- canvas_h_toprow_in %||% 0
   if (!is.finite(top_in) || is.na(top_in) || top_in < 0) top_in <- 0
+  if (isTRUE(mostrar_barra_extra) && !is.null(titulo_extra_int) && nzchar(titulo_extra_int)) {
+    # Reserva mínima para que el título de barra extra no quede comprimido.
+    top_in <- max(top_in, (size_titulo_extra %||% 9) * 0.022)
+  }
   top_in <- min(top_in, h_panel_in * 0.45)
   top_h  <- if (top_in > 0) top_in / h_total_in else 0
 
@@ -1284,9 +1316,9 @@ graficar_barras_apiladas <- function(
       canvas <- canvas + cowplot::draw_text(
         text     = titulo_extra_int,
         x        = x_extra0 + (w_extra * 0.5),
-        y        = y_top0 + (top_h * 0.2),
+        y        = y_top0 + (top_h * 0.5),
         hjust    = 0.5,
-        vjust    = 0,
+        vjust    = 0.5,
         size     = size_titulo_extra,
         colour   = color_barra_extra_int,
         fontface = "bold"

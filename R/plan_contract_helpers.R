@@ -1126,6 +1126,21 @@ diapo <- function(slide, env = parent.frame()) {
   slide
 }
 
+#' Obtener el plan acumulado sin limpiarlo
+#'
+#' Devuelve el plan de diapositivas acumulado por [diapo()] en el entorno
+#' indicado. A diferencia de [reporte_ppt_plan()], no borra el acumulador.
+#' Útil para capturar el plan y pasarlo luego a [plan_word()]
+#' sin necesidad de guardar el objeto pesado devuelto por [reporte_ppt_plan()].
+#'
+#' @param env Entorno donde se buscará el acumulador (por defecto el entorno
+#'   del llamador, igual que [diapo()]).
+#' @return Objeto `ppt_plan` (lista de `ppt_slide`).
+#' @export
+p_get_plan <- function(env = parent.frame()) {
+  .ppt_plan_env(env)
+}
+
 
 # =============================================================================
 # RESET PPT — limpiar acumulados de diapo() + objetos diapo_###

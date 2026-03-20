@@ -15,7 +15,8 @@ reporte_ppt_plan(
   template_pptx = getOption("prosecnur.template_pptx", NA_character_),
   master = "Office Theme",
   mensajes_progreso = TRUE,
-  solo_lista = FALSE
+  solo_lista = FALSE,
+  build_render_meta = FALSE
 )
 }
 \arguments{

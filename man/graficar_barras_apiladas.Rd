@@ -78,7 +78,9 @@ graficar_barras_apiladas(
   canvas_h_legend_in = 0.75,
   canvas_h_caption_in = 0.4,
   canvas_h_panel_in = NULL,
+  canvas_h_panel_in_min = 0,
   canvas_h_toprow_in = 0.18,
+  canvas_min_filas = 2L,
   canvas_pad_bars_y_in = 0.12,
   grosor_modo = c("manual", "auto"),
   grosor_barras_mult = 1,
@@ -207,6 +209,10 @@ separación respecto a las etiquetas del cruce.}
 \item{canvas_w_etiquetas, canvas_w_buf_etq_bars, canvas_w_buf_bars_extra, canvas_w_bars, canvas_w_extra}{Anchos relativos de columnas del canvas (etiquetas, buffers, panel, extra).}
 
 \item{canvas_h_header_in, canvas_h_legend_in, canvas_h_caption_in, canvas_h_panel_in, canvas_h_toprow_in}{Alturas relativas (en pulgadas “virtuales”) para encabezado, panel, leyenda, caption y fila superior.}
+
+\item{canvas_min_filas}{Mínimo de filas virtuales cuando \code{usar_canvas = TRUE}.
+Sirve para mantener alineación y grosor visual consistente entre gráficos
+con una sola barra y gráficos con múltiples barras.}
 
 \item{canvas_pad_bars_y_in}{Padding vertical (in) dentro del placeholder del panel de barras (top/bottom).}
 
