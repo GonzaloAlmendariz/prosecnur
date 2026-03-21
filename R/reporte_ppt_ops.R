@@ -34,6 +34,7 @@
 #'   gráficos y el log de decisiones, de forma invisible si solo se genera
 #'   el archivo PPTX.
 #'
+#' @family reporte
 #' @export
 reporte_ppt_ops <- function(
     data,

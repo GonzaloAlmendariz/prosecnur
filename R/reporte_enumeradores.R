@@ -31,6 +31,7 @@
 #'   `output_file` (archivo general),
 #'   `output_files` (todos los PDFs generados),
 #'   `bundle` y `bundles`.
+#' @family reporte
 #' @export
 reporte_enumeradores <- function(
     data,
