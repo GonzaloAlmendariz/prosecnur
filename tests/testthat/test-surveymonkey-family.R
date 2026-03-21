@@ -223,7 +223,7 @@ test_that("familia surveymonkey_ genera XLSForm de referencia y data compatible"
   orden_p4 <- as.character(rp_inst$choices$name[rp_inst$choices$list_name == list_name_p4])
 
   recod <- expect_no_error(
-    prosecnur::reporte_recodificar_items(
+    prosecnur::reporte_dimensiones(
       data = rp_data,
       instrumento = rp_inst,
       vars = c("p4_1"),

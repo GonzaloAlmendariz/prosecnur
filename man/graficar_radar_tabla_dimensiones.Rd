@@ -22,35 +22,41 @@ graficar_radar_tabla_dimensiones(
 )
 }
 \arguments{
-\item{data}{Base recodificada e indexada.}
+\item{data}{Base recodificada e indexada; salida de
+\code{reporte_dimensiones() |> reporte_dimensiones_indices()}.}
 
-\item{modo}{\code{"general"} o \code{"indicadores"}.}
+\item{modo}{\code{"general"} (índices por subindices) o \code{"indicadores"} (subindices por ítem).}
 
-\item{objetivo}{Id técnico del catálogo.}
+\item{objetivo}{Id técnico del catálogo (columna \verb{idx_*} o clave de bloque).}
 
-\item{instrumento}{Instrumento opcional.}
+\item{instrumento}{Instrumento opcional. Si es \code{NULL}, se usa \code{attr(data, "instrumento_reporte")}.}
 
-\item{cruce}{Variable de comparación opcional.}
+\item{cruce}{Variable de comparación opcional (columna en \code{data}).}
 
 \item{incluir_total}{Si es \code{NULL}, usa el default interno.}
 
 \item{filtros}{Lista nombrada de filtros por variable.}
 
-\item{iter_var, iter_level}{Control opcional de iteración.}
+\item{iter_var, iter_level}{Variable y nivel opcionales de iteración.}
 
 \item{titulo, subtitulo, nota_pie}{Textos del gráfico.}
 
-\item{titulo_tabla}{Título de la primera columna de la tabla.}
+\item{titulo_tabla}{Título de la primera columna de la tabla adjunta.}
 
 \item{...}{Argumentos adicionales del radar, barras y tabla.}
 }
 \value{
-Objeto gráfico o exportación invisible.
+Objeto gráfico (canvas cowplot) o exportación invisible.
 }
 \description{
-Radar + tabla de dimensiones en canvas
+Visualiza indices y bloques de dimensiones como radar o barras, con una
+tabla adjunta de valores numéricos. Requiere que \code{data} sea la salida
+encadenada de \code{\link[=reporte_dimensiones]{reporte_dimensiones()}} y \code{\link[=reporte_dimensiones_indices]{reporte_dimensiones_indices()}}.
 }
 \seealso{
+\code{\link[=reporte_dimensiones]{reporte_dimensiones()}}, \code{\link[=reporte_dimensiones_indices]{reporte_dimensiones_indices()}},
+\code{\link[=reporte_dimensiones_config]{reporte_dimensiones_config()}}, \code{\link[=graficar_heatmap_dimensiones]{graficar_heatmap_dimensiones()}}
+
 Other graficador: 
 \code{\link{graficar_barras_agrupadas}()},
 \code{\link{graficar_barras_apiladas}()},

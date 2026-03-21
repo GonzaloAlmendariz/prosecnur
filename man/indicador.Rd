@@ -8,49 +8,58 @@ indicador(
   nombre,
   etiqueta = nombre,
   niveles,
+  definidores = NULL,
+  grupos = NULL,
+  solo_observados = TRUE,
   measure = c("NOMINAL", "ORDINAL"),
-  prioridad = c("primero", "ultimo")
+  ...
 )
 }
 \arguments{
-\item{nombre}{Nombre de la variable resultante (sin prefijo). Ejemplo:
-\code{"acceso_salud"}.}
+\item{nombre}{Nombre de la variable resultante (sin prefijo).}
 
-\item{etiqueta}{Etiqueta humana del indicador. Ejemplo:
-\code{"Acceso al servicio de salud"}. Por defecto usa \code{nombre}.}
+\item{etiqueta}{Etiqueta humana del indicador. Por defecto usa \\code{nombre}.}
 
-\item{niveles}{Lista de objetos \code{\link{nivel}()}.}
+\item{niveles}{Lista de objetos \\code{\\link{nivel}()}.}
 
-\item{measure}{Nivel de medición: \code{"NOMINAL"} (default) u
-\code{"ORDINAL"}.}
+\item{definidores}{Compatibilidad deprecada con API antigua.}
 
-\item{prioridad}{Resolución cuando una fila matchea múltiples niveles:
-\code{"primero"} (default) asigna el primer nivel que matchea según
-el orden de declaración.}
+\item{grupos}{Compatibilidad deprecada con API antigua.}
+
+\item{solo_observados}{Si \\code{TRUE} (default), no asigna nivel cuando
+una fila no tiene ningún dato observado en las variables evaluadas.}
+
+\item{measure}{Nivel de medición: \\code{"NOMINAL"} (default) u
+\\code{"ORDINAL"}.}
+
+\item{...}{Argumentos no soportados. Si se pasa \\code{prioridad}, se detiene
+con mensaje de migración.}
 }
 \value{
-Lista de clase \code{"prosecnur_indicador"}.
+Lista de clase \\code{"prosecnur_indicador"}.
 }
 \description{
 Constructor de la especificación completa de un indicador categórico.
-Un indicador agrupa múltiples niveles definidos con \code{\link{nivel}()},
-cada uno con una regla lógica. Al aplicarse con
-\code{\link{reporte_indicadores}()}, se crea una nueva variable categórica
-en el data.frame.
+Vía recomendada (nueva):
+\\itemize{
+\\item \\code{niveles} con \\code{cuando = ~ ...}.
+\\item Referencias entre niveles con \\code{nivel_<code>} (solo niveles previos).
+}
 }
 \details{
-Los indicadores son primariamente categóricos (niveles sin puntaje).
-Si se necesitan puntajes numéricos (escala 0-100), el indicador resultante
-puede pasarse a \code{\link{reporte_recodificar_items}()} como cualquier
-otra variable \code{select_one}.
+Compatibilidad (deprecada): también acepta la vía antigua
+\\code{definidores + usa + grupo}.
 }
 \seealso{
 Other indicador: 
+\code{\link{grupo}()},
+\code{\link{ind_helpers}},
+\code{\link{indice}()},
 \code{\link{nivel}()},
-\code{\link{reporte_construir_indices}()},
+\code{\link{reporte_dimensiones}()},
 \code{\link{reporte_dimensiones_config}()},
+\code{\link{reporte_dimensiones_indices}()},
 \code{\link{reporte_indicadores}()},
-\code{\link{reporte_recodificar_items}()},
-\code{\link{reporte_tablas_recodificadas}()}
+\code{\link{subindice}()}
 }
 \concept{indicador}

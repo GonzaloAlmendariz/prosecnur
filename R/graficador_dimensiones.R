@@ -428,24 +428,31 @@
 
 #' Heatmap semafórico de dimensiones en canvas
 #'
-#' @param data Base recodificada e indexada.
-#' @param modo `"general"` o `"indicadores"`.
-#' @param objetivo Id técnico del catálogo.
+#' Visualiza indices y subindices de dimensiones como heatmap semafórico (rojo /
+#' ámbar / verde). Requiere que `data` sea la salida encadenada de
+#' [reporte_dimensiones()] y [reporte_dimensiones_indices()].
+#'
+#' @param data Base recodificada e indexada; salida de
+#'   `reporte_dimensiones() |> reporte_dimensiones_indices()`.
+#' @param modo `"general"` (índices por subindices) o `"indicadores"` (subindices por ítem).
+#' @param objetivo Id técnico del catálogo (columna `idx_*` o clave de bloque).
 #' @param instrumento Instrumento opcional. Si es `NULL`, se usa `attr(data, "instrumento_reporte")`.
-#' @param cruce Variable de comparación opcional.
+#' @param cruce Variable de comparación opcional (columna en `data`).
 #' @param incluir_total Si es `NULL`, usa el default de la configuración interna.
 #' @param filtros Lista nombrada de filtros por variable.
-#' @param iter_var Variable opcional de iteración.
-#' @param iter_level Nivel opcional de iteración.
+#' @param iter_var Variable opcional de iteración (columna en `data`).
+#' @param iter_level Nivel específico de iteración.
 #' @param titulo,subtitulo,nota_pie Textos del gráfico.
 #' @param usar_canvas Si `TRUE`, compone encabezado, panel, leyenda y pie con `cowplot`.
 #' @param debug_ph_bordes,debug_ph_col,debug_ph_lwd Borde de depuración del canvas.
-#' @param exportar Tipo de exportación.
+#' @param exportar Tipo de exportación: `"rplot"`, `"png"`, `"ppt"` o `"word"`.
 #' @param path_salida Ruta de salida cuando `exportar != "rplot"`.
-#' @param ancho,alto,dpi Tamaño y resolución.
+#' @param ancho,alto,dpi Tamaño y resolución de exportación.
 #'
-#' @return Objeto gráfico o exportación invisible.
+#' @return Objeto gráfico (canvas cowplot) o exportación invisible.
 #' @family graficador
+#' @seealso [reporte_dimensiones()], [reporte_dimensiones_indices()],
+#'   [reporte_dimensiones_config()], [graficar_radar_dimensiones()]
 #' @export
 graficar_heatmap_dimensiones <- function(
     data,
@@ -668,19 +675,26 @@ graficar_heatmap_dimensiones <- function(
 
 #' Radar o barras de dimensiones en canvas
 #'
-#' @param data Base recodificada e indexada.
-#' @param modo `"general"` o `"indicadores"`.
-#' @param objetivo Id técnico del catálogo.
-#' @param instrumento Instrumento opcional.
-#' @param cruce Variable de comparación opcional.
+#' Visualiza indices y bloques de dimensiones como radar (cuando hay 3+ ejes)
+#' o barras numéricas comparativas. Requiere que `data` sea la salida encadenada
+#' de [reporte_dimensiones()] y [reporte_dimensiones_indices()].
+#'
+#' @param data Base recodificada e indexada; salida de
+#'   `reporte_dimensiones() |> reporte_dimensiones_indices()`.
+#' @param modo `"general"` (índices por subindices) o `"indicadores"` (subindices por ítem).
+#' @param objetivo Id técnico del catálogo (columna `idx_*` o clave de bloque).
+#' @param instrumento Instrumento opcional. Si es `NULL`, se usa `attr(data, "instrumento_reporte")`.
+#' @param cruce Variable de comparación opcional (columna en `data`).
 #' @param incluir_total Si es `NULL`, usa el default interno.
 #' @param filtros Lista nombrada de filtros por variable.
-#' @param iter_var,iter_level Control opcional de iteración.
+#' @param iter_var,iter_level Variable y nivel opcionales de iteración.
 #' @param titulo,subtitulo,nota_pie Textos del gráfico.
 #' @param ... Argumentos adicionales para `graficar_radar()` o `graficar_barras_numericas()`.
 #'
-#' @return Objeto gráfico o exportación invisible.
+#' @return Objeto gráfico (canvas cowplot) o exportación invisible.
 #' @family graficador
+#' @seealso [reporte_dimensiones()], [reporte_dimensiones_indices()],
+#'   [reporte_dimensiones_config()], [graficar_heatmap_dimensiones()]
 #' @export
 graficar_radar_dimensiones <- function(
     data,
@@ -782,20 +796,27 @@ graficar_radar_dimensiones <- function(
 
 #' Radar + tabla de dimensiones en canvas
 #'
-#' @param data Base recodificada e indexada.
-#' @param modo `"general"` o `"indicadores"`.
-#' @param objetivo Id técnico del catálogo.
-#' @param instrumento Instrumento opcional.
-#' @param cruce Variable de comparación opcional.
+#' Visualiza indices y bloques de dimensiones como radar o barras, con una
+#' tabla adjunta de valores numéricos. Requiere que `data` sea la salida
+#' encadenada de [reporte_dimensiones()] y [reporte_dimensiones_indices()].
+#'
+#' @param data Base recodificada e indexada; salida de
+#'   `reporte_dimensiones() |> reporte_dimensiones_indices()`.
+#' @param modo `"general"` (índices por subindices) o `"indicadores"` (subindices por ítem).
+#' @param objetivo Id técnico del catálogo (columna `idx_*` o clave de bloque).
+#' @param instrumento Instrumento opcional. Si es `NULL`, se usa `attr(data, "instrumento_reporte")`.
+#' @param cruce Variable de comparación opcional (columna en `data`).
 #' @param incluir_total Si es `NULL`, usa el default interno.
 #' @param filtros Lista nombrada de filtros por variable.
-#' @param iter_var,iter_level Control opcional de iteración.
+#' @param iter_var,iter_level Variable y nivel opcionales de iteración.
 #' @param titulo,subtitulo,nota_pie Textos del gráfico.
-#' @param titulo_tabla Título de la primera columna de la tabla.
+#' @param titulo_tabla Título de la primera columna de la tabla adjunta.
 #' @param ... Argumentos adicionales del radar, barras y tabla.
 #'
-#' @return Objeto gráfico o exportación invisible.
+#' @return Objeto gráfico (canvas cowplot) o exportación invisible.
 #' @family graficador
+#' @seealso [reporte_dimensiones()], [reporte_dimensiones_indices()],
+#'   [reporte_dimensiones_config()], [graficar_heatmap_dimensiones()]
 #' @export
 graficar_radar_tabla_dimensiones <- function(
     data,

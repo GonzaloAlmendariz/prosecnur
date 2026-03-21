@@ -18,5 +18,5 @@
   graficador = "Graficos reutilizables para reportes y tableros",
   interactivo = "Dashboard y modulos interactivos",
   surveymonkey = "Traduccion y adaptacion de exportaciones SurveyMonkey",
-  indicador = "Definicion de indicadores y puntajes (1-100)"
+  indicador = "Definicion de indicadores y puntajes (0-100)"
 )

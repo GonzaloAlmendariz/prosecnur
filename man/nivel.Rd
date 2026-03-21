@@ -4,35 +4,37 @@
 \alias{nivel}
 \title{Definir un nivel de un indicador}
 \usage{
-nivel(code, label = code, regla)
+nivel(code, label = code, cuando = NULL, usa = NULL)
 }
 \arguments{
 \item{code}{Código interno del nivel (character). Debe ser único dentro
-del indicador. Ejemplo: \code{"asistio_reciente"}.}
+del indicador.}
 
-\item{label}{Etiqueta humana del nivel. Ejemplo:
-\code{"Asistió en últimos 6 meses"}. Por defecto usa \code{code}.}
+\item{label}{Etiqueta humana del nivel. Por defecto usa \\code{code}.}
 
-\item{regla}{Fórmula de un lado (\code{~ expresión}) que se evalúa contra
-el data.frame. Debe retornar un vector lógico. Ejemplo:
-\code{~ p17 \%in\% c("1", "2")}.}
+\item{cuando}{Fórmula de un lado (\code{~ ...}) con la condición del nivel.
+Puede referenciar niveles previos con \verb{nivel_<code>} (ejemplo: \code{nivel_1}).}
+
+\item{usa}{Campo de compatibilidad con API antigua (deprecado).}
 }
 \value{
-Lista de clase \code{"prosecnur_nivel"}.
+Lista de clase \\code{"prosecnur_nivel"}.
 }
 \description{
 Constructor de un nivel individual dentro de un indicador categórico.
-Cada nivel tiene un código interno, una etiqueta humana y una regla lógica
-(fórmula de un lado) que se evalúa contra el data.frame para determinar
-qué filas pertenecen a este nivel.
+Cada nivel tiene un código interno, una etiqueta humana y una condición
+lógica en \code{cuando = ~ ...}.
 }
 \seealso{
 Other indicador: 
+\code{\link{grupo}()},
+\code{\link{ind_helpers}},
 \code{\link{indicador}()},
-\code{\link{reporte_construir_indices}()},
+\code{\link{indice}()},
+\code{\link{reporte_dimensiones}()},
 \code{\link{reporte_dimensiones_config}()},
+\code{\link{reporte_dimensiones_indices}()},
 \code{\link{reporte_indicadores}()},
-\code{\link{reporte_recodificar_items}()},
-\code{\link{reporte_tablas_recodificadas}()}
+\code{\link{subindice}()}
 }
 \concept{indicador}

@@ -28,6 +28,7 @@ mk_styles_cruces <- function() {
       valign         = "center",
       wrapText       = TRUE,
       fontColour     = "#000000",
+      fgFill         = "#FFFFFF",
       fontName       = "Arial"
     ),
     header = openxlsx::createStyle(
@@ -64,7 +65,8 @@ mk_styles_cruces <- function() {
       numFmt   = "#,##0",
       halign   = "right",
       valign   = "center",
-      fontName = "Arial"
+      fontName = "Arial",
+      fgFill   = "#FFFFFF"
     ),
 
     body_num = openxlsx::createStyle(
@@ -72,14 +74,16 @@ mk_styles_cruces <- function() {
       numFmt   = "#,##0.0",
       halign   = "right",
       valign   = "center",
-      fontName = "Arial"
+      fontName = "Arial",
+      fgFill   = "#FFFFFF"
     ),
     body_pct = openxlsx::createStyle(
       fontSize = 10,
       numFmt   = "0.0%",
       halign   = "right",
       valign   = "center",
-      fontName = "Arial"
+      fontName = "Arial",
+      fgFill   = "#FFFFFF"
     ),
     note = openxlsx::createStyle(
       fontSize       = 9,
@@ -88,6 +92,7 @@ mk_styles_cruces <- function() {
       valign         = "center",
       wrapText       = TRUE,
       textDecoration = "italic",
+      fgFill         = "#FFFFFF",
       fontName       = "Arial"
     ),
     total_bold = openxlsx::createStyle(
@@ -108,6 +113,7 @@ mk_styles_cruces <- function() {
       fontSize = 10,
       halign   = "center",
       valign   = "center",
+      fgFill   = "#FFFFFF",
       fontName = "Arial"
     )
   )
@@ -244,7 +250,69 @@ label_variable <- function(var, dic_vars = NULL, labels_override = NULL, data = 
   as.character(var)
 }
 
-.strip_prefijo_bloque <- function(estr_labels, s_lbl) {
+.strip_label_0100 <- function(x) {
+  out <- as.character(x)
+  out <- gsub("\\s*\\[0-100\\]\\s*$", "", out)
+  trimws(out)
+}
+
+.pick_cat_keys <- function(values, codes, labels) {
+  if (!length(codes) && !length(labels)) return(character(0))
+  if (!length(codes)) return(labels)
+  if (!length(labels)) return(codes)
+  vv <- as.character(values)
+  usa_codes  <- any(vv %in% codes)
+  usa_labels <- any(vv %in% labels)
+  if (isTRUE(usa_codes) || !isTRUE(usa_labels)) codes else labels
+}
+
+.dim_weighted_stats <- function(x, w, mask) {
+  x <- suppressWarnings(as.numeric(x))
+  w <- suppressWarnings(as.numeric(w))
+  idx <- if (length(mask) == length(x)) as.logical(mask) else rep(TRUE, length(x))
+  idx <- idx &
+    is.finite(x) & !is.na(x) &
+    is.finite(w) & !is.na(w) &
+    w > 0
+  n_valid <- sum(idx, na.rm = TRUE)
+  if (!n_valid) {
+    return(list(mean = NA_real_, sd = NA_real_, n = 0))
+  }
+  x_ok <- x[idx]
+  w_ok <- w[idx]
+  w_sum <- sum(w_ok, na.rm = TRUE)
+  if (!is.finite(w_sum) || w_sum <= 0) {
+    return(list(mean = NA_real_, sd = NA_real_, n = n_valid))
+  }
+  mu <- sum(w_ok * x_ok, na.rm = TRUE) / w_sum
+  var_w <- sum(w_ok * (x_ok - mu)^2, na.rm = TRUE) / w_sum
+  sd_w <- sqrt(var_w)
+  list(mean = as.numeric(mu), sd = as.numeric(sd_w), n = as.numeric(n_valid))
+}
+
+.dim_pretty_label <- function(var, data) {
+  if (is.null(var) || !length(var)) return("")
+  v <- as.character(var)[1]
+  lbl <- ""
+  if (!is.null(data) && v %in% names(data)) {
+    lb <- attr(data[[v]], "label", exact = TRUE)
+    if (!is.null(lb) && nzchar(trimws(as.character(lb)))) {
+      lbl <- as.character(lb)[1]
+    }
+  }
+  if (!nzchar(trimws(lbl))) {
+    lbl <- v
+  }
+  lbl <- .strip_label_0100(lbl)
+  if (!nzchar(lbl) || identical(lbl, v)) {
+    base <- gsub("^(r100_|sub_|idx_)", "", v)
+    base <- gsub("_", " ", base, fixed = TRUE)
+    lbl <- tools::toTitleCase(base)
+  }
+  trimws(lbl)
+}
+
+.strip_prefijo_subindice <- function(estr_labels, s_lbl) {
   if (!length(estr_labels)) return(estr_labels)
   pref <- paste0(trimws(as.character(s_lbl)), ":")
   labs <- trimws(as.character(estr_labels))
@@ -545,7 +613,7 @@ write_one_numeric_cross <- function(wb, sheet, data, var, dic_vars,
     s_lbl <- label_variable(s, dic_vars, labels_override, data)
 
     # Parche: si labels vienen como "Región: Callao", dejar "Callao"
-    estr_labels <- .strip_prefijo_bloque(estr_labels, s_lbl)
+    estr_labels <- .strip_prefijo_subindice(estr_labels, s_lbl)
 
     v_estr <- as.character(data[[s]])
     usa_codes  <- any(v_estr %in% estr_codes)
@@ -735,6 +803,67 @@ comparar_columnas_sig <- function(n_mat, N_vec, alpha = 0.05) {
         }
       }
     }
+    letras[i, lock] <- ifelse(nzchar(letras[i, lock]), letras[i, lock], ".a")
+  }
+
+  list(letras = letras, sig = sig)
+}
+
+comparar_medias_sig <- function(medias_mat, ns_mat, sds_mat, alpha = 0.05) {
+  K <- ncol(medias_mat)
+  R <- nrow(medias_mat)
+
+  letras <- matrix("", R, K, dimnames = dimnames(medias_mat))
+  sig    <- matrix(FALSE, R, K, dimnames = dimnames(medias_mat))
+
+  for (i in seq_len(R)) {
+    idx <- which(!is.na(medias_mat[i, ]) & ns_mat[i, ] >= 2)
+    if (length(idx) < 2) next
+
+    pairs <- utils::combn(idx, 2, simplify = TRUE)
+    pvals <- apply(pairs, 2, function(ab) {
+      a <- ab[1]
+      b <- ab[2]
+      m1 <- medias_mat[i, a]
+      m2 <- medias_mat[i, b]
+      s1 <- sds_mat[i, a]
+      s2 <- sds_mat[i, b]
+      n1 <- ns_mat[i, a]
+      n2 <- ns_mat[i, b]
+
+      if (any(is.na(c(m1, m2, s1, s2, n1, n2))) || (s1 == 0 && s2 == 0)) {
+        return(NA_real_)
+      }
+
+      v1 <- s1^2 / n1
+      v2 <- s2^2 / n2
+      se <- sqrt(v1 + v2)
+      if (!is.finite(se) || se <= 0) return(NA_real_)
+
+      den_df <- (v1^2 / (n1 - 1)) + (v2^2 / (n2 - 1))
+      if (!is.finite(den_df) || den_df <= 0) return(NA_real_)
+
+      t_stat <- (m1 - m2) / se
+      df <- (v1 + v2)^2 / den_df
+      if (!is.finite(df) || df <= 0) return(NA_real_)
+
+      2 * stats::pt(-abs(t_stat), df = df)
+    })
+
+    padj <- stats::p.adjust(pvals, method = "bonferroni")
+    for (k in seq_along(padj)) {
+      if (is.na(padj[k]) || padj[k] >= alpha) next
+      a <- pairs[1, k]
+      b <- pairs[2, k]
+      if (medias_mat[i, a] > medias_mat[i, b]) {
+        letras[i, a] <- trimws(paste(letras[i, a], LETTERS[b]))
+        sig[i, a] <- TRUE
+      } else if (medias_mat[i, b] > medias_mat[i, a]) {
+        letras[i, b] <- trimws(paste(letras[i, b], LETTERS[a]))
+        sig[i, b] <- TRUE
+      }
+    }
+    lock <- is.na(medias_mat[i, ]) | ns_mat[i, ] < 2
     letras[i, lock] <- ifelse(nzchar(letras[i, lock]), letras[i, lock], ".a")
   }
 
@@ -1075,7 +1204,7 @@ exportar_cruces_multi <- function(data,
         s_lbl <- label_variable(s, dic_vars, labels_override, data)
 
         # Parche: si viene como "Región: Callao", dejar solo "Callao"
-        estr_labels <- .strip_prefijo_bloque(estr_labels, s_lbl)
+        estr_labels <- .strip_prefijo_subindice(estr_labels, s_lbl)
 
         # Guardar ya limpio
         estratos_totales[[s]] <- list(codes = estr_codes, labels = estr_labels)
@@ -1477,67 +1606,1500 @@ exportar_cruces_multi <- function(data,
 }
 
 # =============================================================================
+# Dimensiones (modo especializado para variables 0-100)
+# =============================================================================
+
+.dim_footer_from_meta <- function(data, fuente = "Pulso PUCP") {
+  `%||%` <- function(x, y) if (!is.null(x)) x else y
+
+  rec_meta <- attr(data, "recodificacion_items_meta", exact = TRUE)
+  idx_meta <- attr(data, "indices_meta", exact = TRUE)
+
+  if ((!is.list(rec_meta) || !length(rec_meta)) &&
+      (!is.list(idx_meta) || !length(idx_meta))) {
+    return(paste0("Fuente: ", fuente))
+  }
+
+  fmt_num <- function(x) {
+    out <- suppressWarnings(as.numeric(x))
+    if (is.na(out)) return(NA_character_)
+    format(round(out, 2), trim = TRUE, scientific = FALSE)
+  }
+
+  item_lines <- list()
+  if (is.list(rec_meta) && length(rec_meta)) {
+    for (nm in names(rec_meta)) {
+      it <- rec_meta[[nm]]
+      out_var <- as.character(it$variable_salida %||% nm)[1]
+      it_lbl <- .dim_pretty_label(out_var, data)
+
+      map <- it$mapeo
+      escala <- ""
+      if (is.data.frame(map) && nrow(map)) {
+        lab_col <- if ("etiqueta" %in% names(map)) {
+          "etiqueta"
+        } else if ("label" %in% names(map)) {
+          "label"
+        } else {
+          names(map)[1]
+        }
+        score_col <- if ("score_0_100" %in% names(map)) {
+          "score_0_100"
+        } else if ("score" %in% names(map)) {
+          "score"
+        } else {
+          NA_character_
+        }
+
+        labs <- as.character(map[[lab_col]])
+        scores <- if (!is.na(score_col)) {
+          suppressWarnings(as.numeric(map[[score_col]]))
+        } else {
+          rep(NA_real_, length(labs))
+        }
+
+        ok <- !is.na(labs) & nzchar(trimws(labs))
+        labs <- labs[ok]
+        scores <- scores[ok]
+
+        if (length(labs)) {
+          pares <- vapply(seq_along(labs), function(i) {
+            sc <- fmt_num(scores[i])
+            if (is.na(sc)) labs[i] else paste0(labs[i], " (", sc, ")")
+          }, character(1))
+          escala <- paste(pares, collapse = " -> ")
+        }
+      }
+
+      item_line <- if (nzchar(escala)) {
+        paste0("  - ", it_lbl, ": ", escala)
+      } else {
+        paste0("  - ", it_lbl)
+      }
+
+      item_lines[[out_var]] <- item_line
+      item_lines[[nm]] <- item_line
+    }
+  }
+
+  subindices_lines <- character(0)
+
+  subindices_meta <- if (is.list(idx_meta) && is.list(idx_meta$subindices)) idx_meta$subindices else list()
+  if (length(subindices_meta)) {
+    for (id in names(subindices_meta)) {
+      sl <- subindices_meta[[id]]
+      out_var <- as.character(sl$salida %||% paste0("sub_", id))[1]
+      sl_lbl <- sl$etiqueta %||% .dim_pretty_label(out_var, data)
+      subindices_lines <- c(subindices_lines, paste0("- ", sl_lbl, ": promedio de:"))
+
+      vars_sl <- unique(as.character(sl$vars %||% character(0)))
+      vars_sl <- vars_sl[!is.na(vars_sl) & nzchar(trimws(vars_sl))]
+      if (!length(vars_sl)) {
+        subindices_lines <- c(subindices_lines, "  - Componentes no disponibles")
+        next
+      }
+
+      for (v in vars_sl) {
+        ln <- item_lines[[v]]
+        if (is.null(ln) || !nzchar(trimws(ln))) {
+          ln <- paste0("  - ", .dim_pretty_label(v, data))
+        }
+        subindices_lines <- c(subindices_lines, ln)
+      }
+    }
+  }
+
+  indices_lines <- character(0)
+  indices <- if (is.list(idx_meta) && is.list(idx_meta$indices)) idx_meta$indices else list()
+  if (length(indices)) {
+    for (id in names(indices)) {
+      ix <- indices[[id]]
+      out_var <- as.character(ix$salida %||% paste0("idx_", id))[1]
+      ix_lbl <- ix$etiqueta %||% .dim_pretty_label(out_var, data)
+      refs <- unique(as.character(ix$refs_resueltas %||% ix$refs %||% character(0)))
+      refs <- refs[!is.na(refs) & nzchar(trimws(refs))]
+
+      if (!length(refs)) {
+        indices_lines <- c(indices_lines, paste0("- ", ix_lbl, ": indice agregado"))
+        next
+      }
+
+      refs_lbl <- vapply(refs, function(r) {
+        r2 <- if (r %in% names(data)) {
+          r
+        } else if (paste0("sub_", r) %in% names(data)) {
+          paste0("sub_", r)
+        } else {
+          r
+        }
+        .dim_pretty_label(r2, data)
+      }, character(1))
+
+      indices_lines <- c(indices_lines, paste0("- ", ix_lbl, ": promedio de ", paste(refs_lbl, collapse = ", ")))
+    }
+  }
+
+  partes <- c(
+    "1) Enfoque general:",
+    "Este tablero reporta indicadores en escala de 0 a 100 y usa ponderadores cuando hay una variable de pesos disponible."
+  )
+
+  if (length(item_lines)) {
+    partes <- c(
+      partes,
+      "",
+      "2) Recodificacion de items a escala 0-100:",
+      unname(unique(unlist(item_lines)))
+    )
+  }
+
+  if (length(subindices_lines)) {
+    partes <- c(
+      partes,
+      "",
+      "3) Construccion de subindices:",
+      subindices_lines
+    )
+  }
+
+  if (length(indices_lines)) {
+    partes <- c(
+      partes,
+      "",
+      "4) Construccion de indices:",
+      indices_lines
+    )
+  }
+
+  partes <- c(partes, "", paste0("Fuente: ", fuente))
+  paste(partes, collapse = "\n")
+}
+
+.dim_metodologia_df <- function(data,
+                                fuente = "Pulso PUCP",
+                                fila = NULL,
+                                cruces = NULL,
+                                aplicar_semaforo = FALSE,
+                                semaforo_cortes = c(50, 75),
+                                hay_brecha = FALSE,
+                                show_sig = TRUE,
+                                alpha = 0.05) {
+  `%||%` <- function(x, y) if (!is.null(x)) x else y
+
+  rec_meta <- attr(data, "recodificacion_items_meta", exact = TRUE)
+  idx_meta <- attr(data, "indices_meta", exact = TRUE)
+
+  fmt_num <- function(x) {
+    out <- suppressWarnings(as.numeric(x))
+    if (is.na(out)) return(NA_character_)
+    format(round(out, 2), trim = TRUE, scientific = FALSE)
+  }
+
+  fmt_escala <- function(map) {
+    if (!is.data.frame(map) || !nrow(map)) return("")
+    lab_col <- if ("etiqueta" %in% names(map)) {
+      "etiqueta"
+    } else if ("label" %in% names(map)) {
+      "label"
+    } else {
+      names(map)[1]
+    }
+    score_col <- if ("score_0_100" %in% names(map)) {
+      "score_0_100"
+    } else if ("score" %in% names(map)) {
+      "score"
+    } else {
+      NA_character_
+    }
+
+    labs <- as.character(map[[lab_col]])
+    scores <- if (!is.na(score_col)) suppressWarnings(as.numeric(map[[score_col]])) else rep(NA_real_, length(labs))
+    ok <- !is.na(labs) & nzchar(trimws(labs))
+    labs <- labs[ok]
+    scores <- scores[ok]
+    if (!length(labs)) return("")
+
+    pares <- vapply(seq_along(labs), function(i) {
+      sc <- fmt_num(scores[i])
+      if (is.na(sc)) labs[i] else paste0(labs[i], " (", sc, ")")
+    }, character(1))
+    paste(pares, collapse = " -> ")
+  }
+
+  rows <- list()
+  add_row <- function(tipo, elemento, detalle = "") {
+    rows[[length(rows) + 1L]] <<- data.frame(
+      tipo = as.character(tipo),
+      elemento = as.character(elemento),
+      detalle = as.character(detalle),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  add_row(
+    "heading",
+    "1) Enfoque general",
+    "Este tablero reporta indicadores en escala de 0 a 100 y usa ponderadores cuando hay una variable de pesos disponible."
+  )
+
+  if (is.list(rec_meta) && length(rec_meta)) {
+    add_row("heading", "2) Recodificacion de items (0-100)", "")
+    for (nm in names(rec_meta)) {
+      it <- rec_meta[[nm]]
+      src_var <- as.character(it$variable %||% nm)[1]
+
+      lbl_src <- as.character(it$label %||% "")[1]
+      if (!nzchar(trimws(lbl_src))) {
+        lbl_src <- .dim_pretty_label(src_var, data)
+      }
+      escala <- fmt_escala(it$mapeo)
+
+      det <- if (nzchar(escala)) {
+        paste0("Escala 0-100: ", escala)
+      } else {
+        "Recodificado en escala 0-100."
+      }
+      add_row("item", paste0(src_var, " - ", lbl_src), det)
+    }
+  }
+
+  subindices_meta2 <- if (is.list(idx_meta) && is.list(idx_meta$subindices)) idx_meta$subindices else list()
+  if (length(subindices_meta2)) {
+    add_row("heading", "3) Construccion de subindices", "")
+    for (id in names(subindices_meta2)) {
+      sl <- subindices_meta2[[id]]
+      out_var <- as.character(sl$salida %||% paste0("sub_", id))[1]
+      sl_lbl <- sl$etiqueta %||% .dim_pretty_label(out_var, data)
+      vars_sl <- unique(as.character(sl$vars %||% character(0)))
+      vars_sl <- vars_sl[!is.na(vars_sl) & nzchar(trimws(vars_sl))]
+
+      det <- if (length(vars_sl)) {
+        comp <- vapply(vars_sl, function(v) .dim_pretty_label(v, data), FUN.VALUE = character(1))
+        paste0("Promedio simple de: ", paste(comp, collapse = ", "))
+      } else {
+        "Componentes no disponibles"
+      }
+      add_row("item", sl_lbl, det)
+    }
+  }
+
+  indices <- if (is.list(idx_meta) && is.list(idx_meta$indices)) idx_meta$indices else list()
+  if (length(indices)) {
+    add_row("heading", "4) Construccion de indices", "")
+    for (id in names(indices)) {
+      ix <- indices[[id]]
+      out_var <- as.character(ix$salida %||% paste0("idx_", id))[1]
+      ix_lbl <- ix$etiqueta %||% .dim_pretty_label(out_var, data)
+      refs <- unique(as.character(ix$refs_resueltas %||% ix$refs %||% character(0)))
+      refs <- refs[!is.na(refs) & nzchar(trimws(refs))]
+
+      det <- if (length(refs)) {
+        refs_lbl <- vapply(refs, function(r) {
+          r2 <- if (r %in% names(data)) {
+            r
+          } else if (paste0("sub_", r) %in% names(data)) {
+            paste0("sub_", r)
+          } else {
+            r
+          }
+          .dim_pretty_label(r2, data)
+        }, character(1))
+        paste0("Promedio simple de: ", paste(refs_lbl, collapse = ", "))
+      } else {
+        "Indice agregado"
+      }
+
+      add_row("item", ix_lbl, det)
+    }
+  }
+
+  add_row("source", "Fuente", as.character(fuente))
+
+  do.call(rbind, rows)
+}
+
+exportar_dimensiones_multi <- function(data,
+                                       dic_vars,
+                                       SECCIONES,
+                                       fila,
+                                       cruzar_dim       = NULL,
+                                       incluir_total    = TRUE,
+                                       brecha_filas     = FALSE,
+                                       etiq_brecha_filas = "Brecha",
+                                       brecha_cols      = FALSE,
+                                       etiq_brecha_cols = "Brecha",
+                                       tablas           = NULL,
+                                       labels_override  = NULL,
+                                       path_xlsx        = "cruces_multi.xlsx",
+                                       hoja             = "Cruces",
+                                       fuente           = "Pulso PUCP",
+                                       survey           = NULL,
+                                       orders_list      = NULL,
+                                       weight_col       = "peso",
+                                       opciones_excluir = NULL,
+                                       show_sig         = TRUE,
+                                       alpha            = 0.05,
+                                       digits           = 1,
+                                       aplicar_semaforo = TRUE,
+                                       semaforo_cortes  = c(50, 75),
+                                       semaforo_colores = c(
+                                         rojo = "#F8D7DA",
+                                         amarillo = "#FFF3CD",
+                                         verde = "#D4EDDA"
+                                       ),
+                                       aplicar_gradiente_brecha = TRUE,
+                                       brecha_colores = c(
+                                         bajo = "#FFFFFF",
+                                         alto = "#F4B183"
+                                       ),
+                                       brecha_cortes = c(0, 30)) {
+  `%||%` <- function(x, y) if (!is.null(x)) x else y
+  .clean_chr <- function(x) {
+    y <- as.character(x)
+    y <- y[!is.na(y) & nzchar(trimws(y))]
+    unique(trimws(y))
+  }
+  .sanitize_sheet_name <- function(x, fallback = "Resultados") {
+    out <- as.character(x)[1]
+    if (is.na(out) || !nzchar(trimws(out))) out <- fallback
+    out <- trimws(out)
+    out <- gsub("[:\\\\/\\?\\*\\[\\]]", "-", out)
+    if (!nzchar(out)) out <- fallback
+    substr(out, 1, 31)
+  }
+  .numfmt <- function(dg) {
+    if (!is.finite(dg) || is.na(dg) || dg < 0) dg <- 1L
+    dg <- as.integer(dg)
+    if (dg == 0L) "#,##0" else paste0("#,##0.", paste(rep("0", dg), collapse = ""))
+  }
+  .coerce_nonneg_int <- function(x, default = 0L) {
+    y <- suppressWarnings(as.integer(x)[1])
+    if (!is.finite(y) || is.na(y) || y < 0L) as.integer(default) else y
+  }
+  .letters_ref <- function(n) {
+    if (!is.finite(n) || is.na(n) || n <= 0) return(character(0))
+    vapply(seq_len(as.integer(n)), function(i) openxlsx::int2col(i), FUN.VALUE = character(1))
+  }
+  .to_rgb <- function(col, fallback = "#FFFFFF") {
+    x <- tryCatch(grDevices::col2rgb(col), error = function(e) NULL)
+    if (is.null(x)) x <- grDevices::col2rgb(fallback)
+    as.numeric(x[, 1])
+  }
+  .mix_color <- function(col_bajo, col_alto, t) {
+    t <- pmax(0, pmin(1, as.numeric(t)))
+    r0 <- .to_rgb(col_bajo, "#FFFFFF")
+    r1 <- .to_rgb(col_alto, "#F4B183")
+    rr <- round(r0 + (r1 - r0) * t)
+    grDevices::rgb(rr[1], rr[2], rr[3], maxColorValue = 255)
+  }
+
+  etiq_brecha_filas <- as.character(etiq_brecha_filas)[1]
+  if (!nzchar(trimws(etiq_brecha_filas))) etiq_brecha_filas <- "Brecha"
+  etiq_brecha_cols <- as.character(etiq_brecha_cols)[1]
+  if (!nzchar(trimws(etiq_brecha_cols))) etiq_brecha_cols <- "Brecha"
+  digits <- suppressWarnings(as.integer(digits)[1])
+  if (!is.finite(digits) || is.na(digits) || digits < 0L) {
+    stop("`digits` debe ser un entero mayor o igual a 0.", call. = FALSE)
+  }
+  aplicar_semaforo <- isTRUE(aplicar_semaforo)
+  semaforo_cortes <- suppressWarnings(as.numeric(semaforo_cortes))
+  semaforo_cortes <- semaforo_cortes[is.finite(semaforo_cortes) & !is.na(semaforo_cortes)]
+  if (length(semaforo_cortes) < 2L) semaforo_cortes <- c(50, 75)
+  semaforo_cortes <- sort(semaforo_cortes)[1:2]
+  semaforo_cortes <- pmax(0, pmin(100, semaforo_cortes))
+  if (semaforo_cortes[1] >= semaforo_cortes[2]) semaforo_cortes <- c(50, 75)
+
+  semaforo_colores <- as.character(semaforo_colores)
+  nmsc <- names(semaforo_colores %||% character(0))
+  if (is.null(nmsc)) nmsc <- character(0)
+  col_rojo <- if ("rojo" %in% nmsc) semaforo_colores[["rojo"]] else "#F8D7DA"
+  col_ambar <- if ("amarillo" %in% nmsc) semaforo_colores[["amarillo"]] else "#FFF3CD"
+  col_verde <- if ("verde" %in% nmsc) semaforo_colores[["verde"]] else "#D4EDDA"
+  aplicar_gradiente_brecha <- isTRUE(aplicar_gradiente_brecha)
+  brecha_colores <- as.character(brecha_colores)
+  nmbc <- names(brecha_colores %||% character(0))
+  if (is.null(nmbc)) nmbc <- character(0)
+  col_brecha_bajo <- if ("bajo" %in% nmbc) brecha_colores[["bajo"]] else if (length(brecha_colores) >= 1L) brecha_colores[1] else "#FFFFFF"
+  col_brecha_alto <- if ("alto" %in% nmbc) brecha_colores[["alto"]] else if (length(brecha_colores) >= 2L) brecha_colores[2] else "#F4B183"
+  brecha_cortes <- suppressWarnings(as.numeric(brecha_cortes))
+  brecha_cortes <- brecha_cortes[is.finite(brecha_cortes) & !is.na(brecha_cortes)]
+  if (length(brecha_cortes) < 2L) brecha_cortes <- c(0, 30)
+  brecha_cortes <- sort(brecha_cortes)[1:2]
+  brecha_corte_min <- brecha_cortes[1]
+  brecha_corte_max <- brecha_cortes[2]
+
+  hoja_meta <- .sanitize_sheet_name("Metodologia", fallback = "Metodologia")
+
+  plan_tablas <- list()
+  if (is.null(tablas)) {
+    if (!is.list(SECCIONES) || !length(SECCIONES)) {
+      stop("`SECCIONES` debe ser una lista nombrada de variables de indicadores.", call. = FALSE)
+    }
+    if (is.null(names(SECCIONES))) {
+      names(SECCIONES) <- paste0("SECCION_", seq_along(SECCIONES))
+    }
+    if (!length(fila) || is.na(fila) || !nzchar(trimws(as.character(fila)[1]))) {
+      stop("En modo `dimensiones`, `cruces` debe tener exactamente una variable de fila.", call. = FALSE)
+    }
+    fila <- as.character(fila)[1]
+    for (sec in names(SECCIONES)) {
+      plan_tablas[[length(plan_tablas) + 1L]] <- list(
+        titulo = as.character(sec),
+        indicadores = SECCIONES[[sec]],
+        fila = fila,
+        cruzar_dim = cruzar_dim,
+        hoja = hoja,
+        incluir_total = isTRUE(incluir_total),
+        brecha_filas = isTRUE(brecha_filas),
+        etiq_brecha_filas = etiq_brecha_filas,
+        brecha_cols = isTRUE(brecha_cols),
+        etiq_brecha_cols = etiq_brecha_cols,
+        espacio_antes = 0L,
+        espacio_despues = 1L
+      )
+    }
+  } else {
+    if (!is.list(tablas) || !length(tablas)) {
+      stop("`tablas` debe ser una lista no vacía.", call. = FALSE)
+    }
+
+    # --- Auto-expansión sobre tablas raw: idx_* se desglosa en sus subíndices ---
+    idx_meta_raw <- attr(data, "indices_meta", exact = TRUE)
+    meta_idx_map  <- if (is.list(idx_meta_raw) && is.list(idx_meta_raw$indices)) idx_meta_raw$indices else list()
+    meta_sub_map  <- if (is.list(idx_meta_raw) && is.list(idx_meta_raw$subindices)) idx_meta_raw$subindices else list()
+
+    .expand_idx_to_subs <- function(tb_in) {
+      inds_raw <- .clean_chr(tb_in$indicadores %||% tb_in$secciones %||% character(0))
+      if (length(inds_raw) != 1L || !grepl("^idx_", inds_raw)) return(list(tb_in))
+
+      idx_key <- NULL
+      for (nm in names(meta_idx_map)) {
+        salida <- as.character(meta_idx_map[[nm]]$salida %||% paste0("idx_", nm))[1]
+        if (identical(salida, inds_raw)) { idx_key <- nm; break }
+      }
+      if (is.null(idx_key)) return(list(tb_in))
+
+      idx_entry <- meta_idx_map[[idx_key]]
+      idx_etiq  <- as.character(idx_entry$etiqueta %||% idx_key)[1]
+
+      # titulo y hoja: respetar si el usuario los especificó explícitamente
+      tb_in$titulo <- as.character(tb_in$titulo %||% idx_etiq)[1]
+      tb_in$hoja   <- .sanitize_sheet_name(tb_in$hoja %||% idx_etiq, fallback = idx_etiq)
+
+      refs <- unique(as.character(idx_entry$refs %||% character(0)))
+      refs <- refs[!is.na(refs) & nzchar(trimws(refs))]
+
+      sub_tables <- list()
+      first_sub <- TRUE
+      for (r in refs) {
+        sub_entry <- meta_sub_map[[r]]
+        if (is.null(sub_entry)) next
+        sub_var <- as.character(sub_entry$salida %||% paste0("sub_", r))[1]
+        if (!(sub_var %in% names(data))) next
+
+        sub_tb <- tb_in
+        sub_tb$titulo        <- as.character(sub_entry$etiqueta %||% r)[1]
+        sub_tb$indicadores   <- sub_var
+        sub_tb$espacio_antes <- if (first_sub) 3L else 1L
+        sub_tables <- c(sub_tables, list(sub_tb))
+        first_sub <- FALSE
+      }
+
+      c(list(tb_in), sub_tables)
+    }
+
+    tablas_exp <- list()
+    for (tb_raw in tablas) {
+      if (!is.list(tb_raw)) stop("Cada elemento de `tablas` debe ser una lista.", call. = FALSE)
+      tablas_exp <- c(tablas_exp, .expand_idx_to_subs(tb_raw))
+    }
+
+    nms <- names(tablas_exp)
+    for (i in seq_along(tablas_exp)) {
+      tb <- tablas_exp[[i]]
+      indicadores_i <- tb$indicadores %||% tb$secciones %||% character(0)
+      titulo_guess <- if (!is.null(tb$titulo) && nzchar(trimws(as.character(tb$titulo)[1]))) {
+        as.character(tb$titulo)[1]
+      } else if (length(indicadores_i)) {
+        lbl_guess <- label_variable(indicadores_i[1], data = data, dic = dic_vars)
+        .strip_label_0100(lbl_guess)
+      } else if (!is.null(nms) && nzchar(nms[i])) {
+        nms[i]
+      } else {
+        paste0("TABLA_", i)
+      }
+      titulo_i <- as.character(titulo_guess)[1]
+      fila_i <- as.character(tb$fila %||% fila)[1]
+      cruz_i <- tb$cruzar_dim %||% tb$cruzar_con %||% cruzar_dim
+      incluir_total_i <- if (!is.null(tb$incluir_total)) isTRUE(tb$incluir_total) else isTRUE(incluir_total)
+      brecha_filas_i <- if (!is.null(tb$brecha_filas)) isTRUE(tb$brecha_filas) else isTRUE(brecha_filas)
+      etiq_brecha_filas_i <- as.character(tb$etiq_brecha_filas %||% etiq_brecha_filas)[1]
+      if (!nzchar(trimws(etiq_brecha_filas_i))) etiq_brecha_filas_i <- "Brecha"
+      brecha_cols_i <- if (!is.null(tb$brecha_cols)) isTRUE(tb$brecha_cols) else isTRUE(brecha_cols)
+      etiq_brecha_cols_i <- as.character(tb$etiq_brecha_cols %||% etiq_brecha_cols)[1]
+      if (!nzchar(trimws(etiq_brecha_cols_i))) etiq_brecha_cols_i <- "Brecha"
+      espacio_antes_i <- .coerce_nonneg_int(tb$espacio_antes %||% 0L, default = 0L)
+      espacio_despues_i <- .coerce_nonneg_int(tb$espacio_despues %||% 1L, default = 1L)
+
+      plan_tablas[[length(plan_tablas) + 1L]] <- list(
+        titulo = titulo_i,
+        indicadores = indicadores_i,
+        fila = fila_i,
+        cruzar_dim = cruz_i,
+        hoja = as.character(tb$hoja %||% hoja)[1],
+        incluir_total = incluir_total_i,
+        brecha_filas = brecha_filas_i,
+        etiq_brecha_filas = etiq_brecha_filas_i,
+        brecha_cols = brecha_cols_i,
+        etiq_brecha_cols = etiq_brecha_cols_i,
+        espacio_antes = espacio_antes_i,
+        espacio_despues = espacio_despues_i
+      )
+    }
+  }
+
+  for (k in seq_along(plan_tablas)) {
+    tb <- plan_tablas[[k]]
+    titulo_k <- as.character(tb$titulo)[1]
+
+    fila_k <- as.character(tb$fila)[1]
+    if (!nzchar(trimws(fila_k)) || !(fila_k %in% names(data))) {
+      stop("La variable de fila `", fila_k, "` no existe en `data` (tabla: ", titulo_k, ").", call. = FALSE)
+    }
+
+    inds_k <- .clean_chr(tb$indicadores)
+    if (!length(inds_k)) {
+      stop("La tabla `", titulo_k, "` no tiene indicadores válidos.", call. = FALSE)
+    }
+
+    missing_vars <- setdiff(inds_k, names(data))
+    if (length(missing_vars)) {
+      stop(
+        "Variables no encontradas en `data` (tabla ", titulo_k, "): ",
+        paste(missing_vars, collapse = ", "),
+        call. = FALSE
+      )
+    }
+
+    no_num <- inds_k[!vapply(inds_k, function(v) is.numeric(data[[v]]), logical(1))]
+    if (length(no_num)) {
+      stop(
+        "En modo `dimensiones`, todos los indicadores deben ser numéricos (tabla ",
+        titulo_k, "). No numéricos: ", paste(no_num, collapse = ", "),
+        call. = FALSE
+      )
+    }
+
+    pref_ok <- grepl("^(r100_|sub_|idx_)", inds_k)
+    if (any(!pref_ok)) {
+      warning(
+        "Tabla `", titulo_k, "`: variables fuera de prefijos esperados (r100_, sub_, idx_): ",
+        paste(inds_k[!pref_ok], collapse = ", "),
+        call. = FALSE
+      )
+    }
+
+    cruz_k <- .clean_chr(tb$cruzar_dim)
+    cruz_k <- intersect(cruz_k, names(data))
+    cruz_k <- setdiff(cruz_k, fila_k)
+    hoja_k <- .sanitize_sheet_name(tb$hoja %||% hoja, fallback = hoja)
+    if (identical(tolower(hoja_k), tolower(hoja_meta))) {
+      hoja_k <- .sanitize_sheet_name(paste0(hoja_k, "_tablas"), fallback = "Resultados")
+    }
+
+    plan_tablas[[k]]$indicadores <- inds_k
+    plan_tablas[[k]]$fila <- fila_k
+    plan_tablas[[k]]$cruzar_dim <- cruz_k
+    plan_tablas[[k]]$hoja <- hoja_k
+    plan_tablas[[k]]$incluir_total <- isTRUE(tb$incluir_total)
+    plan_tablas[[k]]$brecha_filas <- isTRUE(tb$brecha_filas)
+    plan_tablas[[k]]$etiq_brecha_filas <- as.character(tb$etiq_brecha_filas)[1]
+    plan_tablas[[k]]$brecha_cols <- isTRUE(tb$brecha_cols)
+    plan_tablas[[k]]$etiq_brecha_cols <- as.character(tb$etiq_brecha_cols)[1]
+    plan_tablas[[k]]$espacio_antes <- .coerce_nonneg_int(tb$espacio_antes %||% 0L, default = 0L)
+    plan_tablas[[k]]$espacio_despues <- .coerce_nonneg_int(tb$espacio_despues %||% 1L, default = 1L)
+  }
+
+  w <- get_pesos(data, weight_col)
+  st <- mk_styles_cruces()
+  style_num_dim <- openxlsx::createStyle(
+    fontSize = 10,
+    numFmt = .numfmt(digits),
+    halign = "right",
+    valign = "center",
+    fontName = "Arial"
+  )
+  st_blanco    <- openxlsx::createStyle(fgFill = "#FFFFFF", fontName = "Arial")
+  st_sem_rojo  <- openxlsx::createStyle(fgFill = col_rojo,  fontName = "Arial")
+  st_sem_ambar <- openxlsx::createStyle(fgFill = col_ambar, fontName = "Arial")
+  st_sem_verde <- openxlsx::createStyle(fgFill = col_verde, fontName = "Arial")
+
+  wb <- openxlsx::createWorkbook()
+  footer_source <- paste0("Fuente: ", fuente)
+  meta_df <- .dim_metodologia_df(data = data, fuente = fuente)
+
+  st_meta_h <- openxlsx::createStyle(
+    fontSize = 11,
+    textDecoration = "bold",
+    halign = "left",
+    valign = "center",
+    wrapText = TRUE,
+    fontName = "Arial"
+  )
+  st_meta_label <- openxlsx::createStyle(
+    fontSize = 10,
+    textDecoration = "italic",
+    halign = "left",
+    valign = "top",
+    wrapText = TRUE,
+    fontName = "Arial"
+  )
+  st_meta_t <- openxlsx::createStyle(
+    fontSize = 10,
+    halign = "left",
+    valign = "top",
+    wrapText = TRUE,
+    fontName = "Arial"
+  )
+
+  openxlsx::addWorksheet(wb, hoja_meta)
+  openxlsx::writeData(wb, hoja_meta, "METODOLOGIA DE DIMENSIONES", startRow = 1, startCol = 1, colNames = FALSE)
+  openxlsx::mergeCells(wb, hoja_meta, rows = 1, cols = 1:2)
+  openxlsx::addStyle(wb, hoja_meta, st$sec_title, rows = 1, cols = 1:2, gridExpand = TRUE, stack = TRUE)
+
+  rr <- 3L
+  for (i in seq_len(nrow(meta_df))) {
+    el <- as.character(meta_df$elemento[i])
+    det <- as.character(meta_df$detalle[i])
+    tp <- as.character(meta_df$tipo[i])
+
+    openxlsx::writeData(wb, hoja_meta, el, startRow = rr, startCol = 1, colNames = FALSE)
+    openxlsx::writeData(wb, hoja_meta, det, startRow = rr, startCol = 2, colNames = FALSE)
+
+    if (identical(tp, "heading")) {
+      openxlsx::addStyle(wb, hoja_meta, st_meta_h, rows = rr, cols = 1:2, gridExpand = TRUE, stack = TRUE)
+    } else if (identical(tp, "source")) {
+      openxlsx::addStyle(wb, hoja_meta, st$note, rows = rr, cols = 1:2, gridExpand = TRUE, stack = TRUE)
+      openxlsx::addStyle(wb, hoja_meta, st$footer_top, rows = rr, cols = 1:2, gridExpand = TRUE, stack = TRUE)
+    } else {
+      openxlsx::addStyle(wb, hoja_meta, st_meta_label, rows = rr, cols = 1, gridExpand = TRUE, stack = TRUE)
+      openxlsx::addStyle(wb, hoja_meta, st_meta_t, rows = rr, cols = 2, gridExpand = TRUE, stack = TRUE)
+    }
+
+    h1 <- .calc_row_height(el, col_width = 44, font_size = if (identical(tp, "heading")) 11 else 10, max_h = 160)
+    h2 <- .calc_row_height(det, col_width = 96, font_size = 10, max_h = 180)
+    openxlsx::setRowHeights(wb, hoja_meta, rows = rr, heights = max(h1, h2))
+    rr <- rr + 1L
+  }
+
+  openxlsx::setColWidths(wb, hoja_meta, cols = 1, widths = 44)
+  openxlsx::setColWidths(wb, hoja_meta, cols = 2, widths = 96)
+
+  sheet_rows <- list()
+  .ensure_sheet <- function(sheet_name) {
+    sn <- .sanitize_sheet_name(sheet_name, fallback = hoja)
+    if (!(sn %in% names(sheet_rows))) {
+      openxlsx::addWorksheet(wb, sn)
+      row0 <- 1L
+      openxlsx::writeData(wb, sn, "CRUCES", startRow = row0, startCol = 1)
+      openxlsx::addStyle(wb, sn, st$sec_title, rows = row0, cols = 1, gridExpand = TRUE)
+      openxlsx::mergeCells(wb, sn, rows = row0, cols = 1:6)
+      sheet_rows[[sn]] <<- row0 + 2L
+    }
+    as.integer(sheet_rows[[sn]])
+  }
+  .set_sheet_row <- function(sheet_name, row_value) {
+    sn <- .sanitize_sheet_name(sheet_name, fallback = hoja)
+    sheet_rows[[sn]] <<- as.integer(row_value)
+  }
+
+  for (tb in plan_tablas) {
+    hoja_tb <- tb$hoja
+    fila_excel <- .ensure_sheet(hoja_tb)
+    espacio_antes_tb <- .coerce_nonneg_int(tb$espacio_antes %||% 0L, default = 0L)
+    espacio_despues_tb <- .coerce_nonneg_int(tb$espacio_despues %||% 1L, default = 1L)
+    fila_antes_inicio <- fila_excel
+    fila_excel <- fila_excel + espacio_antes_tb
+
+    sec <- as.character(tb$titulo)[1]
+    vars_sec <- tb$indicadores
+    fila_tb <- tb$fila
+    cruzar_dim_tb <- tb$cruzar_dim
+    incluir_total_tb <- isTRUE(tb$incluir_total)
+    brecha_filas_tb <- isTRUE(tb$brecha_filas)
+    etiq_brecha_filas_tb <- as.character(tb$etiq_brecha_filas)[1]
+    brecha_cols_tb <- isTRUE(tb$brecha_cols)
+    etiq_brecha_cols_tb <- as.character(tb$etiq_brecha_cols)[1]
+
+    x_cache <- lapply(vars_sec, function(v) suppressWarnings(as.numeric(data[[v]])))
+    names(x_cache) <- vars_sec
+    ind_labels <- vapply(vars_sec, function(v) {
+      .strip_label_0100(label_variable(v, dic_vars, labels_override, data))
+    }, character(1))
+
+    fila_lbl <- .strip_label_0100(label_variable(fila_tb, dic_vars, labels_override, data))
+    fila_hdr <- ""
+
+    cats_f <- get_categorias(
+      var              = fila_tb,
+      data             = data,
+      survey           = survey,
+      orders_list      = orders_list,
+      opciones_excluir = opciones_excluir
+    )
+    row_codes  <- cats_f$codes
+    row_labels <- cats_f$labels
+    v_fila <- as.character(data[[fila_tb]])
+    row_keys <- .pick_cat_keys(v_fila, row_codes, row_labels)
+
+    if (length(row_keys)) {
+      row_masks <- lapply(row_keys, function(k) !is.na(v_fila) & v_fila == k)
+      row_labels <- as.character(row_labels)
+    } else {
+      row_masks <- list(rep(FALSE, nrow(data)))
+      row_labels <- "Sin datos"
+    }
+
+    blocks <- list()
+    if (isTRUE(incluir_total_tb) || !length(cruzar_dim_tb)) {
+      blocks[[length(blocks) + 1L]] <- list(
+        top = "",
+        sub = "Total",
+        legacy = "Total",
+        var_key = NA_character_,
+        mask = rep(TRUE, nrow(data)),
+        block_label = "Total"
+      )
+    }
+
+    for (s in cruzar_dim_tb) {
+      cats_s <- get_categorias(
+        var              = s,
+        data             = data,
+        survey           = survey,
+        orders_list      = orders_list,
+        opciones_excluir = opciones_excluir
+      )
+      estr_codes  <- cats_s$codes
+      estr_labels <- cats_s$labels
+      if (!length(estr_codes)) next
+
+      s_lbl <- .strip_label_0100(label_variable(s, dic_vars, labels_override, data))
+      estr_labels <- .strip_prefijo_subindice(estr_labels, s_lbl)
+
+      v_estr <- as.character(data[[s]])
+      keys_s <- .pick_cat_keys(v_estr, estr_codes, estr_labels)
+      if (!length(keys_s)) next
+
+      for (j in seq_along(keys_s)) {
+        cat_lbl <- as.character(estr_labels[j])
+        head_lbl <- paste0(s_lbl, ": ", cat_lbl)
+        blocks[[length(blocks) + 1L]] <- list(
+          top = s_lbl,
+          sub = cat_lbl,
+          legacy = head_lbl,
+          var_key = as.character(s)[1],
+          mask = !is.na(v_estr) & v_estr == keys_s[j],
+          block_label = head_lbl
+        )
+      }
+    }
+
+    if (!length(blocks)) {
+      blocks[[1L]] <- list(
+        top = "",
+        sub = "Total",
+        legacy = "Total",
+        var_key = NA_character_,
+        mask = rep(TRUE, nrow(data)),
+        block_label = "Total"
+      )
+    }
+
+    R <- length(row_labels)
+    I <- length(vars_sec)
+    B <- length(blocks)
+
+    medias <- array(NA_real_, dim = c(R, I, B))
+    sds    <- array(NA_real_, dim = c(R, I, B))
+    ns     <- array(NA_real_, dim = c(R, I, B))
+
+    for (b in seq_len(B)) {
+      mask_b <- as.logical(blocks[[b]]$mask)
+      for (r in seq_len(R)) {
+        mask_rb <- row_masks[[r]] & mask_b
+        for (i in seq_len(I)) {
+          st_i <- .dim_weighted_stats(x_cache[[i]], w, mask_rb)
+          medias[r, i, b] <- st_i$mean
+          sds[r, i, b] <- st_i$sd
+          ns[r, i, b] <- st_i$n
+        }
+      }
+    }
+
+    out <- data.frame(
+      stats::setNames(list(as.character(row_labels)), fila_lbl),
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+    row_brecha_idx_out <- NA_integer_
+
+    h1 <- c("")
+    h2 <- c(fila_hdr)
+    col_k <- 0L
+    is_brecha_col <- logical(0)
+
+    idx_total <- which(vapply(blocks, function(bl) is.na(bl$var_key), logical(1)))
+
+    .add_data_cols <- function(block_indices) {
+      for (b in block_indices) {
+        if (I == 1L) {
+          col_k <<- col_k + 1L
+          out[[paste0("col_", col_k)]] <<- ifelse(is.na(medias[, 1L, b]), NA_real_, round(medias[, 1L, b], digits))
+          h1 <<- c(h1, blocks[[b]]$top)
+          h2 <<- c(h2, blocks[[b]]$sub)
+          is_brecha_col <<- c(is_brecha_col, FALSE)
+        } else {
+          for (i in seq_len(I)) {
+            col_k <<- col_k + 1L
+            out[[paste0("col_", col_k)]] <<- ifelse(is.na(medias[, i, b]), NA_real_, round(medias[, i, b], digits))
+            h1 <<- c(h1, blocks[[b]]$legacy)
+            h2 <<- c(h2, ind_labels[i])
+            is_brecha_col <<- c(is_brecha_col, FALSE)
+          }
+        }
+      }
+    }
+
+    .add_brecha_cols <- function(idx_cv) {
+      if (!isTRUE(brecha_cols_tb) || length(idx_cv) < 2L) return(invisible(NULL))
+      idx_bc <- c(idx_total, idx_cv)
+      if (length(idx_bc) < 2L) return(invisible(NULL))
+      cv_top <- blocks[[idx_cv[1]]]$top
+      if (I == 1L) {
+        col_k <<- col_k + 1L
+        vals_bc <- rep(NA_real_, R)
+        for (r in seq_len(R)) {
+          vv <- medias[r, 1L, idx_bc]
+          vv <- vv[is.finite(vv) & !is.na(vv)]
+          vals_bc[r] <- if (length(vv) >= 2L) round(max(vv) - min(vv), digits) else NA_real_
+        }
+        out[[paste0("col_", col_k)]] <<- vals_bc
+        h1 <<- c(h1, cv_top)
+        h2 <<- c(h2, etiq_brecha_cols_tb)
+        is_brecha_col <<- c(is_brecha_col, TRUE)
+      } else {
+        for (i in seq_len(I)) {
+          col_k <<- col_k + 1L
+          vals_bc <- rep(NA_real_, R)
+          for (r in seq_len(R)) {
+            vv <- medias[r, i, idx_bc]
+            vv <- vv[is.finite(vv) & !is.na(vv)]
+            vals_bc[r] <- if (length(vv) >= 2L) round(max(vv) - min(vv), digits) else NA_real_
+          }
+          out[[paste0("col_", col_k)]] <<- vals_bc
+          h1 <<- c(h1, paste0(cv_top, ": ", etiq_brecha_cols_tb))
+          h2 <<- c(h2, ind_labels[i])
+          is_brecha_col <<- c(is_brecha_col, TRUE)
+        }
+      }
+    }
+
+    .add_data_cols(idx_total)
+    for (s in cruzar_dim_tb) {
+      s_chr <- as.character(s)[1]
+      idx_cv <- which(vapply(blocks, function(bl) identical(bl$var_key, s_chr), logical(1)))
+      if (!length(idx_cv)) next
+      .add_data_cols(idx_cv)
+      .add_brecha_cols(idx_cv)
+    }
+
+    if (isTRUE(incluir_total_tb)) {
+      row_total <- list("Media total")
+      for (b in idx_total) {
+        mask_b <- as.logical(blocks[[b]]$mask)
+        for (i in seq_len(I)) {
+          st_i <- .dim_weighted_stats(x_cache[[i]], w, mask_b)
+          row_total[[length(row_total) + 1L]] <- if (is.na(st_i$mean)) NA_real_ else round(st_i$mean, digits)
+        }
+      }
+      for (s in cruzar_dim_tb) {
+        s_chr <- as.character(s)[1]
+        idx_cv <- which(vapply(blocks, function(bl) identical(bl$var_key, s_chr), logical(1)))
+        if (!length(idx_cv)) next
+        for (b in idx_cv) {
+          mask_b <- as.logical(blocks[[b]]$mask)
+          for (i in seq_len(I)) {
+            st_i <- .dim_weighted_stats(x_cache[[i]], w, mask_b)
+            row_total[[length(row_total) + 1L]] <- if (is.na(st_i$mean)) NA_real_ else round(st_i$mean, digits)
+          }
+        }
+        if (isTRUE(brecha_cols_tb) && length(idx_cv) >= 2L) {
+          idx_bc <- c(idx_total, idx_cv)
+          for (i in seq_len(I)) {
+            mask_all <- lapply(idx_bc, function(bb) as.logical(blocks[[bb]]$mask))
+            vv_total <- vapply(mask_all, function(m) {
+              st_ti <- .dim_weighted_stats(x_cache[[i]], w, m)
+              st_ti$mean
+            }, numeric(1))
+            vv_total <- vv_total[is.finite(vv_total) & !is.na(vv_total)]
+            row_total[[length(row_total) + 1L]] <- if (length(vv_total) >= 2L) round(max(vv_total) - min(vv_total), digits) else NA_real_
+          }
+        }
+      }
+      total_df <- as.data.frame(row_total, stringsAsFactors = FALSE, check.names = FALSE)
+      names(total_df) <- names(out)
+      for (jj in seq.int(2, ncol(total_df))) {
+        total_df[[jj]] <- suppressWarnings(as.numeric(total_df[[jj]]))
+      }
+      out <- dplyr::bind_rows(out, total_df)
+    }
+
+    if (isTRUE(brecha_filas_tb) && R >= 2) {
+      row_bf <- list(etiq_brecha_filas_tb)
+      for (b in idx_total) {
+        for (i in seq_len(I)) {
+          vv <- medias[, i, b]
+          vv <- vv[is.finite(vv) & !is.na(vv)]
+          row_bf[[length(row_bf) + 1L]] <- if (!length(vv)) NA_real_ else round(max(vv) - min(vv), digits)
+        }
+      }
+      for (s in cruzar_dim_tb) {
+        s_chr <- as.character(s)[1]
+        idx_cv <- which(vapply(blocks, function(bl) identical(bl$var_key, s_chr), logical(1)))
+        if (!length(idx_cv)) next
+        for (b in idx_cv) {
+          for (i in seq_len(I)) {
+            vv <- medias[, i, b]
+            vv <- vv[is.finite(vv) & !is.na(vv)]
+            row_bf[[length(row_bf) + 1L]] <- if (!length(vv)) NA_real_ else round(max(vv) - min(vv), digits)
+          }
+        }
+        if (isTRUE(brecha_cols_tb) && length(idx_cv) >= 2L) {
+          for (i in seq_len(I)) row_bf[[length(row_bf) + 1L]] <- NA_real_
+        }
+      }
+      row_b_df <- as.data.frame(row_bf, stringsAsFactors = FALSE, check.names = FALSE)
+      names(row_b_df) <- names(out)
+      out <- dplyr::bind_rows(out, row_b_df)
+      for (jj in seq.int(2, ncol(out))) {
+        out[[jj]] <- suppressWarnings(as.numeric(out[[jj]]))
+      }
+      row_brecha_idx_out <- nrow(out)
+    }
+
+    brecha_col_df_indices <- which(is_brecha_col)
+
+    ncols_tbl <- ncol(out)
+    ncols_pintar <- max(6L, ncols_tbl)
+
+    if (espacio_antes_tb > 0L) {
+      rows_esp_antes <- fila_antes_inicio:(fila_antes_inicio + espacio_antes_tb - 1L)
+      openxlsx::addStyle(
+        wb, hoja_tb, st_blanco,
+        rows = rows_esp_antes,
+        cols = 1:ncols_pintar,
+        gridExpand = TRUE,
+        stack = TRUE
+      )
+    }
+
+    sec_txt <- if (!is.na(sec) && nzchar(trimws(sec))) as.character(sec) else "SECCION"
+    openxlsx::writeData(wb, hoja_tb, sec_txt, startRow = fila_excel, startCol = 1, colNames = FALSE)
+    openxlsx::mergeCells(wb, hoja_tb, rows = fila_excel, cols = 1:ncols_tbl)
+    openxlsx::addStyle(wb, hoja_tb, st$q_title, rows = fila_excel, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+    openxlsx::addStyle(wb, hoja_tb, st$table_end, rows = fila_excel, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+    fila_excel <- fila_excel + 1L
+
+    openxlsx::writeData(wb, hoja_tb, t(h1), startRow = fila_excel, startCol = 1, colNames = FALSE)
+    openxlsx::writeData(wb, hoja_tb, t(h2), startRow = fila_excel + 1L, startCol = 1, colNames = FALSE)
+
+    openxlsx::addStyle(wb, hoja_tb, st$header_A, rows = fila_excel:(fila_excel + 1L), cols = 1, gridExpand = TRUE, stack = TRUE)
+    if (ncols_tbl > 1L) {
+      openxlsx::addStyle(
+        wb, hoja_tb, st$header,
+        rows = fila_excel:(fila_excel + 1L),
+        cols = 2:ncols_tbl,
+        gridExpand = TRUE,
+        stack = TRUE
+      )
+    }
+
+    runs1 <- .merge_runs(h1)
+    for (r in runs1) {
+      c1 <- max(2L, r[1])
+      c2 <- r[2]
+      if ((c2 - c1 + 1L) > 1L) {
+        openxlsx::mergeCells(wb, hoja_tb, rows = fila_excel, cols = c1:c2)
+      }
+    }
+
+    openxlsx::setRowHeights(
+      wb, hoja_tb, rows = fila_excel,
+      heights = .header_row_height(
+        values = h1,
+        runs = runs1,
+        col_offset = 0L,
+        font_size = 10,
+        min_h = 18,
+        max_h = 100
+      )
+    )
+    openxlsx::setRowHeights(
+      wb, hoja_tb, rows = fila_excel + 1L,
+      heights = .header_row_height(
+        values = h2,
+        runs = NULL,
+        col_offset = 0L,
+        font_size = 10,
+        min_h = 18,
+        max_h = 100
+      )
+    )
+
+    fila_excel <- fila_excel + 2L
+
+    openxlsx::writeData(wb, hoja_tb, out, startRow = fila_excel, startCol = 1, colNames = FALSE)
+    row_ini <- fila_excel
+    row_fin <- fila_excel + nrow(out) - 1L
+
+    openxlsx::addStyle(wb, hoja_tb, st$body_txt, rows = row_ini:row_fin, cols = 1, gridExpand = TRUE, stack = TRUE)
+    if (ncols_tbl > 1L) {
+      openxlsx::addStyle(wb, hoja_tb, st_blanco, rows = row_ini:row_fin, cols = 2:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+      openxlsx::addStyle(wb, hoja_tb, style_num_dim, rows = row_ini:row_fin, cols = 2:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+      if (isTRUE(aplicar_semaforo)) {
+        c1 <- semaforo_cortes[1]
+        c2 <- semaforo_cortes[2]
+        val_mat <- as.matrix(out[, 2:ncols_tbl, drop = FALSE])
+        idx_eval <- seq_len(nrow(val_mat))
+        if (!is.na(row_brecha_idx_out) && row_brecha_idx_out %in% idx_eval) {
+          idx_eval <- setdiff(idx_eval, row_brecha_idx_out)
+        }
+        for (cc in seq_len(ncol(val_mat))) {
+          vcol <- suppressWarnings(as.numeric(val_mat[, cc]))
+          idx_ok <- idx_eval[is.finite(vcol[idx_eval]) & !is.na(vcol[idx_eval])]
+          if (!length(idx_ok)) next
+          idx_rojo <- idx_ok[vcol[idx_ok] < c1]
+          idx_ambar <- idx_ok[vcol[idx_ok] >= c1 & vcol[idx_ok] <= c2]
+          idx_verde <- idx_ok[vcol[idx_ok] > c2]
+          excel_col <- cc + 1L
+          if (length(idx_rojo)) {
+            openxlsx::addStyle(
+              wb, hoja_tb, st_sem_rojo,
+              rows = row_ini + idx_rojo - 1L,
+              cols = excel_col,
+              gridExpand = TRUE,
+              stack = TRUE
+            )
+          }
+          if (length(idx_ambar)) {
+            openxlsx::addStyle(
+              wb, hoja_tb, st_sem_ambar,
+              rows = row_ini + idx_ambar - 1L,
+              cols = excel_col,
+              gridExpand = TRUE,
+              stack = TRUE
+            )
+          }
+          if (length(idx_verde)) {
+            openxlsx::addStyle(
+              wb, hoja_tb, st_sem_verde,
+              rows = row_ini + idx_verde - 1L,
+              cols = excel_col,
+              gridExpand = TRUE,
+              stack = TRUE
+            )
+          }
+        }
+      }
+    }
+
+    if (length(brecha_col_df_indices)) {
+      bc_excel_cols <- brecha_col_df_indices + 1L
+      st_bold <- openxlsx::createStyle(textDecoration = "Bold")
+      data_rows <- row_ini:(row_ini + nrow(out) - 1L)
+      openxlsx::addStyle(wb, hoja_tb, st_bold, rows = data_rows, cols = bc_excel_cols, gridExpand = TRUE, stack = TRUE)
+    }
+
+    if (isTRUE(incluir_total_tb) && nrow(out) > R) {
+      row_total_excel <- row_ini + R
+      openxlsx::addStyle(wb, hoja_tb, st$total_bold, rows = row_total_excel, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+      st_total_border <- openxlsx::createStyle(border = "Top", borderStyle = "thin")
+      openxlsx::addStyle(wb, hoja_tb, st_total_border, rows = row_total_excel, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+    }
+    if (isTRUE(brecha_filas_tb) && nrow(out) > R + as.integer(isTRUE(incluir_total_tb))) {
+      row_brecha_excel <- row_fin
+      openxlsx::addStyle(wb, hoja_tb, st$total_bold, rows = row_brecha_excel, cols = 1, gridExpand = TRUE, stack = TRUE)
+      openxlsx::addStyle(wb, hoja_tb, st$footer_top, rows = row_brecha_excel, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+      if (isTRUE(aplicar_gradiente_brecha) && !is.na(row_brecha_idx_out) && ncols_tbl > 1L) {
+        vals_b <- suppressWarnings(as.numeric(as.matrix(out[row_brecha_idx_out, 2:ncols_tbl, drop = FALSE])[1, ]))
+        idx_ok_b <- which(is.finite(vals_b) & !is.na(vals_b))
+        if (length(idx_ok_b)) {
+          style_cache <- new.env(parent = emptyenv())
+          for (jj in idx_ok_b) {
+            tt <- if (isTRUE(brecha_corte_max > brecha_corte_min)) {
+              pmax(0, pmin(1, (vals_b[jj] - brecha_corte_min) / (brecha_corte_max - brecha_corte_min)))
+            } else 0.5
+            col_j <- .mix_color(col_brecha_bajo, col_brecha_alto, tt)
+            if (!exists(col_j, envir = style_cache, inherits = FALSE)) {
+              assign(col_j, openxlsx::createStyle(fgFill = col_j, fontName = "Arial"), envir = style_cache)
+            }
+            st_j <- get(col_j, envir = style_cache, inherits = FALSE)
+            openxlsx::addStyle(wb, hoja_tb, st_j, rows = row_brecha_excel, cols = jj + 1L, gridExpand = TRUE, stack = TRUE)
+          }
+        }
+      }
+    }
+
+    if (length(brecha_col_df_indices) && isTRUE(aplicar_gradiente_brecha)) {
+      bc_excel_cols <- brecha_col_df_indices + 1L
+      style_cache_bc <- new.env(parent = emptyenv())
+      for (rr in seq_len(R)) {
+        row_excel_rr <- row_ini + rr - 1L
+        for (jj in seq_along(brecha_col_df_indices)) {
+          val_bc <- suppressWarnings(as.numeric(out[rr, brecha_col_df_indices[jj] + 1L]))
+          if (!is.finite(val_bc) || is.na(val_bc)) next
+          tt <- if (isTRUE(brecha_corte_max > brecha_corte_min)) {
+            pmax(0, pmin(1, (val_bc - brecha_corte_min) / (brecha_corte_max - brecha_corte_min)))
+          } else 0.5
+          col_j <- .mix_color(col_brecha_bajo, col_brecha_alto, tt)
+          if (!exists(col_j, envir = style_cache_bc, inherits = FALSE)) {
+            assign(col_j, openxlsx::createStyle(fgFill = col_j, fontName = "Arial"), envir = style_cache_bc)
+          }
+          st_j <- get(col_j, envir = style_cache_bc, inherits = FALSE)
+          openxlsx::addStyle(wb, hoja_tb, st_j, rows = row_excel_rr, cols = bc_excel_cols[jj], gridExpand = TRUE, stack = TRUE)
+        }
+      }
+    }
+
+    openxlsx::addStyle(wb, hoja_tb, st$table_end, rows = row_fin, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+
+    fila_excel <- row_fin + 1L
+
+    openxlsx::writeData(wb, hoja_tb, footer_source, startRow = fila_excel, startCol = 1, colNames = FALSE)
+    openxlsx::mergeCells(wb, hoja_tb, rows = fila_excel, cols = 1:ncols_tbl)
+    openxlsx::addStyle(wb, hoja_tb, st$note, rows = fila_excel, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+    openxlsx::addStyle(wb, hoja_tb, st$footer_top, rows = fila_excel, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+    openxlsx::setRowHeights(
+      wb, hoja_tb, rows = fila_excel,
+      heights = .calc_row_height(footer_source, col_width = 60, font_size = 9, max_h = 220)
+    )
+    fila_excel <- fila_excel + 1L
+
+    nota_partes <- c(
+      "Nota metodologica: Los valores representan promedios ponderados en escala de 0 a 100."
+    )
+    if (isTRUE(aplicar_semaforo)) {
+      c1 <- semaforo_cortes[1]
+      c2 <- semaforo_cortes[2]
+      nota_partes <- c(
+        nota_partes,
+        paste0(
+          "Se emplea un semaforo de colores (rojo < ", c1,
+          ", amarillo ", c1, "-", c2, ", verde > ", c2, ")."
+        )
+      )
+    }
+    hay_brecha <- isTRUE(brecha_filas_tb) || length(brecha_col_df_indices)
+    if (hay_brecha) {
+      nota_partes <- c(
+        nota_partes,
+        "La brecha corresponde a la diferencia entre el promedio maximo y minimo del grupo respectivo."
+      )
+      if (isTRUE(aplicar_gradiente_brecha)) {
+        nota_partes <- c(nota_partes, "Se aplica un gradiente de color proporcional a la magnitud de la brecha.")
+      }
+    }
+    
+    nota_txt <- paste(nota_partes, collapse = " ")
+    openxlsx::writeData(wb, hoja_tb, nota_txt, startRow = fila_excel, startCol = 1, colNames = FALSE)
+    openxlsx::mergeCells(wb, hoja_tb, rows = fila_excel, cols = 1:ncols_tbl)
+    openxlsx::addStyle(wb, hoja_tb, st$note, rows = fila_excel, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+    openxlsx::setRowHeights(
+      wb, hoja_tb, rows = fila_excel,
+      heights = .calc_row_height(nota_txt, col_width = 60, font_size = 9, max_h = 80)
+    )
+    fila_excel <- fila_excel + 2L
+
+    if (isTRUE(show_sig) && B >= 2L && R >= 1L) {
+      idx_by_var <- list()
+      cmp_by_var <- list()
+      letras_map_text <- character(0)
+
+      for (s in cruzar_dim_tb) {
+        s_chr <- as.character(s)[1]
+        idx_s <- which(vapply(blocks, function(bl) {
+          identical(as.character(bl$var_key %||% "")[1], s_chr)
+        }, FUN.VALUE = logical(1)))
+        if (length(idx_s) < 2L) next
+
+        s_lbl <- .strip_label_0100(label_variable(s_chr, dic_vars, labels_override, data))
+        estr_lbl_s <- vapply(idx_s, function(ix) {
+          as.character(blocks[[ix]]$sub %||% "")[1]
+        }, FUN.VALUE = character(1))
+        col_letters <- LETTERS[seq_along(estr_lbl_s)]
+        letras_map_text <- c(
+          letras_map_text,
+          paste0(
+            s_lbl, ": ",
+            paste0("(", col_letters, ") ", estr_lbl_s, collapse = " \u00b7 ")
+          )
+        )
+
+        cmp_s <- vector("list", I)
+        for (i in seq_len(I)) {
+          medias_mat <- matrix(medias[, i, idx_s, drop = FALSE], nrow = R, ncol = length(idx_s))
+          ns_mat <- matrix(ns[, i, idx_s, drop = FALSE], nrow = R, ncol = length(idx_s))
+          sds_mat <- matrix(sds[, i, idx_s, drop = FALSE], nrow = R, ncol = length(idx_s))
+          rownames(medias_mat) <- as.character(row_labels)
+          rownames(ns_mat) <- as.character(row_labels)
+          rownames(sds_mat) <- as.character(row_labels)
+          colnames(medias_mat) <- estr_lbl_s
+          colnames(ns_mat) <- estr_lbl_s
+          colnames(sds_mat) <- estr_lbl_s
+          cmp_s[[i]] <- comparar_medias_sig(medias_mat, ns_mat, sds_mat, alpha = alpha)
+        }
+        idx_by_var[[s_chr]] <- idx_s
+        cmp_by_var[[s_chr]] <- cmp_s
+      }
+
+      if (length(cmp_by_var)) {
+        sig_out <- data.frame(
+          stats::setNames(list(as.character(row_labels)), fila_lbl),
+          stringsAsFactors = FALSE,
+          check.names = FALSE
+        )
+        sig_h1 <- c("")
+        sig_h2 <- c(fila_hdr)
+
+        sig_k <- 0L
+        for (b in idx_total) {
+          if (I == 1L) {
+            sig_k <- sig_k + 1L
+            sig_out[[paste0("col_", sig_k)]] <- rep("", R)
+            sig_h1 <- c(sig_h1, blocks[[b]]$top)
+            sig_h2 <- c(sig_h2, blocks[[b]]$sub)
+          } else {
+            for (i in seq_len(I)) {
+              sig_k <- sig_k + 1L
+              sig_out[[paste0("col_", sig_k)]] <- rep("", R)
+              sig_h1 <- c(sig_h1, blocks[[b]]$legacy)
+              sig_h2 <- c(sig_h2, ind_labels[i])
+            }
+          }
+        }
+        for (s in cruzar_dim_tb) {
+          s_chr <- as.character(s)[1]
+          idx_cv <- which(vapply(blocks, function(bl) identical(bl$var_key, s_chr), logical(1)))
+          if (!length(idx_cv)) next
+          estr_lbl_s <- vapply(idx_cv, function(ix) as.character(blocks[[ix]]$sub %||% "")[1], character(1))
+          col_letters <- LETTERS[seq_along(estr_lbl_s)]
+          has_cmp <- !is.null(cmp_by_var[[s_chr]])
+          for (j in seq_along(idx_cv)) {
+            b <- idx_cv[j]
+            pos <- if (has_cmp) match(b, idx_by_var[[s_chr]]) else NA_integer_
+            if (I == 1L) {
+              sig_k <- sig_k + 1L
+              if (is.na(pos) || !has_cmp) {
+                sig_out[[paste0("col_", sig_k)]] <- rep("", R)
+              } else {
+                sig_out[[paste0("col_", sig_k)]] <- as.character(cmp_by_var[[s_chr]][[1L]]$letras[, pos])
+              }
+              sig_h1 <- c(sig_h1, blocks[[b]]$top)
+              sig_h2 <- c(sig_h2, paste0(estr_lbl_s[j], " (", col_letters[j], ")"))
+            } else {
+              for (i in seq_len(I)) {
+                sig_k <- sig_k + 1L
+                if (is.na(pos) || !has_cmp) {
+                  sig_out[[paste0("col_", sig_k)]] <- rep("", R)
+                } else {
+                  sig_out[[paste0("col_", sig_k)]] <- as.character(cmp_by_var[[s_chr]][[i]]$letras[, pos])
+                }
+                sig_h1 <- c(sig_h1, blocks[[b]]$legacy)
+                sig_h2 <- c(sig_h2, paste0(ind_labels[i], " (", col_letters[j], ")"))
+              }
+            }
+          }
+        }
+
+        ncols_sig <- ncol(sig_out)
+        ncols_pintar <- max(ncols_pintar, ncols_sig)
+        txt_sig <- "Comparaciones de medias"
+        openxlsx::writeData(wb, hoja_tb, txt_sig, startRow = fila_excel, startCol = 1, colNames = FALSE)
+        openxlsx::mergeCells(wb, hoja_tb, rows = fila_excel, cols = 1:ncols_sig)
+        openxlsx::addStyle(wb, hoja_tb, st$q_title, rows = fila_excel, cols = 1, gridExpand = TRUE)
+        openxlsx::addStyle(wb, hoja_tb, st$table_end, rows = fila_excel, cols = 1:ncols_sig, gridExpand = TRUE, stack = TRUE)
+        fila_excel <- fila_excel + 1L
+
+        sig_runs1 <- .merge_runs(sig_h1)
+        openxlsx::writeData(wb, hoja_tb, t(sig_h1), startRow = fila_excel, startCol = 1, colNames = FALSE)
+        openxlsx::writeData(wb, hoja_tb, t(sig_h2), startRow = fila_excel + 1L, startCol = 1, colNames = FALSE)
+        openxlsx::addStyle(wb, hoja_tb, st$header_A, rows = fila_excel:(fila_excel + 1L), cols = 1, gridExpand = TRUE, stack = TRUE)
+        if (ncols_sig > 1L) {
+          openxlsx::addStyle(wb, hoja_tb, st$header, rows = fila_excel:(fila_excel + 1L), cols = 2:ncols_sig, gridExpand = TRUE, stack = TRUE)
+        }
+
+        for (r in sig_runs1) {
+          c1 <- max(2L, r[1])
+          c2 <- r[2]
+          if ((c2 - c1 + 1L) > 1L) {
+            openxlsx::mergeCells(wb, hoja_tb, rows = fila_excel, cols = c1:c2)
+          }
+        }
+
+        openxlsx::setRowHeights(
+          wb, hoja_tb, rows = fila_excel,
+          heights = .header_row_height(
+            values = sig_h1,
+            runs = sig_runs1,
+            col_offset = 0L,
+            font_size = 10,
+            min_h = 18,
+            max_h = 100
+          )
+        )
+        openxlsx::setRowHeights(
+          wb, hoja_tb, rows = fila_excel + 1L,
+          heights = .header_row_height(
+            values = sig_h2,
+            runs = NULL,
+            col_offset = 0L,
+            font_size = 10,
+            min_h = 18,
+            max_h = 100
+          )
+        )
+        fila_excel <- fila_excel + 2L
+
+        openxlsx::writeData(wb, hoja_tb, sig_out, startRow = fila_excel, startCol = 1, colNames = FALSE)
+        sig_ini <- fila_excel
+        sig_fin <- fila_excel + nrow(sig_out) - 1L
+
+        openxlsx::addStyle(wb, hoja_tb, st$cell, rows = sig_ini:sig_fin, cols = 1:ncols_sig, gridExpand = TRUE, stack = TRUE)
+        openxlsx::addStyle(wb, hoja_tb, st$table_end, rows = sig_fin, cols = 1:ncols_sig, gridExpand = TRUE, stack = TRUE)
+
+        fila_excel <- sig_fin + 1L
+
+        pie_sig <- paste0(
+          "Las letras indican columnas cuya media es significativamente mayor que la media de la columna identificada con esa letra, ",
+          "segun pruebas t de Welch con correccion de Bonferroni (alpha = ", alpha, "). ",
+          "Letras por estrato: ", paste(letras_map_text, collapse = "  |  "), ". ",
+          "Fuente: ", fuente
+        )
+        openxlsx::writeData(wb, hoja_tb, pie_sig, startRow = fila_excel, startCol = 1, colNames = FALSE)
+        openxlsx::mergeCells(wb, hoja_tb, rows = fila_excel, cols = 1:ncols_tbl)
+        openxlsx::addStyle(wb, hoja_tb, st$note, rows = fila_excel, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+        openxlsx::addStyle(wb, hoja_tb, st$footer_top, rows = fila_excel, cols = 1:ncols_tbl, gridExpand = TRUE, stack = TRUE)
+        openxlsx::setRowHeights(
+          wb, hoja_tb, rows = fila_excel,
+          heights = .calc_row_height(pie_sig, col_width = 60, font_size = 9, max_h = 180)
+        )
+        fila_excel <- fila_excel + 2L
+      }
+    }
+
+    if (espacio_despues_tb > 0L) {
+      rows_esp_desp <- fila_excel:(fila_excel + espacio_despues_tb - 1L)
+      openxlsx::addStyle(
+        wb, hoja_tb, st_blanco,
+        rows = rows_esp_desp,
+        cols = 1:ncols_pintar,
+        gridExpand = TRUE,
+        stack = TRUE
+      )
+    }
+    fila_excel <- fila_excel + espacio_despues_tb
+    .set_sheet_row(hoja_tb, fila_excel)
+  }
+
+  if (length(sheet_rows)) {
+    for (sn in names(sheet_rows)) {
+      openxlsx::setColWidths(wb, sn, cols = 1, widths = 60)
+      openxlsx::setColWidths(wb, sn, cols = 2:200, widths = 16)
+    }
+  }
+
+  openxlsx::saveWorkbook(wb, path_xlsx, overwrite = TRUE)
+  message("Cruces (modo dimensiones) exportados a: ", normalizePath(path_xlsx))
+  invisible(path_xlsx)
+}
+
+# =============================================================================
 # reporte_cruces()
 # =============================================================================
 
-#' Generar reporte de cruces (categóricos y numéricos) en Excel
+#' Generar reporte de cruces en Excel (estándar o dimensiones)
 #'
-#' Función de alto nivel que envuelve a \code{exportar_cruces_multi()} para
-#' generar un archivo de Excel con tablas de cruces múltiples. Permite
-#' combinar en un mismo reporte:
-#'
+#' Función de alto nivel que enruta a:
 #' \itemize{
-#'   \item Cruces de variables categóricas (select_one y select_multiple),
-#'   con totales, porcentajes y, opcionalmente, tablas de significancia
-#'   (pruebas z con corrección de Bonferroni).
-#'   \item Cruces de variables numéricas (definidas en \code{numericas}),
-#'   mostrando estadísticos descriptivos por total y por estrato:
-#'   N válido, media, desviación estándar, mínimo, P25, mediana, P75 y máximo.
+#'   \item \code{exportar_cruces_multi()} cuando \code{modo = "estandar"}.
+#'   \item \code{exportar_dimensiones_multi()} cuando \code{modo = "dimensiones"}.
 #' }
 #'
-#' Esta función está diseñada para trabajar de forma integrada con
-#' \code{reporte_instrumento()} y \code{reporte_data()}, utilizando la
-#' información de \code{$survey} y \code{$orders_list} del instrumento para
-#' recuperar labels, órdenes de categorías y tipos de pregunta.
+#' En modo \code{"dimensiones"}:
+#' \itemize{
+#'   \item \code{SECCIONES} debe contener indicadores numéricos (típicamente
+#'   \code{r100_}, \code{sub_}, \code{idx_}).
+#'   \item Se crea una hoja inicial \code{"Metodologia"} con el detalle técnico
+#'   de construcción de indicadores y escalas.
+#'   \item Si no se usa \code{tablas}, \code{cruces} debe tener exactamente una
+#'   variable, usada como filas.
+#'   \item \code{cruzar_dim} define cruces adicionales para subindices de columnas.
+#' }
 #'
-#' @param data Data frame ya adaptado por \code{reporte_data()}, que contiene
-#'   las variables a cruzar y, de ser el caso, la variable de pesos.
-#' @param instrumento Objeto devuelto por \code{reporte_instrumento()}, que
-#'   debe contener al menos el elemento \code{$survey} y, cuando esté
-#'   disponible, \code{$orders_list}.
-#' @param SECCIONES Lista nombrada que agrupa las variables a cruzar.
-#'   Cada elemento es un vector de nombres de variables que se mostrarán
-#'   como filas bajo el título de la sección correspondiente.
-#' @param cruces Vector de nombres de variables que se usarán como variables
-#'   de cruce (columnas/estratos). Una variable no se cruza consigo misma.
+#' @param data Data frame ya adaptado por \code{reporte_data()}.
+#' @param instrumento Objeto de \code{reporte_instrumento()} con \code{$survey}
+#'   y opcionalmente \code{$orders_list}.
+#' @param SECCIONES Lista nombrada de variables a reportar.
+#' @param cruces Variables de cruce. En modo \code{"dimensiones"}, si no se
+#'   usa \code{tablas}, debe ser un vector de longitud 1 (variable de fila).
+#' @param modo Modo de exportación: \code{"estandar"} o \code{"dimensiones"}.
 #' @param path_xlsx Ruta del archivo \code{.xlsx} de salida.
-#' @param hoja Nombre de la hoja dentro del libro de Excel.
-#' @param fuente Texto que se mostrará como fuente al pie de cada tabla.
-#' @param labels_override Lista nombrada opcional para sobrescribir etiquetas
-#'   de preguntas específicas. Los nombres deben coincidir con los nombres
-#'   de las variables.
-#' @param sm_vars_force Vector opcional de nombres de variables que deben
-#'   tratarse explícitamente como \emph{select_multiple}, incluso si el tipo
-#'   no puede detectarse automáticamente desde el instrumento.
-#' @param weight_col Nombre de la variable de pesos. Si no existe o es NULL,
-#'   se asume peso 1 para todos los casos.
-#' @param opciones_excluir Vector de labels de opciones a excluir tanto de las
-#'   variables tabuladas como de las variables usadas como cruce
-#'   (por ejemplo, categorías de no respuesta).
-#' @param show_sig Lógico; si \code{TRUE}, genera tablas adicionales con
-#'   letras de significancia (comparaciones de proporciones por columna).
-#' @param alpha Nivel de significancia para las pruebas z con corrección
-#'   de Bonferroni.
-#' @param codigos_solo_si_presentes Vector opcional de códigos (por ejemplo,
-#'   \code{c(96, 97, 98, 99)}) que solo se mostrarán en las tablas si
-#'   presentan al menos un caso en la variable correspondiente.
-#' @param numericas Vector opcional de nombres de variables a tratar como
-#'   numéricas. Estas variables se exportarán como tablas de estadísticos
-#'   descriptivos por total y por estrato, en lugar de tablas de frecuencias.
-#' @param digits Número de decimales a utilizar en los estadísticos
-#'   descriptivos de variables numéricas.
+#' @param hoja Nombre de la hoja de salida.
+#' @param fuente Texto de fuente al pie de tabla.
+#' @param labels_override Lista nombrada opcional de etiquetas por variable.
+#' @param sm_vars_force Solo modo \code{"estandar"}: variables a forzar como
+#'   \emph{select_multiple}.
+#' @param weight_col Variable de pesos.
+#' @param opciones_excluir Categorías a excluir en cruces.
+#' @param show_sig Si \code{TRUE}, agrega tablas de significancia.
+#' @param alpha Nivel de significancia.
+#' @param codigos_solo_si_presentes Solo modo \code{"estandar"}.
+#' @param numericas Solo modo \code{"estandar"}.
+#' @param digits Decimales para resultados numéricos.
+#' @param cruzar_dim Solo modo \code{"dimensiones"}: variables adicionales para
+#'   subindices de columnas.
+#' @param filas_dimensiones Solo modo \code{"dimensiones"}: variable de filas.
+#'   Si se especifica, tiene prioridad sobre \code{cruces}.
+#' @param incluir_total Solo modo \code{"dimensiones"}: agrega fila Total.
+#' @param brecha_filas Solo modo \code{"dimensiones"}: agrega fila Brecha (max - min entre filas).
+#' @param etiq_brecha_filas Solo modo \code{"dimensiones"}: texto de la fila Brecha.
+#' @param brecha_cols Solo modo \code{"dimensiones"}: agrega columnas de Brecha
+#'   (max - min entre columnas de cada variable de cruce, sin Total).
+#' @param etiq_brecha_cols Solo modo \code{"dimensiones"}: texto del header de
+#'   las columnas de Brecha.
+#' @param aplicar_semaforo Solo modo \code{"dimensiones"}: aplica formato
+#'   condicional rojo-amarillo-verde en celdas numéricas.
+#' @param semaforo_cortes Solo modo \code{"dimensiones"}: vector numérico de
+#'   dos cortes para semáforo (por defecto \code{c(50, 75)}).
+#' @param semaforo_colores Solo modo \code{"dimensiones"}: vector nombrado con
+#'   colores para \code{rojo}, \code{amarillo} y \code{verde}.
+#' @param aplicar_gradiente_brecha Solo modo \code{"dimensiones"}: si
+#'   \code{TRUE}, colorea la fila Brecha con gradiente.
+#' @param brecha_colores Solo modo \code{"dimensiones"}: vector nombrado con
+#'   colores para \code{bajo} y \code{alto} en la fila Brecha.
+#' @param brecha_cortes Solo modo \code{"dimensiones"}: vector de dos valores
+#'   que definen el rango del gradiente de brecha. Valores por debajo del primer
+#'   corte no reciben color; valores por encima del segundo reciben el color
+#'   maximo. Por defecto \code{c(0, 30)}.
+#' @param tablas Solo modo \code{"dimensiones"}: lista opcional de tablas para
+#'   exportar múltiples planos en un solo archivo. Cada elemento puede definir
+#'   \code{titulo}, \code{indicadores}, \code{fila}, \code{cruzar_dim}
+#'   (o \code{cruzar_con}), \code{hoja}, \code{incluir_total},
+#'   \code{brecha_filas}, \code{brecha_cols}, \code{espacio_antes},
+#'   \code{espacio_despues}, \code{etiq_brecha_filas} y \code{etiq_brecha_cols}.
 #'
-#' @return Invisiblemente, la ruta normalizada al archivo de salida.
+#' @return Invisiblemente, la ruta del archivo de salida.
 #'
 #' @seealso \code{\link{reporte_instrumento}},
 #'   \code{\link{reporte_data}},
@@ -1550,6 +3112,7 @@ reporte_cruces <- function(
     instrumento,
     SECCIONES,
     cruces,
+    modo             = c("estandar", "dimensiones"),
     path_xlsx        = "cruces_multi.xlsx",
     hoja             = "Cruces",
     fuente           = "Pulso PUCP",
@@ -1561,8 +3124,30 @@ reporte_cruces <- function(
     alpha            = 0.05,
     codigos_solo_si_presentes = NULL,
     numericas        = NULL,
-    digits           = 1
+    digits           = 1,
+    cruzar_dim       = NULL,
+    filas_dimensiones = NULL,
+    incluir_total    = TRUE,
+    brecha_filas     = FALSE,
+    etiq_brecha_filas = "Brecha",
+    brecha_cols      = FALSE,
+    etiq_brecha_cols = "Brecha",
+    aplicar_semaforo = TRUE,
+    semaforo_cortes  = c(50, 75),
+    semaforo_colores = c(
+      rojo = "#F8D7DA",
+      amarillo = "#FFF3CD",
+      verde = "#D4EDDA"
+    ),
+    aplicar_gradiente_brecha = TRUE,
+    brecha_colores = c(
+      bajo = "#FFFFFF",
+      alto = "#F4B183"
+    ),
+    brecha_cortes = c(0, 30),
+    tablas           = NULL
 ) {
+  modo <- match.arg(modo)
 
   survey <- NULL
   if (!is.null(instrumento) && "survey" %in% names(instrumento)) {
@@ -1578,6 +3163,60 @@ reporte_cruces <- function(
   if (!is.null(survey) && all(c("name", "label") %in% names(survey))) {
     dic_vars <- dplyr::select(survey, name, label)
     dic_vars <- dplyr::filter(dic_vars, !is.na(name) & name != "")
+  }
+
+  if (identical(modo, "dimensiones")) {
+    fila_dim <- if (!is.null(filas_dimensiones)) filas_dimensiones else cruces
+    fila_dim <- as.character(fila_dim)
+    fila_dim <- fila_dim[!is.na(fila_dim) & nzchar(trimws(fila_dim))]
+
+    if (is.null(tablas)) {
+      if (length(fila_dim) != 1L) {
+        stop(
+          "En `modo = \"dimensiones\"`, debe definir exactamente una variable de fila en `cruces` o `filas_dimensiones`.",
+          call. = FALSE
+        )
+      }
+      fila_dim <- fila_dim[1]
+    } else if (length(fila_dim) > 1L) {
+      stop(
+        "Si usa `filas_dimensiones`, debe contener solo una variable.",
+        call. = FALSE
+      )
+    }
+
+    return(
+      exportar_dimensiones_multi(
+        data             = data,
+        dic_vars         = dic_vars,
+        SECCIONES        = SECCIONES,
+        fila             = fila_dim,
+        cruzar_dim       = cruzar_dim,
+        incluir_total    = incluir_total,
+        brecha_filas     = brecha_filas,
+        etiq_brecha_filas = etiq_brecha_filas,
+        brecha_cols      = brecha_cols,
+        etiq_brecha_cols = etiq_brecha_cols,
+        tablas           = tablas,
+        labels_override  = labels_override,
+        path_xlsx        = path_xlsx,
+        hoja             = hoja,
+        fuente           = fuente,
+        survey           = survey,
+        orders_list      = orders_list,
+        weight_col       = weight_col,
+        opciones_excluir = opciones_excluir,
+        show_sig         = show_sig,
+        alpha            = alpha,
+        digits           = digits,
+        aplicar_semaforo = aplicar_semaforo,
+        semaforo_cortes  = semaforo_cortes,
+        semaforo_colores = semaforo_colores,
+        aplicar_gradiente_brecha = aplicar_gradiente_brecha,
+        brecha_colores = brecha_colores,
+        brecha_cortes = brecha_cortes
+      )
+    )
   }
 
   exportar_cruces_multi(

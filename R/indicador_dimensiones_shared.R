@@ -6,13 +6,11 @@
 # =============================================================================
 
 #' @keywords internal
-.dim_or <- function(x, y) if (!is.null(x)) x else y
+.dim_or <- function(x, y) .ind_or(x, y)
 
 #' @keywords internal
 .dim_validate_ready_data <- function(data, caller = "Dimensiones") {
-  if (!is.data.frame(data)) {
-    stop("`data` debe ser un data.frame o tibble.", call. = FALSE)
-  }
+  .ind_validate_data_frame(data, caller = caller)
 
   rec_meta <- attr(data, "recodificacion_items_meta", exact = TRUE)
   idx_meta <- attr(data, "indices_meta", exact = TRUE)
@@ -20,7 +18,7 @@
   if (!is.list(rec_meta) || !length(rec_meta)) {
     stop(
       caller,
-      ": `data` debe venir de `reporte_recodificar_items()` y contener `recodificacion_items_meta`.",
+      ": `data` debe venir de `reporte_dimensiones()` y contener `recodificacion_items_meta`.",
       call. = FALSE
     )
   }
@@ -28,7 +26,7 @@
   if (!is.list(idx_meta) || !length(idx_meta)) {
     stop(
       caller,
-      ": `data` debe venir de `reporte_construir_indices()` y contener `indices_meta`.",
+      ": `data` debe venir de `reporte_dimensiones_indices()` y contener `indices_meta`.",
       call. = FALSE
     )
   }
@@ -38,37 +36,19 @@
 
 #' @keywords internal
 .dim_resolve_instrumento <- function(data, instrumento = NULL, caller = "Dimensiones") {
-  instrumento <- .dim_or(instrumento, attr(data, "instrumento_reporte", exact = TRUE))
-  if (is.null(instrumento) || !is.list(instrumento)) {
-    stop(
-      caller,
-      ": no se pudo resolver `instrumento`. Usa la salida de `reporte_data()` o pásalo explícitamente.",
-      call. = FALSE
-    )
-  }
-  instrumento
+  .ind_resolve_instrumento(
+    data = data,
+    instrumento = instrumento,
+    caller = caller,
+    required = TRUE
+  )
 }
 
 #' @keywords internal
-.dim_as_named_chr <- function(x) {
-  if (is.null(x)) return(stats::setNames(character(0), character(0)))
-  v <- as.character(unlist(x, use.names = TRUE))
-  n <- names(v)
-  if (is.null(n)) return(stats::setNames(character(0), character(0)))
-  ok <- !is.na(n) & nzchar(trimws(n)) & !is.na(v) & nzchar(trimws(v))
-  stats::setNames(v[ok], n[ok])
-}
+.dim_as_named_chr <- function(x) .ind_as_named_chr(x)
 
 #' @keywords internal
-.dim_nm_get <- function(x, key) {
-  key <- as.character(.dim_or(key, ""))[1]
-  if (!nzchar(key)) return(NULL)
-  nms <- names(x)
-  if (is.null(nms)) return(NULL)
-  i <- match(key, nms)
-  if (is.na(i)) return(NULL)
-  as.character(x[i])[1]
-}
+.dim_nm_get <- function(x, key) .ind_nm_get(x, key)
 
 #' @keywords internal
 .dim_round_half_up <- function(x, digits = 0L) {
@@ -91,16 +71,7 @@
 .dim_clamp <- function(x, lo, hi) max(lo, min(hi, x))
 
 #' @keywords internal
-.dim_pretty_label <- function(x) {
-  x <- as.character(.dim_or(x, ""))
-  x <- gsub("^idx_", "", x)
-  x <- gsub("^bloq_", "", x)
-  x <- gsub("^r100_", "", x)
-  x <- gsub("[_\\.]+", " ", x)
-  x <- trimws(x)
-  if (!nzchar(x)) return("Variable")
-  paste0(toupper(substring(x, 1, 1)), substring(x, 2))
-}
+.dim_pretty_label <- function(x) .ind_pretty_label(x)
 
 #' @keywords internal
 .dim_first_nonempty <- function(...) {
@@ -415,7 +386,7 @@
   meta_raw <- attr(data, "indices_meta", exact = TRUE)
   rec_meta <- attr(data, "recodificacion_items_meta", exact = TRUE)
   meta_indices <- if (is.list(meta_raw) && is.list(meta_raw$indices)) meta_raw$indices else list()
-  meta_bloques <- if (is.list(meta_raw) && is.list(meta_raw$bloques)) meta_raw$bloques else list()
+  meta_subindices <- if (is.list(meta_raw) && is.list(meta_raw$subindices)) meta_raw$subindices else list()
 
   idx_key_to_var <- stats::setNames(
     vapply(meta_indices, function(x) as.character(x$salida %||% NA_character_)[1], character(1)),
@@ -424,12 +395,12 @@
   idx_key_to_var <- idx_key_to_var[!is.na(idx_key_to_var) & nzchar(idx_key_to_var)]
   idx_var_to_key <- stats::setNames(names(idx_key_to_var), as.character(idx_key_to_var))
 
-  bloq_key_to_var <- stats::setNames(
-    vapply(meta_bloques, function(x) as.character(x$salida %||% NA_character_)[1], character(1)),
-    names(meta_bloques)
+  sub_key_to_var <- stats::setNames(
+    vapply(meta_subindices, function(x) as.character(x$salida %||% NA_character_)[1], character(1)),
+    names(meta_subindices)
   )
-  bloq_key_to_var <- bloq_key_to_var[!is.na(bloq_key_to_var) & nzchar(bloq_key_to_var)]
-  bloq_var_to_key <- stats::setNames(names(bloq_key_to_var), as.character(bloq_key_to_var))
+  sub_key_to_var <- sub_key_to_var[!is.na(sub_key_to_var) & nzchar(sub_key_to_var)]
+  sub_var_to_key <- stats::setNames(names(sub_key_to_var), as.character(sub_key_to_var))
 
   rec_out_to_src <- stats::setNames(character(0), character(0))
   if (is.list(rec_meta) && length(rec_meta)) {
@@ -463,7 +434,7 @@
   }
 
   lbl_idx <- .dim_as_named_chr(config$labels_indices)
-  lbl_bloq <- .dim_as_named_chr(config$labels_bloques)
+  lbl_sub <- .dim_as_named_chr(config$labels_subindices)
   lbl_ind <- .dim_as_named_chr(config$labels_indicadores)
 
   label_idx <- function(v, key = NULL) {
@@ -478,11 +449,13 @@
     )
   }
 
-  label_bloq <- function(v, key = NULL) {
-    kk <- as.character(key %||% .dim_nm_get(bloq_var_to_key, v) %||% "")
+  label_sub <- function(v, key = NULL) {
+    kk <- as.character(key %||% .dim_nm_get(sub_var_to_key, v) %||% "")
+    sub_etiq <- if (nzchar(kk) && kk %in% names(meta_subindices)) meta_subindices[[kk]]$etiqueta else NULL
     .dim_first_nonempty(
-      .dim_nm_get(lbl_bloq, kk),
-      .dim_nm_get(lbl_bloq, v),
+      sub_etiq,
+      .dim_nm_get(lbl_sub, kk),
+      .dim_nm_get(lbl_sub, v),
       if (nzchar(kk)) .dim_pretty_label(kk) else "",
       label_data(v),
       label_var(v),
@@ -524,11 +497,11 @@
             mode = "general",
             label = label_idx(id_var, key),
             axis_vars = axis_vars,
-            axis_labels = vapply(axis_vars, label_bloq, character(1))
+            axis_labels = vapply(axis_vars, label_sub, character(1))
           )
         } else {
           key <- as.character(it$key %||% it$id %||% nm)[1]
-          bvar <- as.character(it$block_var %||% .dim_nm_get(bloq_key_to_var, key) %||% NA_character_)[1]
+          bvar <- as.character(it$block_var %||% .dim_nm_get(sub_key_to_var, key) %||% NA_character_)[1]
           axis_vars <- as.character(it$axis_vars %||% character(0))
           axis_vars <- axis_vars[axis_vars %in% names(data)]
           if (!length(axis_vars)) next
@@ -537,7 +510,7 @@
             id = key,
             key = key,
             mode = "indicadores",
-            label = label_bloq(bvar, key),
+            label = label_sub(bvar, key),
             block_var = bvar,
             axis_vars = axis_vars,
             axis_labels = vapply(axis_vars, label_ind, character(1))
@@ -566,8 +539,8 @@
       for (r in refs) {
         rv <- if (r %in% names(data)) {
           r
-        } else if (r %in% names(bloq_key_to_var)) {
-          as.character(bloq_key_to_var[[r]])
+        } else if (r %in% names(sub_key_to_var)) {
+          as.character(sub_key_to_var[[r]])
         } else {
           NA_character_
         }
@@ -583,25 +556,25 @@
         mode = "general",
         label = label_idx(idx_var, nm),
         axis_vars = axis_vars,
-        axis_labels = vapply(axis_vars, label_bloq, character(1))
+        axis_labels = vapply(axis_vars, label_sub, character(1))
       )
     }
   }
 
   if (!length(catalog_indicadores)) {
-    for (bk in names(meta_bloques)) {
-      bl <- meta_bloques[[bk]]
-      bvar <- as.character(bl$salida %||% NA_character_)[1]
-      axis_vars <- unique(as.character(bl$vars %||% character(0)))
+    for (sk in names(meta_subindices)) {
+      sl <- meta_subindices[[sk]]
+      svar <- as.character(sl$salida %||% NA_character_)[1]
+      axis_vars <- unique(as.character(sl$vars %||% character(0)))
       axis_vars <- axis_vars[axis_vars %in% names(data)]
       if (!length(axis_vars)) next
 
-      catalog_indicadores[[bk]] <- list(
-        id = bk,
-        key = bk,
+      catalog_indicadores[[sk]] <- list(
+        id = sk,
+        key = sk,
         mode = "indicadores",
-        label = label_bloq(bvar, bk),
-        block_var = bvar,
+        label = label_sub(svar, sk),
+        block_var = svar,
         axis_vars = axis_vars,
         axis_labels = vapply(axis_vars, label_ind, character(1))
       )
@@ -672,7 +645,7 @@
     theme_color = as.character(theme_color %||% "#0E3B74")[1],
     weight_col = weight_col,
     meta_indices = meta_indices,
-    meta_bloques = meta_bloques,
+    meta_subindices = meta_subindices,
     catalog_general = catalog_general,
     catalog_indicadores = catalog_indicadores,
     section_var_map = section_var_map,
@@ -680,7 +653,7 @@
     label_var = label_var,
     label_data = label_data,
     label_idx = label_idx,
-    label_bloq = label_bloq,
+    label_sub = label_sub,
     label_ind = label_ind,
     radar_min_ejes = vis$radar_min_ejes,
     max_categorias_principal = vis$max_categorias_principal,

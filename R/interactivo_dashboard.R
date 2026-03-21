@@ -1486,7 +1486,7 @@ reporte_interactivo <- function(
   .pretty_dim <- function(x) {
     x <- as.character(x %||% "")
     x <- gsub("^idx_", "", x)
-    x <- gsub("^bloq_", "", x)
+    x <- gsub("^sub_", "", x)
     x <- gsub("^r100_", "", x)
     x <- gsub("[_\\.]+", " ", x)
     x <- trimws(x)
@@ -1540,7 +1540,7 @@ reporte_interactivo <- function(
       catalog_general = list(),
       catalog_indicadores = list(),
       labels_indices = stats::setNames(character(0), character(0)),
-      labels_bloques = stats::setNames(character(0), character(0)),
+      labels_subindices = stats::setNames(character(0), character(0)),
       labels_indicadores = stats::setNames(character(0), character(0)),
       semaforo = list(
         cortes = c(50, 75),
@@ -1611,7 +1611,7 @@ reporte_interactivo <- function(
       idx_meta <- attr(datos_dim_ready, "indices_meta", exact = TRUE)
       rec_meta <- attr(datos_dim_ready, "recodificacion_items_meta", exact = TRUE)
       meta_indices <- if (is.list(idx_meta) && is.list(idx_meta$indices)) idx_meta$indices else list()
-      meta_bloques <- if (is.list(idx_meta) && is.list(idx_meta$bloques)) idx_meta$bloques else list()
+      meta_subindices <- if (is.list(idx_meta) && is.list(idx_meta$subindices)) idx_meta$subindices else list()
 
       idx_key_to_var <- stats::setNames(
         vapply(meta_indices, function(x) as.character(x$salida %||% NA_character_)[1], character(1)),
@@ -1620,12 +1620,12 @@ reporte_interactivo <- function(
       idx_key_to_var <- idx_key_to_var[!is.na(idx_key_to_var) & nzchar(idx_key_to_var)]
       idx_var_to_key <- stats::setNames(names(idx_key_to_var), as.character(idx_key_to_var))
 
-      bloq_key_to_var <- stats::setNames(
-        vapply(meta_bloques, function(x) as.character(x$salida %||% NA_character_)[1], character(1)),
-        names(meta_bloques)
+      sub_key_to_var <- stats::setNames(
+        vapply(meta_subindices, function(x) as.character(x$salida %||% NA_character_)[1], character(1)),
+        names(meta_subindices)
       )
-      bloq_key_to_var <- bloq_key_to_var[!is.na(bloq_key_to_var) & nzchar(bloq_key_to_var)]
-      bloq_var_to_key <- stats::setNames(names(bloq_key_to_var), as.character(bloq_key_to_var))
+      sub_key_to_var <- sub_key_to_var[!is.na(sub_key_to_var) & nzchar(sub_key_to_var)]
+      sub_var_to_key <- stats::setNames(names(sub_key_to_var), as.character(sub_key_to_var))
 
       rec_out_to_src <- stats::setNames(character(0), character(0))
       if (is.list(rec_meta) && length(rec_meta)) {
@@ -1642,7 +1642,7 @@ reporte_interactivo <- function(
 
       rot_map <- .extract_rotulos_map(rotulos_dimensiones, valid_vars = names(datos_dim_ready))
       lbl_idx_cfg <- .as_named_chr(cfg$labels_indices)
-      lbl_bloq_cfg <- .as_named_chr(cfg$labels_bloques)
+      lbl_sub_cfg <- .as_named_chr(cfg$labels_subindices)
       lbl_ind_cfg <- .as_named_chr(cfg$labels_indicadores)
 
       .var_attr_label <- function(v) {
@@ -1665,11 +1665,13 @@ reporte_interactivo <- function(
         )
       }
 
-      .label_bloq <- function(v, key = NULL) {
-        kk <- as.character(key %||% .nm_get(bloq_var_to_key, v) %||% "")
+      .label_sub <- function(v, key = NULL) {
+        kk <- as.character(key %||% .nm_get(sub_var_to_key, v) %||% "")
+        sub_etiq <- if (nzchar(kk) && kk %in% names(meta_subindices)) meta_subindices[[kk]]$etiqueta else NULL
         .first_nonempty(
-          .nm_get(lbl_bloq_cfg, kk),
-          .nm_get(lbl_bloq_cfg, v),
+          sub_etiq,
+          .nm_get(lbl_sub_cfg, kk),
+          .nm_get(lbl_sub_cfg, v),
           .nm_get(rot_map, v),
           if (nzchar(kk)) .pretty_dim(kk) else "",
           .var_attr_label(v),
@@ -1706,8 +1708,8 @@ reporte_interactivo <- function(
           for (r in refs) {
             rv <- if (r %in% names(datos_dim_ready)) {
               r
-            } else if (r %in% names(bloq_key_to_var)) {
-              as.character(bloq_key_to_var[[r]])
+            } else if (r %in% names(sub_key_to_var)) {
+              as.character(sub_key_to_var[[r]])
             } else {
               NA_character_
             }
@@ -1721,7 +1723,7 @@ reporte_interactivo <- function(
             key = nm,
             label = .label_idx(idx_var, nm),
             axis_vars = axis_vars,
-            axis_labels = vapply(axis_vars, .label_bloq, character(1))
+            axis_labels = vapply(axis_vars, .label_sub, character(1))
           )
         }
       } else {
@@ -1740,8 +1742,8 @@ reporte_interactivo <- function(
             for (r in refs) {
               rv <- if (r %in% names(datos_dim_ready)) {
                 r
-              } else if (r %in% names(bloq_key_to_var)) {
-                as.character(bloq_key_to_var[[r]])
+              } else if (r %in% names(sub_key_to_var)) {
+                as.character(sub_key_to_var[[r]])
               } else {
                 NA_character_
               }
@@ -1756,15 +1758,15 @@ reporte_interactivo <- function(
             key = key,
             label = .label_idx(idx_var, key),
             axis_vars = axis_vars,
-            axis_labels = vapply(axis_vars, .label_bloq, character(1))
+            axis_labels = vapply(axis_vars, .label_sub, character(1))
           )
         }
         catalog_general <- catalog_general[lengths(catalog_general) > 0L]
       }
 
       if (!length(catalog_indicadores)) {
-        for (bk in names(meta_bloques)) {
-          bl <- meta_bloques[[bk]]
+        for (bk in names(meta_subindices)) {
+          bl <- meta_subindices[[bk]]
           bvar <- as.character(bl$salida %||% NA_character_)[1]
           vars <- unique(as.character(bl$vars %||% character(0)))
           vars <- vars[vars %in% names(datos_dim_ready)]
@@ -1772,7 +1774,7 @@ reporte_interactivo <- function(
           catalog_indicadores[[bk]] <- list(
             id = bk,
             key = bk,
-            label = .label_bloq(bvar, bk),
+            label = .label_sub(bvar, bk),
             block_var = bvar,
             axis_vars = vars,
             axis_labels = vapply(vars, .label_ind, character(1))
@@ -1782,18 +1784,18 @@ reporte_interactivo <- function(
         for (nm in names(catalog_indicadores)) {
           it <- catalog_indicadores[[nm]]
           key <- as.character(it$key %||% it$id %||% nm)[1]
-          bvar <- as.character(it$block_var %||% .nm_get(bloq_key_to_var, key) %||% NA_character_)[1]
+          bvar <- as.character(it$block_var %||% .nm_get(sub_key_to_var, key) %||% NA_character_)[1]
           vars <- as.character(it$axis_vars %||% character(0))
           vars <- vars[vars %in% names(datos_dim_ready)]
-          if (!length(vars) && key %in% names(meta_bloques)) {
-            vars <- unique(as.character(meta_bloques[[key]]$vars %||% character(0)))
+          if (!length(vars) && key %in% names(meta_subindices)) {
+            vars <- unique(as.character(meta_subindices[[key]]$vars %||% character(0)))
             vars <- vars[vars %in% names(datos_dim_ready)]
           }
           if (!length(vars)) next
           catalog_indicadores[[nm]] <- list(
             id = key,
             key = key,
-            label = .label_bloq(bvar, key),
+            label = .label_sub(bvar, key),
             block_var = bvar,
             axis_vars = vars,
             axis_labels = vapply(vars, .label_ind, character(1))
@@ -1810,13 +1812,13 @@ reporte_interactivo <- function(
         if (nzchar(kk)) lbl_idx_out[kk] <- lab
       }
 
-      lbl_bloq_out <- lbl_bloq_cfg
-      for (v in unique(c(names(bloq_var_to_key), unname(bloq_key_to_var)))) {
+      lbl_sub_out <- lbl_sub_cfg
+      for (v in unique(c(names(sub_var_to_key), unname(sub_key_to_var)))) {
         if (!nzchar(v)) next
-        kk <- as.character(.nm_get(bloq_var_to_key, v) %||% "")
-        lab <- .label_bloq(v, kk)
-        lbl_bloq_out[v] <- lab
-        if (nzchar(kk)) lbl_bloq_out[kk] <- lab
+        kk <- as.character(.nm_get(sub_var_to_key, v) %||% "")
+        lab <- .label_sub(v, kk)
+        lbl_sub_out[v] <- lab
+        if (nzchar(kk)) lbl_sub_out[kk] <- lab
       }
 
       lbl_ind_out <- lbl_ind_cfg
@@ -1828,7 +1830,7 @@ reporte_interactivo <- function(
       cfg$catalog_general <- catalog_general
       cfg$catalog_indicadores <- catalog_indicadores
       cfg$labels_indices <- lbl_idx_out
-      cfg$labels_bloques <- lbl_bloq_out
+      cfg$labels_subindices <- lbl_sub_out
       cfg$labels_indicadores <- lbl_ind_out
 
       sem_c <- suppressWarnings(as.numeric(cfg$semaforo$cortes %||% c(50, 75)))

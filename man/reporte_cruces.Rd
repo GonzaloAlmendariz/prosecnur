@@ -2,13 +2,14 @@
 % Please edit documentation in R/reporte_cruces.R
 \name{reporte_cruces}
 \alias{reporte_cruces}
-\title{Generar reporte de cruces (categóricos y numéricos) en Excel}
+\title{Generar reporte de cruces en Excel (estándar o dimensiones)}
 \usage{
 reporte_cruces(
   data,
   instrumento,
   SECCIONES,
   cruces,
+  modo = c("estandar", "dimensiones"),
   path_xlsx = "cruces_multi.xlsx",
   hoja = "Cruces",
   fuente = "Pulso PUCP",
@@ -20,84 +21,127 @@ reporte_cruces(
   alpha = 0.05,
   codigos_solo_si_presentes = NULL,
   numericas = NULL,
-  digits = 1
+  digits = 1,
+  cruzar_dim = NULL,
+  filas_dimensiones = NULL,
+  incluir_total = TRUE,
+  brecha_filas = FALSE,
+  etiq_brecha_filas = "Brecha",
+  brecha_cols = FALSE,
+  etiq_brecha_cols = "Brecha",
+  aplicar_semaforo = TRUE,
+  semaforo_cortes = c(50, 75),
+  semaforo_colores = c(rojo = "#F8D7DA", amarillo = "#FFF3CD", verde = "#D4EDDA"),
+  aplicar_gradiente_brecha = TRUE,
+  brecha_colores = c(bajo = "#FFFFFF", alto = "#F4B183"),
+  brecha_cortes = c(0, 30),
+  tablas = NULL
 )
 }
 \arguments{
-\item{data}{Data frame ya adaptado por \code{reporte_data()}, que contiene
-las variables a cruzar y, de ser el caso, la variable de pesos.}
+\item{data}{Data frame ya adaptado por \code{reporte_data()}.}
 
-\item{instrumento}{Objeto devuelto por \code{reporte_instrumento()}, que
-debe contener al menos el elemento \code{$survey} y, cuando esté
-disponible, \code{$orders_list}.}
+\item{instrumento}{Objeto de \code{reporte_instrumento()} con \code{$survey}
+y opcionalmente \code{$orders_list}.}
 
-\item{SECCIONES}{Lista nombrada que agrupa las variables a cruzar.
-Cada elemento es un vector de nombres de variables que se mostrarán
-como filas bajo el título de la sección correspondiente.}
+\item{SECCIONES}{Lista nombrada de variables a reportar.}
 
-\item{cruces}{Vector de nombres de variables que se usarán como variables
-de cruce (columnas/estratos). Una variable no se cruza consigo misma.}
+\item{cruces}{Variables de cruce. En modo \code{"dimensiones"}, si no se
+usa \code{tablas}, debe ser un vector de longitud 1 (variable de fila).}
+
+\item{modo}{Modo de exportación: \code{"estandar"} o \code{"dimensiones"}.}
 
 \item{path_xlsx}{Ruta del archivo \code{.xlsx} de salida.}
 
-\item{hoja}{Nombre de la hoja dentro del libro de Excel.}
+\item{hoja}{Nombre de la hoja de salida.}
 
-\item{fuente}{Texto que se mostrará como fuente al pie de cada tabla.}
+\item{fuente}{Texto de fuente al pie de tabla.}
 
-\item{labels_override}{Lista nombrada opcional para sobrescribir etiquetas
-de preguntas específicas. Los nombres deben coincidir con los nombres
-de las variables.}
+\item{labels_override}{Lista nombrada opcional de etiquetas por variable.}
 
-\item{sm_vars_force}{Vector opcional de nombres de variables que deben
-tratarse explícitamente como \emph{select_multiple}, incluso si el tipo
-no puede detectarse automáticamente desde el instrumento.}
+\item{sm_vars_force}{Solo modo \code{"estandar"}: variables a forzar como
+\emph{select_multiple}.}
 
-\item{weight_col}{Nombre de la variable de pesos. Si no existe o es NULL,
-se asume peso 1 para todos los casos.}
+\item{weight_col}{Variable de pesos.}
 
-\item{opciones_excluir}{Vector de labels de opciones a excluir tanto de las
-variables tabuladas como de las variables usadas como cruce
-(por ejemplo, categorías de no respuesta).}
+\item{opciones_excluir}{Categorías a excluir en cruces.}
 
-\item{show_sig}{Lógico; si \code{TRUE}, genera tablas adicionales con
-letras de significancia (comparaciones de proporciones por columna).}
+\item{show_sig}{Si \code{TRUE}, agrega tablas de significancia.}
 
-\item{alpha}{Nivel de significancia para las pruebas z con corrección
-de Bonferroni.}
+\item{alpha}{Nivel de significancia.}
 
-\item{codigos_solo_si_presentes}{Vector opcional de códigos (por ejemplo,
-\code{c(96, 97, 98, 99)}) que solo se mostrarán en las tablas si
-presentan al menos un caso en la variable correspondiente.}
+\item{codigos_solo_si_presentes}{Solo modo \code{"estandar"}.}
 
-\item{numericas}{Vector opcional de nombres de variables a tratar como
-numéricas. Estas variables se exportarán como tablas de estadísticos
-descriptivos por total y por estrato, en lugar de tablas de frecuencias.}
+\item{numericas}{Solo modo \code{"estandar"}.}
 
-\item{digits}{Número de decimales a utilizar en los estadísticos
-descriptivos de variables numéricas.}
+\item{digits}{Decimales para resultados numéricos.}
+
+\item{cruzar_dim}{Solo modo \code{"dimensiones"}: variables adicionales para
+subindices de columnas.}
+
+\item{filas_dimensiones}{Solo modo \code{"dimensiones"}: variable de filas.
+Si se especifica, tiene prioridad sobre \code{cruces}.}
+
+\item{incluir_total}{Solo modo \code{"dimensiones"}: agrega fila Total.}
+
+\item{brecha_filas}{Solo modo \code{"dimensiones"}: agrega fila Brecha (max - min entre filas).}
+
+\item{etiq_brecha_filas}{Solo modo \code{"dimensiones"}: texto de la fila Brecha.}
+
+\item{brecha_cols}{Solo modo \code{"dimensiones"}: agrega columnas de Brecha
+(max - min entre columnas de cada variable de cruce, sin Total).}
+
+\item{etiq_brecha_cols}{Solo modo \code{"dimensiones"}: texto del header de
+las columnas de Brecha.}
+
+\item{aplicar_semaforo}{Solo modo \code{"dimensiones"}: aplica formato
+condicional rojo-amarillo-verde en celdas numéricas.}
+
+\item{semaforo_cortes}{Solo modo \code{"dimensiones"}: vector numérico de
+dos cortes para semáforo (por defecto \code{c(50, 75)}).}
+
+\item{semaforo_colores}{Solo modo \code{"dimensiones"}: vector nombrado con
+colores para \code{rojo}, \code{amarillo} y \code{verde}.}
+
+\item{aplicar_gradiente_brecha}{Solo modo \code{"dimensiones"}: si
+\code{TRUE}, colorea la fila Brecha con gradiente.}
+
+\item{brecha_colores}{Solo modo \code{"dimensiones"}: vector nombrado con
+colores para \code{bajo} y \code{alto} en la fila Brecha.}
+
+\item{brecha_cortes}{Solo modo \code{"dimensiones"}: vector de dos valores
+que definen el rango del gradiente de brecha. Valores por debajo del primer
+corte no reciben color; valores por encima del segundo reciben el color
+maximo. Por defecto \code{c(0, 30)}.}
+
+\item{tablas}{Solo modo \code{"dimensiones"}: lista opcional de tablas para
+exportar múltiples planos en un solo archivo. Cada elemento puede definir
+\code{titulo}, \code{indicadores}, \code{fila}, \code{cruzar_dim}
+(o \code{cruzar_con}), \code{hoja}, \code{incluir_total},
+\code{brecha_filas}, \code{brecha_cols}, \code{espacio_antes},
+\code{espacio_despues}, \code{etiq_brecha_filas} y \code{etiq_brecha_cols}.}
 }
 \value{
-Invisiblemente, la ruta normalizada al archivo de salida.
+Invisiblemente, la ruta del archivo de salida.
 }
 \description{
-Función de alto nivel que envuelve a \code{exportar_cruces_multi()} para
-generar un archivo de Excel con tablas de cruces múltiples. Permite
-combinar en un mismo reporte:
+Función de alto nivel que enruta a:
+\itemize{
+\item \code{exportar_cruces_multi()} cuando \code{modo = "estandar"}.
+\item \code{exportar_dimensiones_multi()} cuando \code{modo = "dimensiones"}.
+}
 }
 \details{
+En modo \code{"dimensiones"}:
 \itemize{
-\item Cruces de variables categóricas (select_one y select_multiple),
-con totales, porcentajes y, opcionalmente, tablas de significancia
-(pruebas z con corrección de Bonferroni).
-\item Cruces de variables numéricas (definidas en \code{numericas}),
-mostrando estadísticos descriptivos por total y por estrato:
-N válido, media, desviación estándar, mínimo, P25, mediana, P75 y máximo.
+\item \code{SECCIONES} debe contener indicadores numéricos (típicamente
+\code{r100_}, \code{sub_}, \code{idx_}).
+\item Se crea una hoja inicial \code{"Metodologia"} con el detalle técnico
+de construcción de indicadores y escalas.
+\item Si no se usa \code{tablas}, \code{cruces} debe tener exactamente una
+variable, usada como filas.
+\item \code{cruzar_dim} define cruces adicionales para subindices de columnas.
 }
-
-Esta función está diseñada para trabajar de forma integrada con
-\code{reporte_instrumento()} y \code{reporte_data()}, utilizando la
-información de \code{$survey} y \code{$orders_list} del instrumento para
-recuperar labels, órdenes de categorías y tipos de pregunta.
 }
 \seealso{
 \code{\link{reporte_instrumento}},

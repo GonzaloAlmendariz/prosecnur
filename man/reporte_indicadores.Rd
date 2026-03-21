@@ -2,56 +2,90 @@
 % Please edit documentation in R/indicador_metricas.R
 \name{reporte_indicadores}
 \alias{reporte_indicadores}
-\title{Construir indicadores categóricos a partir de reglas lógicas}
+\title{Construir indicadores categóricos}
 \usage{
-reporte_indicadores(data, indicadores, instrumento = NULL, prefijo = "ind_")
+reporte_indicadores(
+  data,
+  indicadores,
+  instrumento = NULL,
+  prefijo = "ind_",
+  verbose = TRUE
+)
 }
 \arguments{
-\item{data}{\code{data.frame} o \code{tibble}, típicamente la salida de
-\code{\link{reporte_data}()}.}
+\item{data}{\\code{data.frame} o \\code{tibble}, típicamente la salida de
+\\code{\\link{reporte_data}()}.}
 
-\item{indicadores}{Lista de objetos \code{\link{indicador}()}.}
+\item{indicadores}{Lista de objetos \\code{\\link{indicador}()}.}
 
-\item{instrumento}{Objeto devuelto por \code{\link{reporte_instrumento}()}.
-Si es \code{NULL}, se toma desde \code{attr(data, "instrumento_reporte")}.}
+\item{instrumento}{Objeto devuelto por \\code{\\link{reporte_instrumento}()}.
+Si es \\code{NULL}, se toma desde \\code{attr(data, "instrumento_reporte")}.}
 
-\item{prefijo}{Prefijo para las columnas creadas. Por defecto \code{"ind_"}.}
+\item{prefijo}{Prefijo para las columnas creadas. Por defecto \\code{"ind_"}.}
+
+\item{verbose}{Si \\code{TRUE} (default), imprime mensajes de validación por
+indicador y nivel, en lenguaje claro.}
 }
 \value{
-El mismo \code{data.frame} con las nuevas columnas categóricas.
-Además actualiza el instrumento en \code{attr(data, "instrumento_reporte")}
-y agrega el atributo \code{indicadores_meta} con trazabilidad.
+El mismo \\code{data.frame} con las nuevas columnas categóricas.
+Además actualiza el instrumento en \\code{attr(data, "instrumento_reporte")}
+y agrega el atributo \\code{indicadores_meta} con trazabilidad.
 }
 \description{
-Toma un data.frame y una lista de definiciones de indicadores (construidos
-con \code{\link{indicador}()} y \code{\link{nivel}()}) y crea nuevas
-variables categóricas evaluando las reglas lógicas de cada nivel.
+Evalúa indicadores en dos vías:
+\\itemize{
+\\item Vía nueva (recomendada): \\code{nivel(..., cuando = ~ ...)}
+con referencias \\code{nivel_<code>} entre niveles previos.
+\\item Vía antigua (deprecada): \\code{definidores + usa + grupo}.
+}
 }
 \details{
-Las variables resultantes se integran automáticamente con el instrumento
-almacenado en \code{attr(data, "instrumento_reporte")}, lo que permite
-usarlas directamente con \code{\link{reporte_frecuencias}()},
-\code{\link{reporte_cruces}()}, \code{p_barras_apiladas()}, etc.
+Los niveles deben ser excluyentes. Si dos niveles aplican a la misma fila,
+la función se detiene con error claro para corregir el diseño del indicador.
 
-Para cada indicador, se evalúan las reglas de sus niveles en orden.
-Con \code{prioridad = "primero"} (default), la primera regla que matchea
-determina el nivel asignado. Filas que no matchean ningún nivel reciben
-\code{NA}.
+Si \\code{solo_observados = TRUE} (por indicador), filas sin datos observados
+en variables evaluadas no reciben nivel (quedan \\code{NA}).
+}
+\examples{
+d <- data.frame(
+  P17_1 = c("1", NA, "2"),
+  P17_2 = c(NA, "1", NA),
+  P18 = c("2", "1", "1"),
+  stringsAsFactors = FALSE
+)
 
-Si una regla produce \code{NA} (por ejemplo, porque una variable tiene
-\code{NA} en esa fila), se trata como \code{FALSE} (no matchea).
+ind_demo <- indicador(
+  nombre = "acceso_salud",
+  niveles = list(
+    nivel("1", "Reciente",
+      cuando = ~ ind_alguna(ind_es(P17_1, "1"), ind_es(P17_2, "1"))
+    ),
+    nivel("2", "No reciente",
+      cuando = ~ !nivel_1 & ind_es(P18, "1")
+    ),
+    nivel("3", "No atendido",
+      cuando = ~ !nivel_1 & ind_es(P18, "2")
+    )
+  )
+)
+
+reporte_indicadores(d, list(ind_demo), prefijo = "")
+
 }
 \seealso{
-\code{\link{indicador}}, \code{\link{nivel}},
-\code{\link{reporte_recodificar_items}},
-\code{\link{reporte_frecuencias}}, \code{\link{reporte_cruces}}
+\\code{\\link{indicador}}, \\code{\\link{nivel}},
+\\code{\\link{reporte_dimensiones}},
+\\code{\\link{reporte_frecuencias}}, \\code{\\link{reporte_cruces}}
 
 Other indicador: 
+\code{\link{grupo}()},
+\code{\link{ind_helpers}},
 \code{\link{indicador}()},
+\code{\link{indice}()},
 \code{\link{nivel}()},
-\code{\link{reporte_construir_indices}()},
+\code{\link{reporte_dimensiones}()},
 \code{\link{reporte_dimensiones_config}()},
-\code{\link{reporte_recodificar_items}()},
-\code{\link{reporte_tablas_recodificadas}()}
+\code{\link{reporte_dimensiones_indices}()},
+\code{\link{subindice}()}
 }
 \concept{indicador}
