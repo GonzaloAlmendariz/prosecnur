@@ -41,8 +41,15 @@ graficar_barras_apiladas(
   color_texto_barras = "white",
   size_texto_barras = 3,
   size_texto_barras_peq = NULL,
+  etiquetas_uniformes = FALSE,
   repeler_etiquetas_peq = TRUE,
   desplazamiento_max_etiquetas_peq = 0.05,
+  etiquetas_peq_factor_ancho = 1,
+  etiquetas_peq_padding = 0.003,
+  etiquetas_peq_max_iter = 16L,
+  etiquetas_peq_sesgo_derecha = 0.5,
+  etiquetas_peq_confinadas = FALSE,
+  etiquetas_peq_margen_interno = 0,
   color_barra_extra = "#000000",
   size_barra_extra = 3,
   size_titulo_extra = 3,
@@ -163,11 +170,35 @@ Los valores entre \code{umbral_mostrar_etiqueta} y este umbral se muestran como 
 
 \item{color_texto_barras, size_texto_barras, size_texto_barras_peq}{Estilos de etiquetas internas.}
 
+\item{etiquetas_uniformes}{Si \code{TRUE}, activa modo uniforme de etiquetas:
+no separa entre etiquetas grandes/pequenas, usa un único umbral de visibilidad
+(\code{umbral_mostrar_etiqueta} efectivo) y aplica el repelido con sesgo hacia el centro.}
+
 \item{repeler_etiquetas_peq}{Si \code{TRUE}, intenta separar horizontalmente las etiquetas pequenas
-cuando se superponen, manteniendolas cerca de su centro original.}
+cuando se superponen, manteniendolas cerca de su centro original. En modo uniforme,
+este repelido se aplica a todas las etiquetas visibles.}
 
 \item{desplazamiento_max_etiquetas_peq}{Corrimiento horizontal maximo permitido para etiquetas
 pequenas, en la escala \code{0-1} de la barra normalizada.}
+
+\item{etiquetas_peq_factor_ancho}{Multiplicador del ancho estimado de etiquetas pequenas para
+detectar colisiones. Valores mayores a \code{1} vuelven el detector más conservador y tienden a
+separar mejor textos como \verb{2\%}, \verb{4\%}, \verb{5\%}.}
+
+\item{etiquetas_peq_padding}{Espacio horizontal mínimo adicional entre etiquetas pequenas
+(escala \code{0-1} de la barra).}
+
+\item{etiquetas_peq_max_iter}{Número máximo de iteraciones del algoritmo de repelido.}
+
+\item{etiquetas_peq_sesgo_derecha}{Sesgo de ajuste cuando dos etiquetas pequenas chocan.
+\code{0.5} reparte el movimiento de forma equilibrada; valores mayores desplazan más la etiqueta
+de la derecha (útil cuando se desea “empujar hacia adentro”).}
+
+\item{etiquetas_peq_confinadas}{Si \code{TRUE}, las etiquetas pequenas solo se mueven dentro de su
+propio segmento apilado y no pueden cruzar a segmentos vecinos.}
+
+\item{etiquetas_peq_margen_interno}{Margen de seguridad dentro del segmento cuando
+\code{etiquetas_peq_confinadas = TRUE}, para evitar textos pegados al borde.}
 
 \item{color_barra_extra, size_barra_extra, size_titulo_extra}{Estilos de la columna extra.}
 
@@ -274,6 +305,14 @@ leyenda y caption), permitiendo un control fino del layout (útil para exportaci
 
 Además, se puede agregar una columna de \strong{barra extra} (por defecto, N) o indicadores tipo
 \code{top2box}, \code{top3box} o \code{bottom2box} a partir de los segmentos apilados.
+
+Desde esta versión, el repelido de etiquetas pequenas es configurable: se puede ajustar el
+detector de colisión (ancho estimado), el padding mínimo, el número de iteraciones, el sesgo
+izquierda/derecha y un modo \strong{confinado por segmento} para que las etiquetas no crucen a
+segmentos vecinos ni se salgan visualmente de su barra. Además, \code{etiquetas_uniformes = TRUE}
+activa un modo opt-in sin split \code{peq/grande}, con sesgo de empuje hacia el centro para
+reducir choques. Por compatibilidad, el comportamiento legacy se mantiene cuando
+\code{etiquetas_uniformes = FALSE} (default).
 }
 \examples{
 \dontrun{

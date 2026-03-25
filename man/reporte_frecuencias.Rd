@@ -35,7 +35,6 @@ Other reporte:
 \code{\link{p_barras_multiapiladas}()},
 \code{\link{p_dim_heatmap}()},
 \code{\link{p_dim_radar}()},
-\code{\link{p_dim_radar_tabla}()},
 \code{\link{p_donut}()},
 \code{\link{p_get_plan}()},
 \code{\link{p_numerico}()},

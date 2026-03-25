@@ -136,6 +136,259 @@
   out
 }
 
+.collect_code_label_map_from_sm_cols <- function(df_or_path, code_col, label_col,
+                                                 known_codes = character(0),
+                                                 context = code_col){
+  if (is.character(df_or_path) && file.exists(df_or_path)) {
+    lst <- .read_all_sheets(df_or_path)
+  } else if (is.data.frame(df_or_path)) {
+    lst <- list(DATA = df_or_path)
+  } else {
+    stop("path_data_adaptada debe ser data.frame o ruta a XLSX con la data adaptada.")
+  }
+
+  acc <- tibble::tibble(code = character(0), label = character(0), sheet = character(0))
+  for (nm in names(lst)) {
+    d <- lst[[nm]]
+    if (is.null(d) || !ncol(d) || !(code_col %in% names(d)) || !(label_col %in% names(d))) next
+
+    codes_raw <- as.character(d[[code_col]])
+    labels_raw <- as.character(d[[label_col]])
+    for (i in seq_along(codes_raw)) {
+      codes_i <- .split_tokens(codes_raw[i])[[1]]
+      codes_i <- codes_i[nzchar(codes_i)]
+      if (!length(codes_i)) next
+
+      lab_cell <- trimws(as.character(labels_raw[i]))
+      if (!nzchar(lab_cell)) next
+      labs_i <- strsplit(lab_cell, "\\s*\\|\\|\\s*", perl = TRUE)[[1]]
+      labs_i <- trimws(as.character(labs_i))
+
+      if (length(labs_i) != length(codes_i)) {
+        stop(
+          "[Recodificación] En la data adaptada, la fila ", i, " de la hoja '", nm,
+          "' para '", context, "' tiene una cantidad distinta de códigos y etiquetas en ",
+          shQuote(code_col), " / ", shQuote(label_col),
+          ". Usa el formato 'label1 || label2' respetando el orden de códigos.",
+          call. = FALSE
+        )
+      }
+
+      keep <- nzchar(labs_i)
+      if (!any(keep)) next
+      acc <- dplyr::bind_rows(
+        acc,
+        tibble::tibble(
+          code = codes_i[keep],
+          label = labs_i[keep],
+          sheet = nm
+        )
+      )
+    }
+  }
+
+  if (!nrow(acc)) return(character(0))
+
+  new_codes <- setdiff(unique(acc$code), as.character(known_codes))
+  if (!length(new_codes)) return(character(0))
+
+  out <- character(0)
+  for (code in new_codes) {
+    labs <- unique(acc$label[acc$code == code & nzchar(acc$label)])
+    if (!length(labs)) next
+    if (length(labs) > 1L) {
+      stop(
+        "[Recodificación] En la data adaptada, el código '", code, "' para '", context,
+        "' tiene más de una etiqueta declarada en '", label_col,
+        "': ", paste(shQuote(labs), collapse = ", "),
+        ". Usa una sola etiqueta por código.",
+        call. = FALSE
+      )
+    }
+    out[code] <- labs[1]
+  }
+  out
+}
+
+.template_sheet_name <- function(path_xlsx, parent_var){
+  sh <- readxl::excel_sheets(path_xlsx)
+  hit <- which(sh == parent_var); if (length(hit)) return(sh[hit[1]])
+  hit <- which(tolower(sh) == tolower(parent_var)); if (length(hit)) return(sh[hit[1]])
+  p31 <- substr(parent_var, 1, 31)
+  hit <- which(sh == p31 | tolower(sh) == tolower(p31)); if (length(hit)) return(sh[hit[1]])
+  cl_parent <- gsub("[^A-Za-z0-9]+", "", tolower(parent_var))
+  cl_sheets <- gsub("[^A-Za-z0-9]+", "", tolower(sh))
+  hit <- which(cl_sheets == cl_parent); if (length(hit)) return(sh[hit[1]])
+  d <- adist(cl_parent, cl_sheets); j <- which.min(d)
+  if (length(j) && is.finite(d[j]) && d[j] <= 5) return(sh[j])
+  NA_character_
+}
+
+.collect_sm_code_label_map_from_template <- function(path_plantilla, parent,
+                                                     known_codes = character(0),
+                                                     context = parent){
+  if (is.null(path_plantilla) || !file.exists(path_plantilla)) return(character(0))
+  sheet <- .template_sheet_name(path_plantilla, parent)
+  if (is.na(sheet)) return(character(0))
+
+  tpl <- suppressWarnings(readxl::read_xlsx(path_plantilla, sheet = sheet, col_types = "text"))
+  if (is.null(tpl) || !ncol(tpl) || !nrow(tpl)) return(character(0))
+
+  cols <- names(tpl)
+  label_row <- as.character(tpl[1, , drop = TRUE])
+  names(label_row) <- cols
+
+  rx <- paste0("^", gsub("([\\W])", "\\\\\\1", parent), "/[^/]+_(?i:recod)$")
+  sm_cols <- cols[grepl(rx, cols, perl = TRUE)]
+  sm_cols <- sm_cols[!tolower(sm_cols) %in% tolower(c(
+    paste0(parent, "/ejemplo_recod"),
+    paste0(parent, "/__ejemplo__recod")
+  ))]
+
+  acc <- list()
+  for (cc in sm_cols) {
+    code <- sub("^.+/", "", cc)
+    code <- sub("_(?i:recod)$", "", code, perl = TRUE)
+    if (!nzchar(code) || code %in% as.character(known_codes)) next
+    lab <- trimws(as.character(label_row[[cc]]))
+    if (!nzchar(lab)) next
+    prev <- acc[[code]] %||% character(0)
+    acc[[code]] <- unique(c(prev, lab))
+  }
+
+  # También permite declarar códigos nuevos vía bloque auxiliar
+  has_aux <- all(c("nuevo_codigo", "nueva_etiqueta") %in% cols)
+  if (isTRUE(has_aux) && nrow(tpl) >= 2L) {
+    codes <- trimws(as.character(tpl$nuevo_codigo[-1]))
+    labels <- trimws(as.character(tpl$nueva_etiqueta[-1]))
+    codes[codes == ""] <- NA_character_
+    labels[labels == ""] <- NA_character_
+    for (i in seq_along(codes)) {
+      code <- codes[i]; lab <- labels[i]
+      if (is.na(code) || code %in% as.character(known_codes) || is.na(lab) || !nzchar(lab)) next
+      prev <- acc[[code]] %||% character(0)
+      acc[[code]] <- unique(c(prev, lab))
+    }
+  }
+
+  if (!length(acc)) return(character(0))
+
+  out <- character(0)
+  for (code in names(acc)) {
+    labs <- unique(trimws(as.character(acc[[code]])))
+    labs <- labs[nzchar(labs)]
+    if (!length(labs)) next
+    if (length(labs) > 1L) {
+      stop(
+        "[Recodificación] En la plantilla, el código nuevo '", code, "' para '", context,
+        "' tiene más de una etiqueta declarada: ",
+        paste(shQuote(labs), collapse = ", "),
+        ". Usa una sola etiqueta por código.",
+        call. = FALSE
+      )
+    }
+    out[code] <- labs[1]
+  }
+  out
+}
+
+.collect_aux_code_label_map_from_template <- function(path_plantilla,
+                                                      parent,
+                                                      target_col,
+                                                      known_codes = character(0),
+                                                      required_codes = character(0),
+                                                      context = target_col){
+  if (is.null(path_plantilla) || !file.exists(path_plantilla)) return(character(0))
+  sheet <- .template_sheet_name(path_plantilla, parent)
+  if (is.na(sheet)) return(character(0))
+
+  tpl <- suppressWarnings(readxl::read_xlsx(path_plantilla, sheet = sheet, col_types = "text"))
+  if (is.null(tpl) || !ncol(tpl)) return(character(0))
+  cols <- names(tpl)
+  has_aux <- all(c("nuevo_codigo", "nueva_etiqueta") %in% cols)
+
+  required_codes <- unique(trimws(as.character(required_codes)))
+  required_codes <- required_codes[nzchar(required_codes)]
+  required_codes <- setdiff(required_codes, as.character(known_codes))
+
+  if (!has_aux) {
+    if (length(required_codes)) {
+      stop(
+        "[Recodificación] En la plantilla (hoja '", sheet, "') faltan las columnas ",
+        "'nuevo_codigo' y 'nueva_etiqueta' para declarar códigos nuevos de '", context, "'.",
+        call. = FALSE
+      )
+    }
+    return(character(0))
+  }
+
+  # La fila 1 de datos corresponde al encabezado visible (fila 2 de Excel).
+  codes <- trimws(as.character(tpl$nuevo_codigo[-1]))
+  labels <- trimws(as.character(tpl$nueva_etiqueta[-1]))
+  codes[codes == ""] <- NA_character_
+  labels[labels == ""] <- NA_character_
+
+  has_code <- !is.na(codes)
+  has_label <- !is.na(labels)
+  if (any(has_label & !has_code)) {
+    stop(
+      "[Recodificación] En la plantilla (hoja '", sheet, "'), hay etiquetas sin código ",
+      "en el bloque auxiliar para '", context, "'.",
+      call. = FALSE
+    )
+  }
+  if (any(has_code & !has_label)) {
+    miss <- unique(codes[has_code & !has_label])
+    stop(
+      "[Recodificación] En la plantilla (hoja '", sheet, "'), hay códigos sin etiqueta ",
+      "en el bloque auxiliar para '", context, "': ",
+      paste(shQuote(miss), collapse = ", "),
+      ".",
+      call. = FALSE
+    )
+  }
+
+  keep <- has_code & has_label
+  if (!any(keep)) {
+    if (length(required_codes)) {
+      stop(
+        "[Recodificación] En la plantilla (hoja '", sheet, "'), los códigos nuevos de '",
+        context, "' deben declararse en 'nuevo_codigo'/'nueva_etiqueta'.",
+        call. = FALSE
+      )
+    }
+    return(character(0))
+  }
+
+  acc <- tibble::tibble(code = codes[keep], label = labels[keep])
+  out <- character(0)
+  for (code in unique(acc$code)) {
+    if (code %in% as.character(known_codes)) next
+    labs <- unique(acc$label[acc$code == code])
+    if (length(labs) > 1L) {
+      stop(
+        "[Recodificación] En la plantilla, el código '", code, "' para '", context,
+        "' tiene más de una etiqueta declarada: ",
+        paste(shQuote(labs), collapse = ", "),
+        ". Usa una sola etiqueta por código.",
+        call. = FALSE
+      )
+    }
+    out[code] <- labs[1]
+  }
+
+  missing_codes <- setdiff(required_codes, names(out))
+  if (length(missing_codes)) {
+    stop(
+      "[Recodificación] En la plantilla, faltan etiquetas para códigos nuevos de '", context,
+      "': ", paste(shQuote(missing_codes), collapse = ", "),
+      ". Decláralos en 'nuevo_codigo'/'nueva_etiqueta'.",
+      call. = FALSE
+    )
+  }
+  out
+}
+
 .collect_child_cols <- function(df_or_path, parent){
   # Devuelve nombres de columnas hijas *_recod a lo largo de todas las hojas:
   # ^<parent>_.+_recod$, excluyendo <parent>_recod
@@ -320,8 +573,8 @@
     labels[hit_map] <- dplyr::coalesce(labels[hit_map], unname(labels_from_data[idx_map[hit_map]]))
   }
 
-  # completar labels desde códigos cuando no se copió catálogo original
-  if (!copied_original && length(codes)) {
+  # completar labels faltantes desde el código para evitar choices sin etiqueta
+  if (length(codes)) {
     na_lab <- is.na(labels) | !nzchar(labels)
     labels[na_lab] <- codes[na_lab]
   }
@@ -448,6 +701,10 @@
 #'   Si es XLSX, la función lee todas las hojas para recolectar los tokens.
 #' @param path_instrumento_out Ruta del XLSX de salida con el instrumento
 #'   adaptado. Por defecto \code{"instrumento_adaptado.xlsx"}.
+#' @param path_plantilla Ruta opcional a la plantilla de codificación. Si se
+#'   proporciona, se usa para recuperar etiquetas de códigos nuevos en
+#'   \code{select_multiple}, \code{select_one} e \code{integer}, sin requerir
+#'   columnas \code{*_recod_label} en la data.
 #' @param sm_vars Vector de nombres de variables \code{select_multiple} (padres)
 #'   para las que se creará \code{<parent>_recod} como \code{select_multiple}.
 #' @param so_parent_vars Vector de nombres de variables \code{select_one} (padres)
@@ -487,7 +744,8 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
                                      so_child_vars  = character(0),
                                      integer_vars   = character(0),
                                      choices_order  = c("original_first","by_first_seen","alphabetical"),
-                                     paint = TRUE){
+                                     paint = TRUE,
+                                     path_plantilla = NULL){
 
   choices_order <- match.arg(choices_order)
   stopifnot(file.exists(path_instrumento_in))
@@ -532,12 +790,39 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
     for (pv in sm_vars) {
       col_rec <- paste0(pv, "_recod")
       toks <- .collect_tokens_from_col(path_data_adaptada, col_rec)
+      known_codes <- if (pv %in% survey$name) {
+        ln_orig <- .extract_listname(as.character(survey$type[match(pv, survey$name)][1]))
+        if (!is.na(ln_orig) && ln_orig %in% choices$list_name) {
+          as.character(choices$name[choices$list_name == ln_orig])
+        } else {
+          character(0)
+        }
+      } else {
+        character(0)
+      }
+
+      lab_map <- .collect_sm_code_label_map_from_template(
+        path_plantilla = path_plantilla,
+        parent = pv,
+        known_codes = known_codes,
+        context = pv
+      )
+      if (!length(lab_map)) {
+        lab_map <- .collect_code_label_map_from_sm_cols(
+          path_data_adaptada,
+          code_col = col_rec,
+          label_col = paste0(col_rec, "_label"),
+          known_codes = known_codes,
+          context = pv
+        )
+      }
 
       res <- .add_recoded_q(survey, choices,
                             base_name      = pv,
                             kind           = "multiple",
                             list_name_hint = NULL,  # usa <ln_orig>_recod
                             tokens_from_data = toks,
+                            labels_from_data = lab_map,
                             lab_col_s      = lab_col_s,
                             lab_col_c      = lab_col_c,
                             choices_order  = choices_order,
@@ -570,13 +855,24 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
       } else {
         character(0)
       }
-      lab_map <- .collect_code_label_map_from_col(
-        path_data_adaptada,
-        code_col = col_rec,
-        label_col = paste0(pv, "_recod_label"),
+      required_new <- setdiff(unique(toks[nzchar(toks)]), known_codes)
+      lab_map <- .collect_aux_code_label_map_from_template(
+        path_plantilla = path_plantilla,
+        parent = pv,
+        target_col = col_rec,
         known_codes = known_codes,
+        required_codes = required_new,
         context = pv
       )
+      if (!length(lab_map)) {
+        lab_map <- .collect_code_label_map_from_col(
+          path_data_adaptada,
+          code_col = col_rec,
+          label_col = paste0(pv, "_recod_label"),
+          known_codes = known_codes,
+          context = pv
+        )
+      }
 
       res <- .add_recoded_q(survey, choices,
                             base_name      = pv,
@@ -614,13 +910,23 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
       for (cc in child_cols) {
         toks <- .collect_tokens_from_col(path_data_adaptada, cc)
         toks <- toks[nzchar(toks)]
-        lab_map <- .collect_code_label_map_from_col(
-          path_data_adaptada,
-          code_col = cc,
-          label_col = paste0(cc, "_label"),
+        lab_map <- .collect_aux_code_label_map_from_template(
+          path_plantilla = path_plantilla,
+          parent = pv,
+          target_col = cc,
           known_codes = character(0),
+          required_codes = unique(toks),
           context = cc
         )
+        if (!length(lab_map)) {
+          lab_map <- .collect_code_label_map_from_col(
+            path_data_adaptada,
+            code_col = cc,
+            label_col = paste0(cc, "_label"),
+            known_codes = character(0),
+            context = cc
+          )
+        }
 
         # base para la etiqueta: versión sin _recod
         base_child_name <- sub("(?i)_recod$", "", cc, perl = TRUE)
@@ -654,13 +960,23 @@ ppra_adaptar_instrumento <- function(path_instrumento_in,
     for (pv in integer_vars) {
       col_rec <- paste0(pv, "_recod")
       toks <- .collect_tokens_from_col(path_data_adaptada, col_rec)
-      lab_map <- .collect_code_label_map_from_col(
-        path_data_adaptada,
-        code_col = col_rec,
-        label_col = paste0(col_rec, "_label"),
+      lab_map <- .collect_aux_code_label_map_from_template(
+        path_plantilla = path_plantilla,
+        parent = pv,
+        target_col = col_rec,
         known_codes = character(0),
+        required_codes = unique(toks[nzchar(toks)]),
         context = pv
       )
+      if (!length(lab_map)) {
+        lab_map <- .collect_code_label_map_from_col(
+          path_data_adaptada,
+          code_col = col_rec,
+          label_col = paste0(col_rec, "_label"),
+          known_codes = character(0),
+          context = pv
+        )
+      }
       sig <- .code_label_signature(lab_map)
       known_list <- if (nzchar(sig) && !is.null(integer_registry[[sig]])) integer_registry[[sig]] else NULL
       list_hint <- known_list %||% paste0("lst_", pv, "_recod")

@@ -103,6 +103,8 @@
   chars <- nchar(labels, type = "width", allowNA = FALSE, keepNA = FALSE)
   chars[!is.finite(chars)] <- 0
 
+  # Aproximación visual del ancho de etiqueta sobre escala 0-1.
+  # Se usa para detectar colisiones entre etiquetas internas.
   est <- 0.005 + 0.0045 * pmax(chars, 2) + 0.0035 * pmax(size, 1)
   pmax(0.018, pmin(0.07, est))
 }
@@ -115,7 +117,12 @@
                                             x_min = 0,
                                             x_max = 1,
                                             padding = 0.003,
-                                            max_iter = 16L) {
+                                            max_iter = 16L,
+                                            bias_right = 0.5,
+                                            edge_margin = 0,
+                                            width_factor = 1,
+                                            bias_toward_center = FALSE,
+                                            center_ref = 0.5) {
   x <- suppressWarnings(as.numeric(x))
   n <- length(x)
   if (!n) return(x)
@@ -128,6 +135,23 @@
   max_shift <- suppressWarnings(as.numeric(max_shift)[1])
   if (!is.finite(max_shift) || is.na(max_shift) || max_shift < 0) max_shift <- 0.05
 
+  padding <- suppressWarnings(as.numeric(padding)[1])
+  if (!is.finite(padding) || is.na(padding) || padding < 0) padding <- 0.003
+
+  bias_right <- suppressWarnings(as.numeric(bias_right)[1])
+  if (!is.finite(bias_right) || is.na(bias_right)) bias_right <- 0.5
+  bias_right <- max(0, min(1, bias_right))
+
+  edge_margin <- suppressWarnings(as.numeric(edge_margin)[1])
+  if (!is.finite(edge_margin) || is.na(edge_margin) || edge_margin < 0) edge_margin <- 0
+
+  width_factor <- suppressWarnings(as.numeric(width_factor)[1])
+  if (!is.finite(width_factor) || is.na(width_factor) || width_factor <= 0) width_factor <- 1
+  bias_toward_center <- isTRUE(bias_toward_center)
+  center_ref <- suppressWarnings(as.numeric(center_ref)[1])
+  if (!is.finite(center_ref) || is.na(center_ref)) center_ref <- 0.5
+  center_ref <- max(0, min(1, center_ref))
+
   ord <- order(x, seq_along(x))
   inv <- order(ord)
 
@@ -136,15 +160,39 @@
   size_ord <- rep_len(suppressWarnings(as.numeric(label_size)), n)[ord]
   movable_ord <- movable[ord]
 
-  width_est <- .estimate_label_width_apiladas(labels_ord, size_ord)
+  x_min_vec <- rep_len(suppressWarnings(as.numeric(x_min)), n)
+  x_max_vec <- rep_len(suppressWarnings(as.numeric(x_max)), n)
+  x_min_vec[!is.finite(x_min_vec)] <- 0
+  x_max_vec[!is.finite(x_max_vec)] <- 1
+
+  x_min_ord <- x_min_vec[ord]
+  x_max_ord <- x_max_vec[ord]
+  swap_idx <- x_min_ord > x_max_ord
+  if (any(swap_idx)) {
+    tmp <- x_min_ord[swap_idx]
+    x_min_ord[swap_idx] <- x_max_ord[swap_idx]
+    x_max_ord[swap_idx] <- tmp
+  }
+
+  # Margen interno para que la etiqueta no toque el borde del segmento.
+  x_min_ord <- pmin(x_max_ord - 1e-6, x_min_ord + edge_margin)
+  x_max_ord <- pmax(x_min_ord + 1e-6, x_max_ord - edge_margin)
+
+  width_est <- .estimate_label_width_apiladas(labels_ord, size_ord) * width_factor
   half_width <- width_est / 2
 
-  lower <- pmax(x_min + half_width, x_ord - max_shift)
-  upper <- pmin(x_max - half_width, x_ord + max_shift)
+  lower <- pmax(x_min_ord + half_width, x_ord - max_shift)
+  upper <- pmin(x_max_ord - half_width, x_ord + max_shift)
 
   impossible <- lower > upper
   if (any(impossible)) {
-    center_fix <- pmin(x_max - half_width[impossible], pmax(x_min + half_width[impossible], x_ord[impossible]))
+    seg_center_imp <- (x_min_ord[impossible] + x_max_ord[impossible]) / 2
+    push_to_center <- ifelse(seg_center_imp <= center_ref, x_max_ord[impossible], x_min_ord[impossible])
+    center_fix <- pmin(
+      x_max_ord[impossible],
+      pmax(x_min_ord[impossible], push_to_center)
+    )
+    center_fix <- pmin(1, pmax(0, center_fix))
     lower[impossible] <- center_fix
     upper[impossible] <- center_fix
   }
@@ -173,8 +221,22 @@
       shift_right <- 0
 
       if (movable_ord[i] && movable_ord[i + 1L]) {
-        shift_left <- min(overlap / 2, left_room)
-        shift_right <- min(overlap / 2, right_room)
+        bias_eff <- bias_right
+        if (isTRUE(bias_toward_center)) {
+          pair_mid <- (x_adj[i] + x_adj[i + 1L]) / 2
+          center_bias <- if (pair_mid < center_ref) {
+            0.75
+          } else if (pair_mid > center_ref) {
+            0.25
+          } else {
+            0.5
+          }
+          bias_eff <- (bias_right + center_bias) / 2
+        }
+        target_right <- overlap * bias_eff
+        target_left <- overlap - target_right
+        shift_right <- min(target_right, right_room)
+        shift_left <- min(target_left, left_room)
 
         rem <- overlap - shift_left - shift_right
         if (rem > 1e-9 && right_room > shift_right) {
@@ -239,6 +301,14 @@
 #' Además, se puede agregar una columna de **barra extra** (por defecto, N) o indicadores tipo
 #' `top2box`, `top3box` o `bottom2box` a partir de los segmentos apilados.
 #'
+#' Desde esta versión, el repelido de etiquetas pequenas es configurable: se puede ajustar el
+#' detector de colisión (ancho estimado), el padding mínimo, el número de iteraciones, el sesgo
+#' izquierda/derecha y un modo **confinado por segmento** para que las etiquetas no crucen a
+#' segmentos vecinos ni se salgan visualmente de su barra. Además, `etiquetas_uniformes = TRUE`
+#' activa un modo opt-in sin split `peq/grande`, con sesgo de empuje hacia el centro para
+#' reducir choques. Por compatibilidad, el comportamiento legacy se mantiene cuando
+#' `etiquetas_uniformes = FALSE` (default).
+#'
 #' @param data `data.frame` o `tibble` en formato ancho con columnas de categorías, base y porcentajes.
 #' @param var_categoria Nombre de la columna categórica (eje Y).
 #' @param var_etiqueta_categoria Columna opcional con la etiqueta visible de cada categoría.
@@ -276,10 +346,27 @@
 #'   Estilos de texto del encabezado y caption.
 #' @param color_leyenda,size_leyenda Estilos de texto de leyenda.
 #' @param color_texto_barras,size_texto_barras,size_texto_barras_peq Estilos de etiquetas internas.
+#' @param etiquetas_uniformes Si `TRUE`, activa modo uniforme de etiquetas:
+#'   no separa entre etiquetas grandes/pequenas, usa un único umbral de visibilidad
+#'   (`umbral_mostrar_etiqueta` efectivo) y aplica el repelido con sesgo hacia el centro.
 #' @param repeler_etiquetas_peq Si `TRUE`, intenta separar horizontalmente las etiquetas pequenas
-#'   cuando se superponen, manteniendolas cerca de su centro original.
+#'   cuando se superponen, manteniendolas cerca de su centro original. En modo uniforme,
+#'   este repelido se aplica a todas las etiquetas visibles.
 #' @param desplazamiento_max_etiquetas_peq Corrimiento horizontal maximo permitido para etiquetas
 #'   pequenas, en la escala `0-1` de la barra normalizada.
+#' @param etiquetas_peq_factor_ancho Multiplicador del ancho estimado de etiquetas pequenas para
+#'   detectar colisiones. Valores mayores a `1` vuelven el detector más conservador y tienden a
+#'   separar mejor textos como `2%`, `4%`, `5%`.
+#' @param etiquetas_peq_padding Espacio horizontal mínimo adicional entre etiquetas pequenas
+#'   (escala `0-1` de la barra).
+#' @param etiquetas_peq_max_iter Número máximo de iteraciones del algoritmo de repelido.
+#' @param etiquetas_peq_sesgo_derecha Sesgo de ajuste cuando dos etiquetas pequenas chocan.
+#'   `0.5` reparte el movimiento de forma equilibrada; valores mayores desplazan más la etiqueta
+#'   de la derecha (útil cuando se desea “empujar hacia adentro”).
+#' @param etiquetas_peq_confinadas Si `TRUE`, las etiquetas pequenas solo se mueven dentro de su
+#'   propio segmento apilado y no pueden cruzar a segmentos vecinos.
+#' @param etiquetas_peq_margen_interno Margen de seguridad dentro del segmento cuando
+#'   `etiquetas_peq_confinadas = TRUE`, para evitar textos pegados al borde.
 #' @param color_barra_extra,size_barra_extra,size_titulo_extra Estilos de la columna extra.
 #' @param color_ejes,size_ejes Estilos de las etiquetas de categorías (dibujadas en canvas).
 #' @param color_titulos_grupo,size_titulos_grupo Estilos para títulos de bloque izquierdo en canvas.
@@ -392,8 +479,15 @@ graficar_barras_apiladas <- function(
     color_texto_barras    = "white",
     size_texto_barras     = 3,
     size_texto_barras_peq = NULL,
+    etiquetas_uniformes   = FALSE,
     repeler_etiquetas_peq = TRUE,
     desplazamiento_max_etiquetas_peq = 0.05,
+    etiquetas_peq_factor_ancho = 1,
+    etiquetas_peq_padding = 0.003,
+    etiquetas_peq_max_iter = 16L,
+    etiquetas_peq_sesgo_derecha = 0.5,
+    etiquetas_peq_confinadas = FALSE,
+    etiquetas_peq_margen_interno = 0,
     color_barra_extra     = "#000000",
     size_barra_extra      = 3,
     size_titulo_extra     = 3,
@@ -520,10 +614,33 @@ graficar_barras_apiladas <- function(
   decimales <- suppressWarnings(as.integer(decimales))
   if (length(decimales) < 1L || !is.finite(decimales[1]) || decimales[1] < 0L) decimales <- 0L else decimales <- decimales[1]
   size_texto_barras_peq <- size_texto_barras_peq %||% size_texto_barras
+  etiquetas_uniformes <- isTRUE(etiquetas_uniformes)
   repeler_etiquetas_peq <- isTRUE(repeler_etiquetas_peq)
   desplazamiento_max_etiquetas_peq <- suppressWarnings(as.numeric(desplazamiento_max_etiquetas_peq)[1])
   if (!is.finite(desplazamiento_max_etiquetas_peq) || is.na(desplazamiento_max_etiquetas_peq) || desplazamiento_max_etiquetas_peq < 0) {
     desplazamiento_max_etiquetas_peq <- 0.05
+  }
+  etiquetas_peq_factor_ancho <- suppressWarnings(as.numeric(etiquetas_peq_factor_ancho)[1])
+  if (!is.finite(etiquetas_peq_factor_ancho) || is.na(etiquetas_peq_factor_ancho) || etiquetas_peq_factor_ancho <= 0) {
+    etiquetas_peq_factor_ancho <- 1
+  }
+  etiquetas_peq_padding <- suppressWarnings(as.numeric(etiquetas_peq_padding)[1])
+  if (!is.finite(etiquetas_peq_padding) || is.na(etiquetas_peq_padding) || etiquetas_peq_padding < 0) {
+    etiquetas_peq_padding <- 0.003
+  }
+  etiquetas_peq_max_iter <- suppressWarnings(as.integer(etiquetas_peq_max_iter)[1])
+  if (!is.finite(etiquetas_peq_max_iter) || is.na(etiquetas_peq_max_iter) || etiquetas_peq_max_iter < 1L) {
+    etiquetas_peq_max_iter <- 16L
+  }
+  etiquetas_peq_sesgo_derecha <- suppressWarnings(as.numeric(etiquetas_peq_sesgo_derecha)[1])
+  if (!is.finite(etiquetas_peq_sesgo_derecha) || is.na(etiquetas_peq_sesgo_derecha)) {
+    etiquetas_peq_sesgo_derecha <- 0.5
+  }
+  etiquetas_peq_sesgo_derecha <- max(0, min(1, etiquetas_peq_sesgo_derecha))
+  etiquetas_peq_confinadas <- isTRUE(etiquetas_peq_confinadas)
+  etiquetas_peq_margen_interno <- suppressWarnings(as.numeric(etiquetas_peq_margen_interno)[1])
+  if (!is.finite(etiquetas_peq_margen_interno) || is.na(etiquetas_peq_margen_interno) || etiquetas_peq_margen_interno < 0) {
+    etiquetas_peq_margen_interno <- 0
   }
   umbral_etiqueta_legacy <- normalizar_umbral_prop(
     if (missing(umbral_etiqueta)) NULL else umbral_etiqueta,
@@ -810,7 +927,11 @@ graficar_barras_apiladas <- function(
     df_lab <- df_long |>
       dplyr::group_by(.data[[var_categoria]]) |>
       dplyr::arrange(factor(.grupo, levels = niveles_stack_real), .by_group = TRUE) |>
-      dplyr::mutate(x_center = cumsum(.valor_plot) - .valor_plot / 2) |>
+      dplyr::mutate(
+        x_right = cumsum(.valor_plot),
+        x_left = x_right - .valor_plot,
+        x_center = x_left + .valor_plot / 2
+      ) |>
       dplyr::ungroup()
 
     .asignar_pct_exacto <- function(p, dec) {
@@ -847,67 +968,126 @@ graficar_barras_apiladas <- function(
         .pct_units = .asignar_pct_exacto(.valor_plot, decimales),
         lab        = .fmt_units_pct(.pct_units, decimales)
       ) |>
-      dplyr::ungroup() |>
-      dplyr::mutate(
-        .tamano_etq = dplyr::case_when(
-          .valor_plot >= umbral_etiqueta_normal_eff  ~ "grande",
-          .valor_plot >= umbral_mostrar_etiqueta_eff ~ "peq",
-          TRUE                                        ~ "ninguna"
-        ),
-        .size_label = dplyr::if_else(.tamano_etq == "grande", size_texto_barras, size_texto_barras_peq),
-        x_label = x_center
-      ) |>
-      dplyr::filter(.tamano_etq != "ninguna", is.finite(x_center))
+      dplyr::ungroup()
 
-    if (isTRUE(repeler_etiquetas_peq) &&
-        desplazamiento_max_etiquetas_peq > 0 &&
-        nrow(df_lab) > 1L &&
-        any(df_lab$.tamano_etq == "peq")) {
-      idx_por_cat <- split(seq_len(nrow(df_lab)), as.character(df_lab[[var_categoria]]))
-      for (idx in idx_por_cat) {
-        if (length(idx) < 2L) next
-        df_lab$x_label[idx] <- .repel_label_positions_apiladas(
-          x = df_lab$x_center[idx],
-          labels = df_lab$lab[idx],
-          label_size = df_lab$.size_label[idx],
-          movable = df_lab$.tamano_etq[idx] == "peq",
-          max_shift = desplazamiento_max_etiquetas_peq
-        )
+    if (isTRUE(etiquetas_uniformes)) {
+      df_lab <- df_lab |>
+        dplyr::mutate(
+          .mostrar = .valor_plot >= umbral_mostrar_etiqueta_eff,
+          .size_label = size_texto_barras,
+          x_label = x_center
+        ) |>
+        dplyr::filter(.mostrar, is.finite(x_center))
+
+      if (isTRUE(repeler_etiquetas_peq) &&
+          desplazamiento_max_etiquetas_peq > 0 &&
+          nrow(df_lab) > 1L) {
+        idx_por_cat <- split(seq_len(nrow(df_lab)), as.character(df_lab[[var_categoria]]))
+        for (idx in idx_por_cat) {
+          if (length(idx) < 2L) next
+          df_lab$x_label[idx] <- .repel_label_positions_apiladas(
+            x = df_lab$x_center[idx],
+            labels = df_lab$lab[idx],
+            label_size = df_lab$.size_label[idx],
+            movable = rep(TRUE, length(idx)),
+            max_shift = desplazamiento_max_etiquetas_peq,
+            x_min = if (etiquetas_peq_confinadas) df_lab$x_left[idx] else 0,
+            x_max = if (etiquetas_peq_confinadas) df_lab$x_right[idx] else 1,
+            padding = etiquetas_peq_padding,
+            max_iter = etiquetas_peq_max_iter,
+            bias_right = etiquetas_peq_sesgo_derecha,
+            edge_margin = if (etiquetas_peq_confinadas) etiquetas_peq_margen_interno else 0,
+            width_factor = etiquetas_peq_factor_ancho,
+            bias_toward_center = TRUE
+          )
+        }
       }
-    }
 
-    df_lab_grande <- df_lab[df_lab$.tamano_etq == "grande", , drop = FALSE]
-    df_lab_peq    <- df_lab[df_lab$.tamano_etq == "peq",    , drop = FALSE]
+      if (nrow(df_lab) > 0) {
+        p_bars <- p_bars +
+          ggplot2::geom_text(
+            data    = df_lab,
+            mapping = ggplot2::aes(
+              x = x_label,
+              y = if (usar_y_numerico) .data$.y_plot else .data[[var_categoria]],
+              label = lab
+            ),
+            color   = color_texto_barras,
+            size    = size_texto_barras,
+            fontface = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+            inherit.aes = FALSE
+          )
+      }
+    } else {
+      df_lab <- df_lab |>
+        dplyr::mutate(
+          .tamano_etq = dplyr::case_when(
+            .valor_plot >= umbral_etiqueta_normal_eff  ~ "grande",
+            .valor_plot >= umbral_mostrar_etiqueta_eff ~ "peq",
+            TRUE                                        ~ "ninguna"
+          ),
+          .size_label = dplyr::if_else(.tamano_etq == "grande", size_texto_barras, size_texto_barras_peq),
+          x_label = x_center
+        ) |>
+        dplyr::filter(.tamano_etq != "ninguna", is.finite(x_center))
 
-    if (nrow(df_lab_grande) > 0) {
-      p_bars <- p_bars +
-        ggplot2::geom_text(
-          data    = df_lab_grande,
-          mapping = ggplot2::aes(
-            x = x_label,
-            y = if (usar_y_numerico) .data$.y_plot else .data[[var_categoria]],
-            label = lab
-          ),
-          color   = color_texto_barras,
-          size    = size_texto_barras,
-          fontface = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-          inherit.aes = FALSE
-        )
-    }
-    if (nrow(df_lab_peq) > 0) {
-      p_bars <- p_bars +
-        ggplot2::geom_text(
-          data    = df_lab_peq,
-          mapping = ggplot2::aes(
-            x = x_label,
-            y = if (usar_y_numerico) .data$.y_plot else .data[[var_categoria]],
-            label = lab
-          ),
-          color   = color_texto_barras,
-          size    = size_texto_barras_peq,
-          fontface = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
-          inherit.aes = FALSE
-        )
+      if (isTRUE(repeler_etiquetas_peq) &&
+          desplazamiento_max_etiquetas_peq > 0 &&
+          nrow(df_lab) > 1L &&
+          any(df_lab$.tamano_etq == "peq")) {
+        idx_por_cat <- split(seq_len(nrow(df_lab)), as.character(df_lab[[var_categoria]]))
+        for (idx in idx_por_cat) {
+          if (length(idx) < 2L) next
+          df_lab$x_label[idx] <- .repel_label_positions_apiladas(
+            x = df_lab$x_center[idx],
+            labels = df_lab$lab[idx],
+            label_size = df_lab$.size_label[idx],
+            movable = df_lab$.tamano_etq[idx] == "peq",
+            max_shift = desplazamiento_max_etiquetas_peq,
+            x_min = if (etiquetas_peq_confinadas) df_lab$x_left[idx] else 0,
+            x_max = if (etiquetas_peq_confinadas) df_lab$x_right[idx] else 1,
+            padding = etiquetas_peq_padding,
+            max_iter = etiquetas_peq_max_iter,
+            bias_right = etiquetas_peq_sesgo_derecha,
+            edge_margin = if (etiquetas_peq_confinadas) etiquetas_peq_margen_interno else 0,
+            width_factor = etiquetas_peq_factor_ancho
+          )
+        }
+      }
+
+      df_lab_grande <- df_lab[df_lab$.tamano_etq == "grande", , drop = FALSE]
+      df_lab_peq    <- df_lab[df_lab$.tamano_etq == "peq",    , drop = FALSE]
+
+      if (nrow(df_lab_grande) > 0) {
+        p_bars <- p_bars +
+          ggplot2::geom_text(
+            data    = df_lab_grande,
+            mapping = ggplot2::aes(
+              x = x_label,
+              y = if (usar_y_numerico) .data$.y_plot else .data[[var_categoria]],
+              label = lab
+            ),
+            color   = color_texto_barras,
+            size    = size_texto_barras,
+            fontface = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+            inherit.aes = FALSE
+          )
+      }
+      if (nrow(df_lab_peq) > 0) {
+        p_bars <- p_bars +
+          ggplot2::geom_text(
+            data    = df_lab_peq,
+            mapping = ggplot2::aes(
+              x = x_label,
+              y = if (usar_y_numerico) .data$.y_plot else .data[[var_categoria]],
+              label = lab
+            ),
+            color   = color_texto_barras,
+            size    = size_texto_barras_peq,
+            fontface = if ("porcentajes" %in% textos_negrita) "bold" else "plain",
+            inherit.aes = FALSE
+          )
+      }
     }
   }
 

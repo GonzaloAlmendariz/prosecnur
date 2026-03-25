@@ -439,10 +439,19 @@
 #' @param instrumento Instrumento opcional. Si es `NULL`, se usa `attr(data, "instrumento_reporte")`.
 #' @param cruce Variable de comparación opcional (columna en `data`).
 #' @param incluir_total Si es `NULL`, usa el default de la configuración interna.
+#' @param brecha_filas,brecha_cols Si `TRUE`, agrega fila/columna de brecha
+#'   calculada como `(max - min)` en la matriz del heatmap.
+#' @param etiq_brecha_filas,etiq_brecha_cols Etiquetas para fila/columna de brecha.
+#' @param aplicar_gradiente_brecha Si `TRUE`, colorea celdas de brecha con gradiente.
+#' @param brecha_colores Vector de colores para brecha (`bajo`, `alto`).
+#' @param brecha_cortes Cortes numéricos (mín, máx) para escalar el gradiente de brecha.
 #' @param filtros Lista nombrada de filtros por variable.
 #' @param iter_var Variable opcional de iteración (columna en `data`).
 #' @param iter_level Nivel específico de iteración.
 #' @param titulo,subtitulo,nota_pie Textos del gráfico.
+#' @param size_ejes_x Tamaño opcional de etiquetas del eje X. Si es `NULL`, usa `size_ejes`.
+#' @param titulo_total_x,titulo_total_y Etiquetas para los totales en eje X y eje Y.
+#' @param mostrar_n_cruce_x Si `TRUE`, agrega `(N=...)` en etiquetas del eje X por cruce.
 #' @param usar_canvas Si `TRUE`, compone encabezado, panel, leyenda y pie con `cowplot`.
 #' @param debug_ph_bordes,debug_ph_col,debug_ph_lwd Borde de depuración del canvas.
 #' @param exportar Tipo de exportación: `"rplot"`, `"png"`, `"ppt"` o `"word"`.
@@ -461,6 +470,13 @@ graficar_heatmap_dimensiones <- function(
     instrumento = NULL,
     cruce = NULL,
     incluir_total = NULL,
+    brecha_filas = FALSE,
+    etiq_brecha_filas = "Brecha",
+    brecha_cols = FALSE,
+    etiq_brecha_cols = "Brecha",
+    aplicar_gradiente_brecha = TRUE,
+    brecha_colores = c(bajo = "#FFFFFF", alto = "#F4B183"),
+    brecha_cortes = c(0, 30),
     filtros = list(),
     iter_var = NULL,
     iter_level = NULL,
@@ -476,16 +492,20 @@ graficar_heatmap_dimensiones <- function(
     color_leyenda = "#004B8D",
     size_leyenda = 9,
     color_ejes = "#20324d",
-    size_ejes = 11,
+    size_ejes = 10,
+    size_ejes_x = NULL,
     color_texto_celdas = "#122842",
-    size_texto_celdas = 11,
+    size_texto_celdas = 10,
     color_fondo = NA,
-    angle_x = -18,
+    angle_x = 0,
+    titulo_total_x = "Total",
+    titulo_total_y = "Total cruce",
+    mostrar_n_cruce_x = FALSE,
     mostrar_leyenda = TRUE,
     usar_canvas = TRUE,
-    canvas_h_title = 0.15,
-    canvas_h_legend = 0.10,
-    canvas_h_caption = 0.08,
+    canvas_h_title = 0.13,
+    canvas_h_legend = 0.09,
+    canvas_h_caption = 0.06,
     canvas_pad_top = 0.01,
     debug_ph_bordes = FALSE,
     debug_ph_col = "#FF00FF",
@@ -505,6 +525,66 @@ graficar_heatmap_dimensiones <- function(
   modo <- match.arg(modo)
   exportar <- match.arg(exportar)
   mostrar_leyenda <- TRUE
+  mostrar_n_cruce_x <- isTRUE(mostrar_n_cruce_x)
+
+  brecha_filas <- isTRUE(brecha_filas)
+  brecha_cols <- isTRUE(brecha_cols)
+  aplicar_gradiente_brecha <- isTRUE(aplicar_gradiente_brecha)
+
+  size_ejes_x <- suppressWarnings(as.numeric(size_ejes_x))
+  if (!length(size_ejes_x) || !is.finite(size_ejes_x[1]) || is.na(size_ejes_x[1]) || size_ejes_x[1] <= 0) {
+    size_ejes_x <- size_ejes
+  } else {
+    size_ejes_x <- size_ejes_x[1]
+  }
+
+  titulo_total_x <- as.character(titulo_total_x %||% "Total")[1]
+  if (!nzchar(trimws(titulo_total_x))) titulo_total_x <- "Total"
+  titulo_total_y <- as.character(titulo_total_y %||% "Total cruce")[1]
+  if (!nzchar(trimws(titulo_total_y))) titulo_total_y <- "Total cruce"
+
+  etiq_brecha_filas <- as.character(etiq_brecha_filas %||% "Brecha")[1]
+  if (!nzchar(trimws(etiq_brecha_filas))) etiq_brecha_filas <- "Brecha"
+  etiq_brecha_cols <- as.character(etiq_brecha_cols %||% "Brecha")[1]
+  if (!nzchar(trimws(etiq_brecha_cols))) etiq_brecha_cols <- "Brecha"
+
+  brecha_colores <- as.character(brecha_colores)
+  nmbc <- names(brecha_colores %||% character(0))
+  if (is.null(nmbc)) nmbc <- character(0)
+  col_brecha_bajo <- if ("bajo" %in% nmbc) brecha_colores[["bajo"]] else if (length(brecha_colores) >= 1L) brecha_colores[1] else "#FFFFFF"
+  col_brecha_alto <- if ("alto" %in% nmbc) brecha_colores[["alto"]] else if (length(brecha_colores) >= 2L) brecha_colores[2] else "#F4B183"
+
+  brecha_cortes <- suppressWarnings(as.numeric(brecha_cortes))
+  brecha_cortes <- brecha_cortes[is.finite(brecha_cortes) & !is.na(brecha_cortes)]
+  if (length(brecha_cortes) < 2L) brecha_cortes <- c(0, 30)
+  brecha_cortes <- sort(brecha_cortes)[1:2]
+  brecha_corte_min <- brecha_cortes[1]
+  brecha_corte_max <- brecha_cortes[2]
+
+  .to_rgb <- function(col, fallback = "#FFFFFF") {
+    x <- tryCatch(grDevices::col2rgb(col), error = function(e) NULL)
+    if (is.null(x)) x <- grDevices::col2rgb(fallback)
+    as.numeric(x[, 1])
+  }
+  .mix_color <- function(col_bajo, col_alto, t) {
+    t <- pmax(0, pmin(1, as.numeric(t)))
+    if (!is.finite(t) || is.na(t)) return(col_bajo)
+    r0 <- .to_rgb(col_bajo, "#FFFFFF")
+    r1 <- .to_rgb(col_alto, "#F4B183")
+    rr <- round(r0 + (r1 - r0) * t)
+    grDevices::rgb(rr[1], rr[2], rr[3], maxColorValue = 255)
+  }
+  .calc_brecha <- function(x) {
+    v <- suppressWarnings(as.numeric(x))
+    v <- v[is.finite(v) & !is.na(v)]
+    if (length(v) < 2L) return(NA_real_)
+    max(v, na.rm = TRUE) - min(v, na.rm = TRUE)
+  }
+  .fmt_n_x <- function(x) {
+    x <- .dim_round_half_up(x, 0)
+    if (!is.finite(x) || is.na(x)) return(NA_character_)
+    format(as.integer(x), trim = TRUE, big.mark = ",", scientific = FALSE)
+  }
 
   ctx <- .dim_build_context(data, instrumento = instrumento)
   payload <- .dim_build_payload(
@@ -541,10 +621,106 @@ graficar_heatmap_dimensiones <- function(
   cuts_lab <- .dim_range_labels(sem$cortes[1], sem$cortes[2])
   legend_breaks <- cuts_lab
   legend_limits <- c(cuts_lab[1], cuts_lab[2], cuts_lab[3], "Sin dato")
-  sc <- payload$score_heat
+  sc_base <- payload$score_heat
+  sc <- sc_base
 
-  sc$grupo <- factor(sc$grupo, levels = payload$group_order %||% unique(as.character(sc$grupo)))
-  sc$axis_label <- factor(sc$axis_label, levels = rev(payload$axis_order_heat %||% unique(as.character(sc$axis_label))))
+  if (isTRUE(brecha_cols)) {
+    sc_bc <- sc_base |>
+      dplyr::group_by(.data$axis_label) |>
+      dplyr::summarise(score_raw = .calc_brecha(.data$score_raw), .groups = "drop") |>
+      dplyr::mutate(
+        axis_var = "__brecha_cols__",
+        grupo = etiq_brecha_cols,
+        tipo = "brecha_cols",
+        base = NA_real_,
+        score_round = .dim_round_half_up(.data$score_raw, 0)
+      ) |>
+      dplyr::select("axis_var", "axis_label", "grupo", "tipo", "score_raw", "base", "score_round")
+    sc <- dplyr::bind_rows(sc, sc_bc)
+  }
+
+  if (isTRUE(brecha_filas)) {
+    sc_bf <- sc_base |>
+      dplyr::group_by(.data$grupo) |>
+      dplyr::summarise(score_raw = .calc_brecha(.data$score_raw), .groups = "drop") |>
+      dplyr::mutate(
+        axis_var = "__brecha_filas__",
+        axis_label = etiq_brecha_filas,
+        tipo = "brecha_filas",
+        base = NA_real_,
+        score_round = .dim_round_half_up(.data$score_raw, 0)
+      ) |>
+      dplyr::select("axis_var", "axis_label", "grupo", "tipo", "score_raw", "base", "score_round")
+    sc <- dplyr::bind_rows(sc, sc_bf)
+  }
+
+  if (isTRUE(brecha_cols) && isTRUE(brecha_filas)) {
+    sc_corner <- data.frame(
+      axis_var = "__brecha_corner__",
+      axis_label = etiq_brecha_filas,
+      grupo = etiq_brecha_cols,
+      tipo = "brecha_corner",
+      score_raw = NA_real_,
+      base = NA_real_,
+      score_round = NA_real_,
+      stringsAsFactors = FALSE
+    )
+    sc <- dplyr::bind_rows(sc, sc_corner)
+  }
+
+  sc$grupo <- as.character(sc$grupo)
+  sc$axis_label <- as.character(sc$axis_label)
+  sc$grupo[sc$grupo == "Total"] <- titulo_total_x
+  sc$axis_label[sc$axis_label == "Total cruce"] <- titulo_total_y
+
+  group_order <- payload$group_order %||% unique(as.character(sc_base$grupo))
+  group_order <- as.character(group_order)
+  group_order[group_order == "Total"] <- titulo_total_x
+  if (isTRUE(brecha_cols) && !(etiq_brecha_cols %in% group_order)) {
+    group_order <- c(group_order, etiq_brecha_cols)
+  }
+  axis_order_heat <- payload$axis_order_heat %||% unique(as.character(sc_base$axis_label))
+  axis_order_heat <- as.character(axis_order_heat)
+  axis_order_heat[axis_order_heat == "Total cruce"] <- titulo_total_y
+  if (isTRUE(brecha_filas) && !(etiq_brecha_filas %in% axis_order_heat)) {
+    axis_order_heat <- c(axis_order_heat, etiq_brecha_filas)
+  }
+
+  if (isTRUE(mostrar_n_cruce_x)) {
+    bases_grupo <- sc |>
+      dplyr::group_by(.data$grupo) |>
+      dplyr::summarise(
+        base_plot = {
+          b <- suppressWarnings(as.numeric(.data$base))
+          b <- b[is.finite(b) & !is.na(b)]
+          if (length(b)) b[1] else NA_real_
+        },
+        .groups = "drop"
+      )
+
+    map_n <- stats::setNames(
+      vapply(seq_len(nrow(bases_grupo)), function(i) {
+        lab <- as.character(bases_grupo$grupo[i])
+        n_txt <- .fmt_n_x(as.numeric(bases_grupo$base_plot[i]))
+        if (is.na(n_txt) || !nzchar(n_txt)) lab else paste0(lab, " (N=", n_txt, ")")
+      }, character(1)),
+      as.character(bases_grupo$grupo)
+    )
+
+    sc_groups_new <- unname(map_n[sc$grupo])
+    keep_old_sc <- is.na(sc_groups_new) | !nzchar(sc_groups_new)
+    sc_groups_new[keep_old_sc] <- sc$grupo[keep_old_sc]
+    sc$grupo <- sc_groups_new
+
+    group_order_new <- unname(map_n[group_order])
+    keep_old_ord <- is.na(group_order_new) | !nzchar(group_order_new)
+    group_order_new[keep_old_ord] <- group_order[keep_old_ord]
+    group_order <- unique(group_order_new)
+  }
+
+  sc$grupo <- factor(sc$grupo, levels = group_order)
+  sc$axis_label <- factor(sc$axis_label, levels = rev(axis_order_heat))
+  sc$is_brecha <- as.character(sc$tipo %||% "") %in% c("brecha_cols", "brecha_filas", "brecha_corner")
   sc$estado <- dplyr::case_when(
     is.na(sc$score_raw) ~ "Sin dato",
     sc$score_raw < sem$cortes[1] ~ cuts_lab[1],
@@ -552,38 +728,53 @@ graficar_heatmap_dimensiones <- function(
     TRUE ~ cuts_lab[3]
   )
   sc$estado <- factor(sc$estado, levels = c(cuts_lab[1], cuts_lab[2], cuts_lab[3], "Sin dato"))
+
+  fill_std <- dplyr::case_when(
+    sc$estado == cuts_lab[1] ~ sem$rojo,
+    sc$estado == cuts_lab[2] ~ sem$ambar,
+    sc$estado == cuts_lab[3] ~ sem$verde,
+    TRUE ~ sem$na
+  )
+  fill_brecha <- rep(col_brecha_alto, nrow(sc))
+  if (isTRUE(aplicar_gradiente_brecha)) {
+    vals_b <- suppressWarnings(as.numeric(sc$score_raw))
+    tt <- if (isTRUE(brecha_corte_max > brecha_corte_min)) {
+      pmax(0, pmin(1, (vals_b - brecha_corte_min) / (brecha_corte_max - brecha_corte_min)))
+    } else {
+      rep(0.5, length(vals_b))
+    }
+    fill_brecha <- vapply(tt, function(ti) .mix_color(col_brecha_bajo, col_brecha_alto, ti), character(1))
+  }
+  fill_brecha[!is.finite(suppressWarnings(as.numeric(sc$score_raw))) | is.na(sc$score_raw)] <- sem$na
+  sc$fill_hex <- ifelse(sc$is_brecha, fill_brecha, as.character(fill_std))
   sc$label <- ifelse(is.na(sc$score_raw), "", .dim_fmt_int(sc$score_round))
 
-  max_chars <- max(nchar(as.character(payload$axis_order_heat), type = "width"), na.rm = TRUE)
+  max_chars <- max(nchar(as.character(axis_order_heat), type = "width"), na.rm = TRUE)
   left_margin <- .dim_clamp(36 + 7 * max_chars, 130, 320)
 
   p_panel <- ggplot2::ggplot(
     sc,
-    ggplot2::aes(x = .data$grupo, y = .data$axis_label, fill = .data$estado)
+    ggplot2::aes(x = .data$grupo, y = .data$axis_label, fill = .data$fill_hex)
   ) +
-    ggplot2::geom_tile(colour = "white", linewidth = 0.7) +
+    ggplot2::geom_tile(colour = "#F2F5F9", linewidth = 0.45) +
     ggplot2::geom_text(
       ggplot2::aes(label = .data$label),
       size = size_texto_celdas / 3,
       colour = color_texto_celdas,
       fontface = "bold"
     ) +
-    ggplot2::scale_fill_manual(
-      values = c(
-        stats::setNames(sem$rojo, cuts_lab[1]),
-        stats::setNames(sem$ambar, cuts_lab[2]),
-        stats::setNames(sem$verde, cuts_lab[3]),
-        "Sin dato" = sem$na
-      ),
-      limits = legend_limits,
-      breaks = legend_breaks,
-      drop = FALSE
-    ) +
+    ggplot2::scale_fill_identity() +
     ggplot2::theme_minimal(base_size = 11) +
     ggplot2::theme(
       panel.grid = ggplot2::element_blank(),
       axis.title = ggplot2::element_blank(),
-      axis.text.x = ggplot2::element_text(size = size_ejes, colour = color_ejes, angle = angle_x, hjust = 0, vjust = 1),
+      axis.text.x = ggplot2::element_text(
+        size = size_ejes_x,
+        colour = color_ejes,
+        angle = angle_x,
+        hjust = if (abs(angle_x) < 1e-6) 0.5 else 0,
+        vjust = if (abs(angle_x) < 1e-6) 0.5 else 1
+      ),
       axis.text.y = ggplot2::element_text(size = size_ejes, colour = color_ejes),
       legend.title = ggplot2::element_blank(),
       legend.text = ggplot2::element_text(size = size_leyenda, colour = color_leyenda),
@@ -686,6 +877,9 @@ graficar_heatmap_dimensiones <- function(
 #' @param instrumento Instrumento opcional. Si es `NULL`, se usa `attr(data, "instrumento_reporte")`.
 #' @param cruce Variable de comparación opcional (columna en `data`).
 #' @param incluir_total Si es `NULL`, usa el default interno.
+#' @param inicio_eje_pct Piso visual del eje radial en porcentaje (0-99). Si se
+#'   define, se mapea internamente a `limites = c(inicio_eje_pct/100, 1)` y
+#'   falla con error si hay valores observados por debajo de ese piso.
 #' @param filtros Lista nombrada de filtros por variable.
 #' @param iter_var,iter_level Variable y nivel opcionales de iteración.
 #' @param titulo,subtitulo,nota_pie Textos del gráfico.
@@ -703,6 +897,7 @@ graficar_radar_dimensiones <- function(
     instrumento = NULL,
     cruce = NULL,
     incluir_total = NULL,
+    inicio_eje_pct = NULL,
     filtros = list(),
     iter_var = NULL,
     iter_level = NULL,
@@ -724,6 +919,9 @@ graficar_radar_dimensiones <- function(
     iter_level = iter_level
   )
 
+  extra_args <- list(...)
+  extra_args <- .dim_alias_radar_extra_args(extra_args)
+
   if (!nrow(payload$score_plot)) {
     blank <- .dim_blank_canvas("Sin datos para mostrar")
     return(.dim_export_canvas(
@@ -739,15 +937,36 @@ graficar_radar_dimensiones <- function(
     ))
   }
 
-  extra_args <- list(...)
-  extra_args <- .dim_alias_radar_extra_args(extra_args)
-
   if (identical(payload$visual_mode, "radar")) {
     if (!exists("graficar_radar", mode = "function", inherits = TRUE)) {
       stop("No existe `graficar_radar()`.", call. = FALSE)
     }
 
     df_plot <- .dim_payload_to_plot_df(payload)
+    inicio_eje_pct <- .dim_or(inicio_eje_pct, extra_args$inicio_eje_pct)
+    if (!is.null(inicio_eje_pct)) {
+      inicio_eje_pct <- suppressWarnings(as.numeric(inicio_eje_pct)[1])
+      if (!is.finite(inicio_eje_pct) || inicio_eje_pct < 0 || inicio_eje_pct >= 100) {
+        stop("`inicio_eje_pct` debe ser NULL o un número en [0, 100).", call. = FALSE)
+      }
+      vals <- suppressWarnings(as.numeric(df_plot$valor))
+      vals <- vals[is.finite(vals) & !is.na(vals)]
+      if (length(vals)) {
+        min_obs <- suppressWarnings(min(vals, na.rm = TRUE))
+        if (is.finite(min_obs) && min_obs < inicio_eje_pct) {
+          stop(
+            "`inicio_eje_pct`=", format(inicio_eje_pct, trim = TRUE),
+            " no es válido: el mínimo observado es ",
+            format(round(min_obs, 1), trim = TRUE),
+            ". Ajuste el piso o revise los datos.",
+            call. = FALSE
+          )
+        }
+      }
+      if (is.null(extra_args$limites)) {
+        extra_args$limites <- c(inicio_eje_pct / 100, 1)
+      }
+    }
     base_args <- list(
       data = df_plot,
       var_eje = "eje",
@@ -760,7 +979,19 @@ graficar_radar_dimensiones <- function(
       nota_pie = nota_pie,
       usar_canvas = TRUE,
       mostrar_radios = FALSE,
-      mostrar_niveles = FALSE
+      mostrar_niveles = FALSE,
+      color_grilla = "#D9E1EA",
+      color_radios = "#E4EAF1",
+      cortes_grilla = 4,
+      wrap_ejes = 22,
+      eje_label_mult = 1.03,
+      leyenda_posicion = "abajo",
+      legend_n_por_fila = 4,
+      legend_key_cm = 0.45,
+      legend_espaciado = 12,
+      canvas_h_header_in = 0.58,
+      canvas_h_legend_in = 0.20,
+      canvas_h_caption_in = 0.08
     )
 
     args <- .merge_args(base_args, extra_args)
@@ -847,6 +1078,9 @@ graficar_radar_tabla_dimensiones <- function(
     iter_level = iter_level
   )
 
+  extra_args <- list(...)
+  extra_args <- .dim_alias_radar_extra_args(extra_args)
+
   if (!nrow(payload$score_plot)) {
     blank <- .dim_blank_canvas("Sin datos para mostrar")
     return(.dim_export_canvas(
@@ -861,9 +1095,6 @@ graficar_radar_tabla_dimensiones <- function(
       ppt_master = extra_args$ppt_master %||% "Office Theme"
     ))
   }
-
-  extra_args <- list(...)
-  extra_args <- .dim_alias_radar_extra_args(extra_args)
 
   if (identical(payload$visual_mode, "radar")) {
     if (!exists("graficar_radar", mode = "function", inherits = TRUE)) {

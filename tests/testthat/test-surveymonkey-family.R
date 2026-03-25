@@ -769,7 +769,7 @@ test_that("ppra_adaptar_data usa el bloque auxiliar para integer", {
 
   out <- readxl::read_excel(path_out, sheet = "data")
   expect_identical(as.character(out$age_recod), c("1", "2"))
-  expect_identical(as.character(out$age_recod_label), c("Adulto", "Mayor"))
+  expect_false("age_recod_label" %in% names(out))
 })
 
 test_that("ppra_adaptar_data e instrumento resuelven select_one modo padre con bloque auxiliar", {
@@ -834,12 +834,13 @@ test_that("ppra_adaptar_data e instrumento resuelven select_one modo padre con b
 
   out <- readxl::read_excel(path_out_data, sheet = "data")
   expect_identical(as.character(out$mode_recod[[1]]), "3")
-  expect_identical(as.character(out$mode_recod_label[[1]]), "Canal mixto")
+  expect_false("mode_recod_label" %in% names(out))
 
   prosecnur::ppra_adaptar_instrumento(
     path_instrumento_in = path_inst,
     path_data_adaptada = path_out_data,
     path_instrumento_out = path_out_inst,
+    path_plantilla = path_tpl,
     so_parent_vars = "mode"
   )
 
@@ -853,6 +854,92 @@ test_that("ppra_adaptar_data e instrumento resuelven select_one modo padre con b
   expect_identical(
     as.character(lst_mode_recod[[label_col]][match("3", as.character(lst_mode_recod$name))]),
     "Canal mixto"
+  )
+})
+
+test_that("ppra_adaptar_data e instrumento preservan labels de codigos nuevos en select_multiple", {
+  inst <- make_codif_inst(
+    survey = data.frame(
+      type = c("select_multiple lst_need", "text"),
+      name = c("need", "need_detail"),
+      relevant = c(NA, "selected(${need}, '70')"),
+      `label::Spanish (ES)` = c("Necesidad principal", "Detalle necesidad"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    choices = data.frame(
+      list_name = c("lst_need", "lst_need"),
+      name = c("1", "70"),
+      `label::Spanish (ES)` = c("Trabajo", "Servicio comunitario"),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  dat <- make_codif_dat(data.frame(
+    `_uuid` = c("u1", "u2"),
+    `_index` = c(1, 2),
+    need = c("1 70", "1"),
+    `need/1` = c(1, 1),
+    `need/70` = c(1, 0),
+    need_detail = c("Red local", NA),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  ))
+
+  path_inst <- tempfile(fileext = ".xlsx")
+  path_data <- tempfile(fileext = ".xlsx")
+  path_familias <- tempfile(fileext = ".xlsx")
+  path_tpl <- tempfile(fileext = ".xlsx")
+  path_out_data <- tempfile(fileext = ".xlsx")
+  path_out_inst <- tempfile(fileext = ".xlsx")
+  on.exit(unlink(c(path_inst, path_data, path_familias, path_tpl, path_out_data, path_out_inst)), add = TRUE)
+
+  write_codif_inst_xlsx(inst, path_inst)
+  openxlsx::write.xlsx(list(data = dat$raw), file = path_data, overwrite = TRUE)
+  prosecnur::escribir_plantilla_familias(inst, dat, path = path_familias)
+  fam <- prosecnur::leer_familias_clasificar(path_familias, inst, dat, verbose = FALSE)
+  plantilla <- prosecnur::construir_plantilla_desde_familias(inst, dat, fam)
+  prosecnur::exportar_plantilla_codificacion_xlsx(plantilla, path_xlsx = path_tpl, inst = inst)
+
+  wb <- openxlsx::loadWorkbook(path_tpl)
+  hdr_need <- read_sheet_headers(path_tpl, "need")
+  col_new <- ncol(hdr_need) + 1L
+  openxlsx::writeData(wb, "need", x = "need/99_recod", startCol = col_new, startRow = 1, colNames = FALSE)
+  openxlsx::writeData(wb, "need", x = "Apoyo digital", startCol = col_new, startRow = 2, colNames = FALSE)
+  openxlsx::writeData(wb, "need", x = "1", startCol = col_new, startRow = 3, colNames = FALSE)
+  openxlsx::saveWorkbook(wb, path_tpl, overwrite = TRUE)
+
+  prosecnur::ppra_adaptar_data(
+    path_instrumento = path_inst,
+    path_datos = path_data,
+    path_plantilla = path_tpl,
+    sm_vars = "need",
+    out_path = path_out_data
+  )
+
+  out <- readxl::read_excel(path_out_data, sheet = "data")
+  expect_true("need_recod" %in% names(out))
+  expect_false("need_recod_label" %in% names(out))
+  expect_match(as.character(out$need_recod[[1]]), "(^|\\s)99(\\s|$)", perl = TRUE)
+
+  prosecnur::ppra_adaptar_instrumento(
+    path_instrumento_in = path_inst,
+    path_data_adaptada = path_out_data,
+    path_instrumento_out = path_out_inst,
+    path_plantilla = path_tpl,
+    sm_vars = "need"
+  )
+
+  choices_out <- readxl::read_excel(path_out_inst, sheet = "choices")
+  lst_need_recod <- choices_out[choices_out$list_name == "lst_need_recod", , drop = FALSE]
+  label_col <- names(choices_out)[match(TRUE, tolower(names(choices_out)) %in% c(
+    "label::spanish (es)", "label::spanish(es)", "label::spanish_es",
+    "label_spanish_es", "label::spanish", "label", "label::es"
+  ))]
+  expect_true("99" %in% as.character(lst_need_recod$name))
+  expect_identical(
+    as.character(lst_need_recod[[label_col]][match("99", as.character(lst_need_recod$name))]),
+    "Apoyo digital"
   )
 })
 
@@ -923,12 +1010,13 @@ test_that("ppra_adaptar_data e instrumento resuelven select_one modo hijo con bl
   out <- readxl::read_excel(path_out_data, sheet = "data")
   expect_false("mode_recod" %in% names(out))
   expect_identical(as.character(out$mode_detail_recod[[1]]), "7")
-  expect_identical(as.character(out$mode_detail_recod_label[[1]]), "Canal mixto extendido")
+  expect_false("mode_detail_recod_label" %in% names(out))
 
   prosecnur::ppra_adaptar_instrumento(
     path_instrumento_in = path_inst,
     path_data_adaptada = path_out_data,
     path_instrumento_out = path_out_inst,
+    path_plantilla = path_tpl,
     so_child_vars = "mode"
   )
 

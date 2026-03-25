@@ -23,7 +23,7 @@
 
           shiny::div(
             class = "toggle-row",
-            shiny::span(class = "toggle-label", "Códigos"),
+            shiny::span(class = "toggle-label", "Codigos"),
             shiny::tags$label(
               class = "switch",
               shiny::tags$input(id = "vista_etiquetas", type = "checkbox", checked = "checked"),
@@ -334,7 +334,7 @@
         chv <- ch[ch$list_name == ln, c("name", label_col), drop = FALSE]
         if (nrow(chv)) {
           opts_df <- data.frame(
-            Código   = as.character(chv$name),
+            Codigo   = as.character(chv$name),
             Etiqueta = as.character(chv[[label_col]]),
             stringsAsFactors = FALSE
           )
@@ -343,7 +343,7 @@
     }
 
     if (is.null(opts_df) || !nrow(opts_df)) {
-      opts_df <- data.frame(Código = character(0), Etiqueta = character(0), stringsAsFactors = FALSE)
+      opts_df <- data.frame(Codigo = character(0), Etiqueta = character(0), stringsAsFactors = FALSE)
     }
 
     # Ocultar códigos perdidos salvo que se observen (SO o SM)
@@ -372,8 +372,8 @@
 
       keep_perd <- if (length(vals_obs)) intersect(cod_perd, vals_obs) else character(0)
 
-      es_perd <- opts_df$Código %in% cod_perd
-      opts_df <- opts_df[!es_perd | (opts_df$Código %in% keep_perd), , drop = FALSE]
+      es_perd <- opts_df$Codigo %in% cod_perd
+      opts_df <- opts_df[!es_perd | (opts_df$Codigo %in% keep_perd), , drop = FALSE]
     }
 
     DT::datatable(

@@ -13,7 +13,8 @@ ppra_adaptar_instrumento(
   so_child_vars = character(0),
   integer_vars = character(0),
   choices_order = c("original_first", "by_first_seen", "alphabetical"),
-  paint = TRUE
+  paint = TRUE,
+  path_plantilla = NULL
 )
 }
 \arguments{
@@ -56,6 +57,11 @@ Puede ser \code{"original_first"} (por defecto), \code{"alphabetical"} o
 \item{paint}{Lógico; si es \code{TRUE}, colorea las filas nuevas en
 \code{survey} y las listas nuevas en \code{choices} para facilitar la
 inspección visual.}
+
+\item{path_plantilla}{Ruta opcional a la plantilla de codificación. Si se
+proporciona, se usa para recuperar etiquetas de códigos nuevos en
+\code{select_multiple}, \code{select_one} e \code{integer}, sin requerir
+columnas \code{*_recod_label} en la data.}
 }
 \value{
 Invisiblemente, una lista con:

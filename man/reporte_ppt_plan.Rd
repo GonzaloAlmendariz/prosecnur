@@ -33,8 +33,8 @@ hay una sola fuente.}
 \item{presets}{Lista de presets por tipo de gráfico. El contrato esperado es
 \code{base$args}, \code{barras_apiladas$args}, \code{multi_apiladas$args},
 \code{barras_agrupadas$args}, \code{barras_numericas$args}, \code{pie$args},
-\code{donut$args}, \code{radar_tabla$args}, \code{dim_heatmap$args}, \code{dim_radar$args}
-y \code{dim_radar_tabla$args}. También puede construirse con \code{p_presets()}.}
+\code{donut$args}, \code{radar_tabla$args}, \code{dim_heatmap$args} y \code{dim_radar$args}.
+También puede construirse con \code{p_presets()}.}
 
 \item{plan}{Lista de slides ya construidos con \code{p_plan()} o \code{list(diapo_001=..., ...)}.
 Si es \code{NULL}, se recolectan objetos \code{diapo_###} desde \code{env_diapos}.}
@@ -92,7 +92,6 @@ Other reporte:
 \code{\link{p_barras_multiapiladas}()},
 \code{\link{p_dim_heatmap}()},
 \code{\link{p_dim_radar}()},
-\code{\link{p_dim_radar_tabla}()},
 \code{\link{p_donut}()},
 \code{\link{p_get_plan}()},
 \code{\link{p_numerico}()},

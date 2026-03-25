@@ -908,6 +908,205 @@ test_that("graficar_barras_apiladas repela etiquetas pequenas con umbrales expli
   expect_true(all(x_adj >= 0 & x_adj <= 1))
 })
 
+test_that("graficar_barras_apiladas activa modo uniforme con una sola capa de etiquetas", {
+  df <- data.frame(
+    categoria = "Item",
+    N = 100,
+    pct_1 = 0.01,
+    pct_2 = 0.02,
+    pct_3 = 0.03,
+    pct_4 = 0.94,
+    stringsAsFactors = FALSE
+  )
+
+  p <- prosecnur::graficar_barras_apiladas(
+    data = df,
+    var_categoria = "categoria",
+    var_n = "N",
+    cols_porcentaje = c("pct_1", "pct_2", "pct_3", "pct_4"),
+    etiquetas_grupos = c(
+      pct_1 = "1",
+      pct_2 = "2",
+      pct_3 = "3",
+      pct_4 = "94"
+    ),
+    mostrar_valores = TRUE,
+    decimales = 0,
+    umbral_mostrar_etiqueta = 0.01,
+    umbral_etiqueta_normal = 0.05,
+    size_texto_barras = 4,
+    etiquetas_uniformes = TRUE
+  )
+
+  text_layers <- Filter(function(layer) inherits(layer$geom, "GeomText"), p$layers)
+  expect_length(text_layers, 1)
+  layer_data <- text_layers[[1]]$data
+
+  expect_setequal(as.character(layer_data$lab), c("1%", "2%", "3%", "94%"))
+  expect_true(all(layer_data$.size_label == 4))
+  expect_false(".tamano_etq" %in% names(layer_data))
+})
+
+test_that("graficar_barras_apiladas en modo uniforme empuja hacia adentro en borde izquierdo", {
+  df <- data.frame(
+    categoria = "Item",
+    N = 100,
+    pct_1 = 0.01,
+    pct_2 = 0.02,
+    pct_3 = 0.03,
+    pct_4 = 0.94,
+    stringsAsFactors = FALSE
+  )
+
+  p <- prosecnur::graficar_barras_apiladas(
+    data = df,
+    var_categoria = "categoria",
+    var_n = "N",
+    cols_porcentaje = c("pct_1", "pct_2", "pct_3", "pct_4"),
+    etiquetas_grupos = c(
+      pct_1 = "1",
+      pct_2 = "2",
+      pct_3 = "3",
+      pct_4 = "94"
+    ),
+    mostrar_valores = TRUE,
+    decimales = 0,
+    umbral_mostrar_etiqueta = 0.01,
+    umbral_etiqueta_normal = 0.05,
+    etiquetas_uniformes = TRUE,
+    etiquetas_peq_confinadas = TRUE
+  )
+
+  text_layers <- Filter(function(layer) inherits(layer$geom, "GeomText"), p$layers)
+  layer_data <- text_layers[[1]]$data
+  row_left <- layer_data[layer_data$lab == "1%", , drop = FALSE]
+
+  expect_equal(nrow(row_left), 1)
+  expect_gte(row_left$x_label, 0)
+  expect_lte(row_left$x_label, 1)
+  expect_gt(row_left$x_label, row_left$x_center)
+})
+
+test_that("graficar_barras_apiladas en modo uniforme empuja hacia adentro en borde derecho", {
+  df <- data.frame(
+    categoria = "Item",
+    N = 100,
+    pct_1 = 0.94,
+    pct_2 = 0.03,
+    pct_3 = 0.02,
+    pct_4 = 0.01,
+    stringsAsFactors = FALSE
+  )
+
+  p <- prosecnur::graficar_barras_apiladas(
+    data = df,
+    var_categoria = "categoria",
+    var_n = "N",
+    cols_porcentaje = c("pct_1", "pct_2", "pct_3", "pct_4"),
+    etiquetas_grupos = c(
+      pct_1 = "94",
+      pct_2 = "3",
+      pct_3 = "2",
+      pct_4 = "1"
+    ),
+    mostrar_valores = TRUE,
+    decimales = 0,
+    umbral_mostrar_etiqueta = 0.01,
+    umbral_etiqueta_normal = 0.05,
+    etiquetas_uniformes = TRUE,
+    etiquetas_peq_confinadas = TRUE
+  )
+
+  text_layers <- Filter(function(layer) inherits(layer$geom, "GeomText"), p$layers)
+  layer_data <- text_layers[[1]]$data
+  row_right <- layer_data[layer_data$lab == "1%", , drop = FALSE]
+
+  expect_equal(nrow(row_right), 1)
+  expect_gte(row_right$x_label, 0)
+  expect_lte(row_right$x_label, 1)
+  expect_lt(row_right$x_label, row_right$x_center)
+})
+
+test_that("graficar_barras_apiladas en modo uniforme aumenta separacion minima entre etiquetas", {
+  df <- data.frame(
+    categoria = "Item",
+    N = 100,
+    pct_1 = 0.01,
+    pct_2 = 0.02,
+    pct_3 = 0.03,
+    pct_4 = 0.94,
+    stringsAsFactors = FALSE
+  )
+
+  p <- prosecnur::graficar_barras_apiladas(
+    data = df,
+    var_categoria = "categoria",
+    var_n = "N",
+    cols_porcentaje = c("pct_1", "pct_2", "pct_3", "pct_4"),
+    etiquetas_grupos = c(
+      pct_1 = "1",
+      pct_2 = "2",
+      pct_3 = "3",
+      pct_4 = "94"
+    ),
+    mostrar_valores = TRUE,
+    decimales = 0,
+    umbral_mostrar_etiqueta = 0.01,
+    umbral_etiqueta_normal = 0.05,
+    etiquetas_uniformes = TRUE
+  )
+
+  text_layers <- Filter(function(layer) inherits(layer$geom, "GeomText"), p$layers)
+  layer_data <- text_layers[[1]]$data
+  peq_data <- layer_data[layer_data$lab %in% c("1%", "2%", "3%"), , drop = FALSE]
+  peq_data <- peq_data[order(peq_data$x_center), , drop = FALSE]
+
+  expect_gt(min(diff(peq_data$x_label)), min(diff(peq_data$x_center)))
+  expect_true(all(peq_data$x_label >= 0 & peq_data$x_label <= 1))
+})
+
+test_that("graficar_barras_apiladas mantiene comportamiento legacy con etiquetas_uniformes = FALSE", {
+  df <- data.frame(
+    categoria = "Item",
+    N = 100,
+    pct_1 = 0.01,
+    pct_2 = 0.02,
+    pct_3 = 0.03,
+    pct_4 = 0.94,
+    stringsAsFactors = FALSE
+  )
+
+  mk_args <- list(
+    data = df,
+    var_categoria = "categoria",
+    var_n = "N",
+    cols_porcentaje = c("pct_1", "pct_2", "pct_3", "pct_4"),
+    etiquetas_grupos = c(
+      pct_1 = "1",
+      pct_2 = "2",
+      pct_3 = "3",
+      pct_4 = "94"
+    ),
+    mostrar_valores = TRUE,
+    decimales = 0,
+    umbral_mostrar_etiqueta = 0.01,
+    umbral_etiqueta_normal = 0.05
+  )
+
+  p_default <- do.call(prosecnur::graficar_barras_apiladas, mk_args)
+  p_legacy  <- do.call(prosecnur::graficar_barras_apiladas, c(mk_args, list(etiquetas_uniformes = FALSE)))
+
+  extract_labels <- function(p) {
+    text_layers <- Filter(function(layer) inherits(layer$geom, "GeomText"), p$layers)
+    out <- do.call(rbind, lapply(text_layers, function(layer) {
+      layer$data[, c("lab", "x_center", "x_label"), drop = FALSE]
+    }))
+    out[order(out$lab, out$x_center), , drop = FALSE]
+  }
+
+  expect_equal(extract_labels(p_default), extract_labels(p_legacy))
+})
+
 test_that("slide_1 agrega subtitulo y base automatica multi-fuente en orden de data", {
   skip_if_not_installed("officer")
   skip_if_not_installed("rvg")

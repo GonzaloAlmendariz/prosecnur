@@ -11,6 +11,7 @@ graficar_radar_dimensiones(
   instrumento = NULL,
   cruce = NULL,
   incluir_total = NULL,
+  inicio_eje_pct = NULL,
   filtros = list(),
   iter_var = NULL,
   iter_level = NULL,
@@ -33,6 +34,10 @@ graficar_radar_dimensiones(
 \item{cruce}{Variable de comparación opcional (columna en \code{data}).}
 
 \item{incluir_total}{Si es \code{NULL}, usa el default interno.}
+
+\item{inicio_eje_pct}{Piso visual del eje radial en porcentaje (0-99). Si se
+define, se mapea internamente a \code{limites = c(inicio_eje_pct/100, 1)} y
+falla con error si hay valores observados por debajo de ese piso.}
 
 \item{filtros}{Lista nombrada de filtros por variable.}
 

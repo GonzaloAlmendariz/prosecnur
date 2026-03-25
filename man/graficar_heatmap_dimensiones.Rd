@@ -11,6 +11,13 @@ graficar_heatmap_dimensiones(
   instrumento = NULL,
   cruce = NULL,
   incluir_total = NULL,
+  brecha_filas = FALSE,
+  etiq_brecha_filas = "Brecha",
+  brecha_cols = FALSE,
+  etiq_brecha_cols = "Brecha",
+  aplicar_gradiente_brecha = TRUE,
+  brecha_colores = c(bajo = "#FFFFFF", alto = "#F4B183"),
+  brecha_cortes = c(0, 30),
   filtros = list(),
   iter_var = NULL,
   iter_level = NULL,
@@ -26,16 +33,20 @@ graficar_heatmap_dimensiones(
   color_leyenda = "#004B8D",
   size_leyenda = 9,
   color_ejes = "#20324d",
-  size_ejes = 11,
+  size_ejes = 10,
+  size_ejes_x = NULL,
   color_texto_celdas = "#122842",
-  size_texto_celdas = 11,
+  size_texto_celdas = 10,
   color_fondo = NA,
-  angle_x = -18,
+  angle_x = 0,
+  titulo_total_x = "Total",
+  titulo_total_y = "Total cruce",
+  mostrar_n_cruce_x = FALSE,
   mostrar_leyenda = TRUE,
   usar_canvas = TRUE,
-  canvas_h_title = 0.15,
-  canvas_h_legend = 0.1,
-  canvas_h_caption = 0.08,
+  canvas_h_title = 0.13,
+  canvas_h_legend = 0.09,
+  canvas_h_caption = 0.06,
   canvas_pad_top = 0.01,
   debug_ph_bordes = FALSE,
   debug_ph_col = "#FF00FF",
@@ -64,6 +75,17 @@ graficar_heatmap_dimensiones(
 
 \item{incluir_total}{Si es \code{NULL}, usa el default de la configuración interna.}
 
+\item{brecha_filas, brecha_cols}{Si \code{TRUE}, agrega fila/columna de brecha
+calculada como \code{(max - min)} en la matriz del heatmap.}
+
+\item{etiq_brecha_filas, etiq_brecha_cols}{Etiquetas para fila/columna de brecha.}
+
+\item{aplicar_gradiente_brecha}{Si \code{TRUE}, colorea celdas de brecha con gradiente.}
+
+\item{brecha_colores}{Vector de colores para brecha (\code{bajo}, \code{alto}).}
+
+\item{brecha_cortes}{Cortes numéricos (mín, máx) para escalar el gradiente de brecha.}
+
 \item{filtros}{Lista nombrada de filtros por variable.}
 
 \item{iter_var}{Variable opcional de iteración (columna en \code{data}).}
@@ -71,6 +93,12 @@ graficar_heatmap_dimensiones(
 \item{iter_level}{Nivel específico de iteración.}
 
 \item{titulo, subtitulo, nota_pie}{Textos del gráfico.}
+
+\item{size_ejes_x}{Tamaño opcional de etiquetas del eje X. Si es \code{NULL}, usa \code{size_ejes}.}
+
+\item{titulo_total_x, titulo_total_y}{Etiquetas para los totales en eje X y eje Y.}
+
+\item{mostrar_n_cruce_x}{Si \code{TRUE}, agrega \code{(N=...)} en etiquetas del eje X por cruce.}
 
 \item{usar_canvas}{Si \code{TRUE}, compone encabezado, panel, leyenda y pie con \code{cowplot}.}
 

@@ -1231,6 +1231,17 @@ p_dim_heatmap <- function(
     objetivo,
     cruce = NULL,
     incluir_total = NULL,
+    brecha_filas = FALSE,
+    etiq_brecha_filas = "Brecha",
+    brecha_cols = FALSE,
+    etiq_brecha_cols = "Brecha",
+    aplicar_gradiente_brecha = TRUE,
+    brecha_colores = c(bajo = "#FFFFFF", alto = "#F4B183"),
+    brecha_cortes = c(0, 30),
+    size_ejes_x = NULL,
+    titulo_total_x = "Total",
+    titulo_total_y = "Total cruce",
+    mostrar_n_cruce_x = FALSE,
     filtros = list(),
     iter_var = NULL,
     iter_level = NULL,
@@ -1271,6 +1282,38 @@ p_dim_heatmap <- function(
       stop("`incluir_total` debe ser NULL o logical(1).", call. = FALSE)
     }
   }
+  if (!is.logical(brecha_filas) || length(brecha_filas) != 1L || is.na(brecha_filas)) {
+    stop("`brecha_filas` debe ser logical(1).", call. = FALSE)
+  }
+  if (!is.logical(brecha_cols) || length(brecha_cols) != 1L || is.na(brecha_cols)) {
+    stop("`brecha_cols` debe ser logical(1).", call. = FALSE)
+  }
+  if (!is.logical(aplicar_gradiente_brecha) || length(aplicar_gradiente_brecha) != 1L || is.na(aplicar_gradiente_brecha)) {
+    stop("`aplicar_gradiente_brecha` debe ser logical(1).", call. = FALSE)
+  }
+
+  etiq_brecha_filas <- .ppt_norm_text1(etiq_brecha_filas, blank = "Brecha")
+  etiq_brecha_cols <- .ppt_norm_text1(etiq_brecha_cols, blank = "Brecha")
+
+  brecha_colores <- as.character(brecha_colores)
+  if (!length(brecha_colores)) brecha_colores <- c(bajo = "#FFFFFF", alto = "#F4B183")
+
+  brecha_cortes <- suppressWarnings(as.numeric(brecha_cortes))
+  brecha_cortes <- brecha_cortes[is.finite(brecha_cortes) & !is.na(brecha_cortes)]
+  if (length(brecha_cortes) < 2L) brecha_cortes <- c(0, 30)
+  brecha_cortes <- sort(brecha_cortes)[1:2]
+
+  if (!is.null(size_ejes_x)) {
+    size_ejes_x <- suppressWarnings(as.numeric(size_ejes_x))
+    if (!is.finite(size_ejes_x) || is.na(size_ejes_x) || size_ejes_x <= 0) {
+      stop("`size_ejes_x` debe ser NULL o numérico positivo.", call. = FALSE)
+    }
+  }
+  titulo_total_x <- .ppt_norm_text1(titulo_total_x, blank = "Total")
+  titulo_total_y <- .ppt_norm_text1(titulo_total_y, blank = "Total cruce")
+  if (!is.logical(mostrar_n_cruce_x) || length(mostrar_n_cruce_x) != 1L || is.na(mostrar_n_cruce_x)) {
+    stop("`mostrar_n_cruce_x` debe ser logical(1).", call. = FALSE)
+  }
 
   filtros <- .ppt_norm_filters(filtros)
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
@@ -1282,6 +1325,17 @@ p_dim_heatmap <- function(
     objetivo = objetivo,
     cruce = cruce,
     incluir_total = incluir_total,
+    brecha_filas = isTRUE(brecha_filas),
+    etiq_brecha_filas = as.character(etiq_brecha_filas)[1],
+    brecha_cols = isTRUE(brecha_cols),
+    etiq_brecha_cols = as.character(etiq_brecha_cols)[1],
+    aplicar_gradiente_brecha = isTRUE(aplicar_gradiente_brecha),
+    brecha_colores = brecha_colores,
+    brecha_cortes = brecha_cortes,
+    size_ejes_x = size_ejes_x,
+    titulo_total_x = as.character(titulo_total_x)[1],
+    titulo_total_y = as.character(titulo_total_y)[1],
+    mostrar_n_cruce_x = isTRUE(mostrar_n_cruce_x),
     filtros = filtros,
     iter_var = iter_var,
     iter_level = iter_level,
@@ -1301,6 +1355,7 @@ p_dim_radar <- function(
     objetivo,
     cruce = NULL,
     incluir_total = NULL,
+    inicio_eje_pct = NULL,
     filtros = list(),
     iter_var = NULL,
     iter_level = NULL,
@@ -1342,6 +1397,13 @@ p_dim_radar <- function(
     }
   }
 
+  if (!is.null(inicio_eje_pct)) {
+    inicio_eje_pct <- suppressWarnings(as.numeric(inicio_eje_pct)[1])
+    if (!is.finite(inicio_eje_pct) || inicio_eje_pct < 0 || inicio_eje_pct >= 100) {
+      stop("`inicio_eje_pct` debe ser NULL o un número en [0, 100).", call. = FALSE)
+    }
+  }
+
   filtros <- .ppt_norm_filters(filtros)
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
@@ -1352,6 +1414,7 @@ p_dim_radar <- function(
     objetivo = objetivo,
     cruce = cruce,
     incluir_total = incluir_total,
+    inicio_eje_pct = inicio_eje_pct,
     filtros = filtros,
     iter_var = iter_var,
     iter_level = iter_level,
@@ -1363,8 +1426,7 @@ p_dim_radar <- function(
   el
 }
 
-#' @title Radar + tabla de dimensiones
-#' @family reporte
+#' @title (Retirado) Radar + tabla de dimensiones
 #' @export
 p_dim_radar_tabla <- function(
     modo = c("general", "indicadores"),
@@ -1379,64 +1441,10 @@ p_dim_radar_tabla <- function(
     overrides = list(),
     base = list()
 ) {
-  modo <- match.arg(modo)
-
-  if (!is.character(objetivo) || length(objetivo) != 1L || !nzchar(trimws(objetivo))) {
-    stop("`objetivo` debe ser character(1) no vacío.", call. = FALSE)
-  }
-  objetivo <- trimws(objetivo)
-
-  if (!is.null(cruce)) {
-    if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
-      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
-    }
-    cruce <- trimws(cruce)
-  }
-
-  if (!is.null(iter_var)) {
-    if (!is.character(iter_var) || length(iter_var) != 1L || !nzchar(trimws(iter_var))) {
-      stop("`iter_var` debe ser NULL o character(1) no vacío.", call. = FALSE)
-    }
-    iter_var <- trimws(iter_var)
-  }
-
-  if (!is.null(iter_level)) {
-    if (!is.character(iter_level) || length(iter_level) != 1L || !nzchar(trimws(iter_level))) {
-      stop("`iter_level` debe ser NULL o character(1) no vacío.", call. = FALSE)
-    }
-    iter_level <- trimws(iter_level)
-  }
-
-  if (!is.null(incluir_total)) {
-    if (!is.logical(incluir_total) || length(incluir_total) != 1L || is.na(incluir_total)) {
-      stop("`incluir_total` debe ser NULL o logical(1).", call. = FALSE)
-    }
-  }
-
-  if (!is.null(titulo_tabla)) {
-    titulo_tabla <- .ppt_norm_text1(titulo_tabla, blank = NULL)
-  }
-
-  filtros <- .ppt_norm_filters(filtros)
-  if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
-  if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
-
-  el <- list(
-    .element_type = "dim_radar_tabla",
-    modo = modo,
-    objetivo = objetivo,
-    cruce = cruce,
-    incluir_total = incluir_total,
-    filtros = filtros,
-    iter_var = iter_var,
-    iter_level = iter_level,
-    titulo_tabla = titulo_tabla,
-    title_slide = .ppt_norm_text1(titulo, blank = NULL),
-    overrides = overrides,
-    base = base
+  stop(
+    "`p_dim_radar_tabla()` fue retirado del flujo PPT. Use `p_dim_radar()` o `p_dim_heatmap()`.",
+    call. = FALSE
   )
-  class(el) <- c("ppt_element", "list")
-  el
 }
 
 #' @title Texto (para cajas libres en layouts)

@@ -203,7 +203,10 @@ graficar_radar <- function(
   tabla_firstcol_size <- suppressWarnings(as.numeric(tabla_firstcol_size))
   if (!is.finite(tabla_firstcol_size) || tabla_firstcol_size <= 0) tabla_firstcol_size <- 11
   tabla_firstcol_wrap <- suppressWarnings(as.integer(tabla_firstcol_wrap))
-  if (!is.finite(tabla_firstcol_wrap) || tabla_firstcol_wrap <= 0) tabla_firstcol_wrap <- NA_integer_
+  if (length(tabla_firstcol_wrap) != 1L || is.na(tabla_firstcol_wrap) ||
+      !is.finite(tabla_firstcol_wrap) || tabla_firstcol_wrap <= 0) {
+    tabla_firstcol_wrap <- NA_integer_
+  }
   tabla_firstcol_indent_npc <- suppressWarnings(as.numeric(tabla_firstcol_indent_npc))
   if (!is.finite(tabla_firstcol_indent_npc)) tabla_firstcol_indent_npc <- 0.015
   tabla_firstcol_indent_npc <- max(0, min(0.08, tabla_firstcol_indent_npc))
@@ -487,6 +490,28 @@ graficar_radar <- function(
     tidyr::complete(.eje, .grupo, fill = list(.valor = 0)) |>
     dplyr::arrange(.grupo, .eje)
 
+  # Límites radiales (escala real 0-1). Se definen antes de la geometría para
+  # poder mapear el polígono al rango visual completo cuando hay piso > 0.
+  if (is.null(limites)) {
+    r_lim <- c(0, 1)
+  } else {
+    r_lim <- suppressWarnings(as.numeric(limites))
+    if (length(r_lim) != 2 || any(!is.finite(r_lim))) r_lim <- c(0, 1)
+    r_lim <- sort(r_lim)
+    r_lim[1] <- max(0, r_lim[1])
+    r_lim[2] <- min(1, r_lim[2])
+    if (r_lim[2] <= r_lim[1]) r_lim <- c(0, 1)
+  }
+
+  # Convierte valor real al radio visual del radar (zoom radial).
+  .map_r_to_plot <- function(r) {
+    rr <- suppressWarnings(as.numeric(r))
+    den <- r_lim[2] - r_lim[1]
+    if (!is.finite(den) || den <= 0) return(rr)
+    rr <- (rr - r_lim[1]) / den
+    pmax(0, pmin(1, rr))
+  }
+
   lab_ejes <- levels(df_plot$.eje)
   if (!is.null(wrap_ejes) && is.finite(wrap_ejes) && wrap_ejes > 0) {
     if (requireNamespace("stringr", quietly = TRUE)) {
@@ -510,8 +535,9 @@ graficar_radar <- function(
   df_xy <- df_plot |>
     dplyr::left_join(angle_tbl, by = ".eje") |>
     dplyr::mutate(
-      x = .data$.valor * radar_scale * cos(.data$.ang),
-      y = .data$.valor * radar_scale * sin(.data$.ang)
+      .valor_plot = .map_r_to_plot(.data$.valor),
+      x = .data$.valor_plot * radar_scale * cos(.data$.ang),
+      y = .data$.valor_plot * radar_scale * sin(.data$.ang)
     )
 
   df_poly <- df_xy |>
@@ -523,24 +549,18 @@ graficar_radar <- function(
   # ---------------------------------------------------------------------------
   # 3) Límites radiales
   # ---------------------------------------------------------------------------
-  if (is.null(limites)) {
-    r_lim <- c(0, 1)
-  } else {
-    r_lim <- suppressWarnings(as.numeric(limites))
-    if (length(r_lim) != 2 || any(!is.finite(r_lim))) r_lim <- c(0, 1)
-    r_lim <- sort(r_lim)
-    r_lim[1] <- max(0, r_lim[1])
-    r_lim[2] <- min(1, r_lim[2])
-    if (r_lim[2] <= r_lim[1]) r_lim <- c(0, 1)
-  }
-
   rings <- unique(seq(r_lim[1], r_lim[2], length.out = cortes_grilla))
+  rings_plot <- .map_r_to_plot(rings)
+  ring_max_plot <- suppressWarnings(max(rings_plot, na.rm = TRUE))
+  if (!is.finite(ring_max_plot) || ring_max_plot <= 0) ring_max_plot <- 1
 
   grid_df <- NULL
   if (isTRUE(mostrar_tela)) {
-    grid_df <- lapply(rings, function(rr) {
+    grid_df <- lapply(seq_along(rings), function(i) {
+      rr <- rings[i]
+      rr_plot <- rings_plot[i]
       lvl <- angle_tbl |>
-        dplyr::mutate(.r = rr, x = rr * radar_scale * cos(.data$.ang), y = rr * radar_scale * sin(.data$.ang)) |>
+        dplyr::mutate(.r = rr, x = rr_plot * radar_scale * cos(.data$.ang), y = rr_plot * radar_scale * sin(.data$.ang)) |>
         dplyr::arrange(.data$.idx)
       dplyr::bind_rows(lvl, lvl[1, , drop = FALSE])
     }) |> dplyr::bind_rows()
@@ -549,11 +569,11 @@ graficar_radar <- function(
   axes_df <- NULL
   if (isTRUE(mostrar_radios)) {
     axes_df <- angle_tbl |>
-      dplyr::mutate(x0 = 0, y0 = 0, x1 = r_lim[2] * radar_scale * cos(.data$.ang), y1 = r_lim[2] * radar_scale * sin(.data$.ang))
+      dplyr::mutate(x0 = 0, y0 = 0, x1 = ring_max_plot * radar_scale * cos(.data$.ang), y1 = ring_max_plot * radar_scale * sin(.data$.ang))
   }
 
   level_lab <- NULL
-  if (isTRUE(mostrar_niveles)) level_lab <- tibble::tibble(.nivel = rings, x = rings * radar_scale, y = 0)
+  if (isTRUE(mostrar_niveles)) level_lab <- tibble::tibble(.nivel = rings, x = rings_plot * radar_scale, y = 0)
 
   max_label_lines <- max(
     1L,
@@ -569,7 +589,7 @@ graficar_radar <- function(
   min_label_gap <- 0.03 + (max_label_lines - 1L) * 0.01
   label_ring_mult <- max(eje_label_mult, radar_scale + min_label_gap)
   label_ring_mult <- min(label_ring_mult, 1.10)
-  label_ring <- r_lim[2] * label_ring_mult
+  label_ring <- ring_max_plot * label_ring_mult
   lab_axes <- angle_tbl |>
     dplyr::mutate(
       eje = lab_ejes[.data$.idx],
@@ -728,7 +748,7 @@ graficar_radar <- function(
     )
   }
 
-  lim_xy <- r_lim[2] * max(1.18, label_ring_mult * 1.05)
+  lim_xy <- ring_max_plot * max(1.18, label_ring_mult * 1.05)
 
   clip_mode <- if (ppt_safe) "on" else "off"
 
@@ -981,9 +1001,21 @@ graficar_radar <- function(
 
       if (isTRUE(tabla_auto_fit)) {
 
-        # OJO: esto es más estable que grobWidth() en algunos devices
-        gw_in <- suppressWarnings(grid::convertWidth(sum(tab_grob$widths),  "in", valueOnly = TRUE))
-        gh_in <- suppressWarnings(grid::convertHeight(sum(tab_grob$heights), "in", valueOnly = TRUE))
+        # Medir robustamente: algunos grobs (p.ej. grobTree) no exponen
+        # `$widths/$heights` como unidades sumables.
+        gw_unit <- if (!is.null(tab_grob$widths) && inherits(tab_grob$widths, "unit")) {
+          sum(tab_grob$widths)
+        } else {
+          grid::grobWidth(tab_grob)
+        }
+        gh_unit <- if (!is.null(tab_grob$heights) && inherits(tab_grob$heights, "unit")) {
+          sum(tab_grob$heights)
+        } else {
+          grid::grobHeight(tab_grob)
+        }
+
+        gw_in <- suppressWarnings(grid::convertWidth(gw_unit, "in", valueOnly = TRUE))
+        gh_in <- suppressWarnings(grid::convertHeight(gh_unit, "in", valueOnly = TRUE))
 
         # Tamaño disponible del PH (en pulgadas) usando el tamaño final del canvas
         ph_w_in <- ancho * w_tab
@@ -1245,7 +1277,7 @@ graficar_radar <- function(
         dplyr::filter(is.finite(.data$x), is.finite(.data$y), !is.na(.data$x), !is.na(.data$y))
 
       # 3) límites: incluir labels dentro del viewport
-      lim_xy_ppt <- max(r_lim[2] * 1.18, (r_lim[2] * label_ring_mult) * 1.06)
+      lim_xy_ppt <- max(ring_max_plot * 1.18, (ring_max_plot * label_ring_mult) * 1.06)
 
       fondo_ppt <- if (is.na(color_fondo) || is.null(color_fondo)) "transparent" else color_fondo
 

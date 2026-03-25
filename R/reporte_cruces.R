@@ -290,7 +290,7 @@ label_variable <- function(var, dic_vars = NULL, labels_override = NULL, data = 
   list(mean = as.numeric(mu), sd = as.numeric(sd_w), n = as.numeric(n_valid))
 }
 
-.dim_pretty_label <- function(var, data) {
+.dim_pretty_label <- function(var, data = NULL) {
   if (is.null(var) || !length(var)) return("")
   v <- as.character(var)[1]
   lbl <- ""

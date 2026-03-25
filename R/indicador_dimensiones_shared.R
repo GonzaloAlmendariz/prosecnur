@@ -670,6 +670,7 @@
   list(
     score_plot = data.frame(),
     score_heat = data.frame(),
+    base_universe = NA_real_,
     axis_order_plot = character(0),
     axis_order_heat = character(0),
     mode = as.character(mode %||% ""),
@@ -710,7 +711,43 @@
 
   obj_map <- if (identical(modo, "indicadores")) ctx$catalog_indicadores else ctx$catalog_general
   if (!(objetivo %in% names(obj_map))) {
-    stop("`objetivo` no existe en el catálogo de dimensiones para `modo='", modo, "'.", call. = FALSE)
+    .norm <- function(x) tolower(trimws(as.character(x %||% "")))
+    keys <- names(obj_map)
+    labs <- vapply(obj_map, function(z) as.character(z$label %||% ""), character(1))
+    target <- .norm(objetivo)
+
+    hit_key <- keys[.norm(keys) == target]
+    hit_lab <- keys[.norm(labs) == target]
+    hits <- unique(c(hit_key, hit_lab))
+
+    if (length(hits) == 1L) {
+      objetivo <- hits[1]
+    } else {
+      other_mode <- if (identical(modo, "general")) "indicadores" else "general"
+      other_map <- if (identical(modo, "general")) ctx$catalog_indicadores else ctx$catalog_general
+      exists_in_other <- objetivo %in% names(other_map)
+
+      avail <- if (length(keys)) paste(utils::head(keys, 12), collapse = ", ") else "<vacío>"
+      if (length(keys) > 12) avail <- paste0(avail, ", ...")
+
+      hint_other <- if (isTRUE(exists_in_other)) {
+        paste0(" El objetivo sí existe en `modo='", other_mode, "'.")
+      } else {
+        ""
+      }
+      hint_amb <- if (length(hits) > 1L) {
+        paste0(" Coincidencias ambiguas por etiqueta/id: ", paste(hits, collapse = ", "), ".")
+      } else {
+        ""
+      }
+
+      stop(
+        "`objetivo` no existe en el catálogo de dimensiones para `modo='", modo, "'. ",
+        "Objetivos disponibles: ", avail, ".",
+        hint_other, hint_amb,
+        call. = FALSE
+      )
+    }
   }
   obj <- obj_map[[objetivo]]
 
@@ -795,6 +832,7 @@
   }
 
   w <- .dim_safe_weights(df, ctx$weight_col)
+  base_universe <- suppressWarnings(sum(w, na.rm = TRUE))
   groups <- list()
   hidden_main <- 0L
 
@@ -915,6 +953,7 @@
   list(
     score_plot = sc_plot,
     score_heat = sc_heat,
+    base_universe = as.numeric(base_universe),
     axis_order_plot = as.character(axis_labels),
     axis_order_heat = c("Total cruce", as.character(axis_labels)),
     mode = as.character(obj$mode %||% modo),

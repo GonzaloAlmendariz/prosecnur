@@ -15,7 +15,6 @@ p_presets(
   radar_tabla = list(),
   dim_heatmap = list(),
   dim_radar = list(),
-  dim_radar_tabla = list(),
   numerico = NULL,
   debug = list(),
   ...
@@ -50,7 +49,7 @@ Objeto con clase \code{"ppt_presets"}.
 \description{
 Construye un objeto de presets que centraliza configuraciones por tipo:
 \code{base}, \code{barras_apiladas}, \code{multi_apiladas}, \code{barras_agrupadas},
-\code{barras_numericas}, \code{pie}, \code{donut} y \code{radar_tabla}.
+\code{barras_numericas}, \code{pie}, \code{donut}, \code{radar_tabla}, \code{dim_heatmap} y \code{dim_radar}.
 
 Este helper refleja el contrato real que consume \code{reporte_ppt_plan()}, equivalente
 a pasar manualmente una lista con sublistas \code{args}.
@@ -66,7 +65,6 @@ Other reporte:
 \code{\link{p_barras_multiapiladas}()},
 \code{\link{p_dim_heatmap}()},
 \code{\link{p_dim_radar}()},
-\code{\link{p_dim_radar_tabla}()},
 \code{\link{p_donut}()},
 \code{\link{p_get_plan}()},
 \code{\link{p_numerico}()},

@@ -2,7 +2,7 @@
 % Please edit documentation in R/reporte_plan_slides.R
 \name{p_dim_radar_tabla}
 \alias{p_dim_radar_tabla}
-\title{Radar + tabla de dimensiones}
+\title{(Retirado) Radar + tabla de dimensiones}
 \usage{
 p_dim_radar_tabla(
   modo = c("general", "indicadores"),
@@ -19,45 +19,5 @@ p_dim_radar_tabla(
 )
 }
 \description{
-Radar + tabla de dimensiones
+(Retirado) Radar + tabla de dimensiones
 }
-\seealso{
-Other reporte: 
-\code{\link{diapo}()},
-\code{\link{exportar_frecuencias_spss}()},
-\code{\link{freq_table_spss}()},
-\code{\link{generar_spss_niveles}()},
-\code{\link{p_barras_agrupadas}()},
-\code{\link{p_barras_apiladas}()},
-\code{\link{p_barras_multiapiladas}()},
-\code{\link{p_dim_heatmap}()},
-\code{\link{p_dim_radar}()},
-\code{\link{p_donut}()},
-\code{\link{p_get_plan}()},
-\code{\link{p_numerico}()},
-\code{\link{p_pie}()},
-\code{\link{p_plan}()},
-\code{\link{p_presets}()},
-\code{\link{p_radar_tabla}()},
-\code{\link{p_slide_1}()},
-\code{\link{p_slide_2}()},
-\code{\link{p_slide_section}()},
-\code{\link{p_slide_title}()},
-\code{\link{p_text}()},
-\code{\link{plan_word}()},
-\code{\link{reporte_codebook}()},
-\code{\link{reporte_cruces}()},
-\code{\link{reporte_data}()},
-\code{\link{reporte_enumeradores}()},
-\code{\link{reporte_frecuencias}()},
-\code{\link{reporte_instrumento}()},
-\code{\link{reporte_ppt}()},
-\code{\link{reporte_ppt_cruces}()},
-\code{\link{reporte_ppt_ops}()},
-\code{\link{reporte_ppt_plan}()},
-\code{\link{reporte_spss}()},
-\code{\link{reporte_word}()},
-\code{\link{reporte_word_cruces}()},
-\code{\link{w_presets}()}
-}
-\concept{reporte}

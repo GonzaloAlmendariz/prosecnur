@@ -34,8 +34,8 @@
 #' @param presets Lista de presets por tipo de gráfico. El contrato esperado es
 #'   `base$args`, `barras_apiladas$args`, `multi_apiladas$args`,
 #'   `barras_agrupadas$args`, `barras_numericas$args`, `pie$args`,
-#'   `donut$args`, `radar_tabla$args`, `dim_heatmap$args`, `dim_radar$args`
-#'   y `dim_radar_tabla$args`. También puede construirse con `p_presets()`.
+#'   `donut$args`, `radar_tabla$args`, `dim_heatmap$args` y `dim_radar$args`.
+#'   También puede construirse con `p_presets()`.
 #'
 #' @param plan Lista de slides ya construidos con `p_plan()` o `list(diapo_001=..., ...)`.
 #'   Si es `NULL`, se recolectan objetos `diapo_###` desde `env_diapos`.
@@ -92,7 +92,11 @@ reporte_ppt_plan <- function(
 
   .is_inst_sources <- function(x) {
     is.list(x) && !is.data.frame(x) && length(x) > 0L &&
-      all(vapply(x, function(z) is.list(z) && !is.null(z$survey), logical(1)))
+      all(vapply(x, function(z) {
+        is.list(z) && !is.data.frame(z) &&
+          ("survey" %in% names(z)) &&
+          !is.null(z[["survey"]])
+      }, logical(1)))
   }
 
   .normalize_named_sources <- function(x, arg_name) {
@@ -156,6 +160,12 @@ reporte_ppt_plan <- function(
   # 0.1) Presets (tu contrato)
   # -----------------------
   presets <- presets %||% list()
+  if (!is.null(presets$dim_radar_tabla)) {
+    warning(
+      "`presets$dim_radar_tabla` fue retirado del flujo PPT y será ignorado. Use `dim_radar` o `dim_heatmap`.",
+      call. = FALSE
+    )
+  }
   # defaults mínimos si el usuario no pasó nada
   presets$barras_apiladas <- presets$barras_apiladas %||% list(args = list())
   if (is.null(presets$barras_apiladas$args) || !is.list(presets$barras_apiladas$args)) {
@@ -187,9 +197,6 @@ reporte_ppt_plan <- function(
   presets$dim_radar <- presets$dim_radar %||% list(args = list())
   presets$dim_radar$args <- presets$dim_radar$args %||% list()
 
-  presets$dim_radar_tabla <- presets$dim_radar_tabla %||% list(args = list())
-  presets$dim_radar_tabla$args <- presets$dim_radar_tabla$args %||% list()
-
   # ------------------------------------------------------------
   # HERENCIA: base$args (solo estilo) -> todos los presets$args
   # ------------------------------------------------------------
@@ -204,7 +211,7 @@ reporte_ppt_plan <- function(
     names(presets),
     c("barras_apiladas", "multi_apiladas", "barras_agrupadas",
       "barras_numericas", "pie", "donut", "radar_tabla",
-      "dim_heatmap", "dim_radar", "dim_radar_tabla")
+      "dim_heatmap", "dim_radar")
   )
 
   for (nm in targets) {
@@ -231,14 +238,30 @@ reporte_ppt_plan <- function(
   # herencia: donut hereda pie
   presets$donut$args <- .merge_args(presets$pie$args, presets$donut$args)
 
-  # herencia: radar_tabla de dimensiones hereda dim_radar
-  presets$dim_radar_tabla$args <- .merge_args(presets$dim_radar$args, presets$dim_radar_tabla$args)
-
   # defaults de seguridad
   presets$pie$args$usar_canvas   <- presets$pie$args$usar_canvas   %||% TRUE
   presets$pie$args$exportar      <- presets$pie$args$exportar      %||% "rplot"
   presets$donut$args$usar_canvas <- presets$donut$args$usar_canvas %||% presets$pie$args$usar_canvas
   presets$donut$args$exportar    <- presets$donut$args$exportar    %||% presets$pie$args$exportar
+
+  # defaults estéticos únicos para dimensiones (PPT)
+  presets$dim_heatmap$args$angle_x <- presets$dim_heatmap$args$angle_x %||% 0
+  presets$dim_heatmap$args$size_ejes <- presets$dim_heatmap$args$size_ejes %||% 10
+  presets$dim_heatmap$args$size_texto_celdas <- presets$dim_heatmap$args$size_texto_celdas %||% 10
+  presets$dim_heatmap$args$canvas_h_title <- presets$dim_heatmap$args$canvas_h_title %||% 0.13
+  presets$dim_heatmap$args$canvas_h_legend <- presets$dim_heatmap$args$canvas_h_legend %||% 0.09
+  presets$dim_heatmap$args$canvas_h_caption <- presets$dim_heatmap$args$canvas_h_caption %||% 0.06
+
+  presets$dim_radar$args$cortes_grilla <- presets$dim_radar$args$cortes_grilla %||% 4
+  presets$dim_radar$args$wrap_ejes <- presets$dim_radar$args$wrap_ejes %||% 22
+  presets$dim_radar$args$eje_label_mult <- presets$dim_radar$args$eje_label_mult %||% 1.03
+  presets$dim_radar$args$leyenda_posicion <- presets$dim_radar$args$leyenda_posicion %||% "abajo"
+  presets$dim_radar$args$legend_n_por_fila <- presets$dim_radar$args$legend_n_por_fila %||% 4
+  presets$dim_radar$args$legend_key_cm <- presets$dim_radar$args$legend_key_cm %||% 0.45
+  presets$dim_radar$args$legend_espaciado <- presets$dim_radar$args$legend_espaciado %||% 12
+  presets$dim_radar$args$canvas_h_header_in <- presets$dim_radar$args$canvas_h_header_in %||% 0.58
+  presets$dim_radar$args$canvas_h_legend_in <- presets$dim_radar$args$canvas_h_legend_in %||% 0.20
+  presets$dim_radar$args$canvas_h_caption_in <- presets$dim_radar$args$canvas_h_caption_in %||% 0.08
 
   # ---------------------------------------------------------------------------
   # 1) Helpers — PPT strict con contrato interno (.PPT_CONTRACT)
@@ -930,7 +953,7 @@ reporte_ppt_plan <- function(
       ))
     }
 
-    if (etype %in% c("dim_heatmap", "dim_radar", "dim_radar_tabla")) {
+    if (etype %in% c("dim_heatmap", "dim_radar")) {
       if (!exists(".dim_build_context", mode = "function", inherits = TRUE) ||
           !exists(".dim_build_payload", mode = "function", inherits = TRUE)) {
         return(NULL)
@@ -955,13 +978,18 @@ reporte_ppt_plan <- function(
         iter_level = el$iter_level %||% NULL
       )
 
-      sc <- payload$score_plot %||% data.frame()
-      if (!nrow(sc) || !("base" %in% names(sc))) return(NULL)
+      # En dimensiones, la base automática debe reflejar el universo analizado
+      # (post filtros/iteración), incluso cuando `incluir_total = FALSE`.
+      N_total <- suppressWarnings(as.numeric(payload$base_universe)[1])
+      if (!is.finite(N_total)) {
+        sc <- payload$score_plot %||% data.frame()
+        if (!nrow(sc) || !("base" %in% names(sc))) return(NULL)
 
-      grupos <- as.character(sc$grupo %||% character(0))
-      bases <- suppressWarnings(as.numeric(sc$base))
-      idx_total <- which(grupos == "Total")
-      N_total <- if (length(idx_total)) bases[idx_total[1]] else suppressWarnings(max(bases, na.rm = TRUE))
+        grupos <- as.character(sc$grupo %||% character(0))
+        bases <- suppressWarnings(as.numeric(sc$base))
+        idx_total <- which(grupos == "Total")
+        N_total <- if (length(idx_total)) bases[idx_total[1]] else suppressWarnings(max(bases, na.rm = TRUE))
+      }
       if (!is.finite(N_total)) return(NULL)
 
       N_pretty <- format(N_total, big.mark = ",", scientific = FALSE)
@@ -1274,6 +1302,12 @@ reporte_ppt_plan <- function(
     if (is.na(etype) || !nzchar(etype)) {
       stop(".render_element(): elemento sin `.element_type`.", call. = FALSE)
     }
+    if (identical(etype, "dim_radar_tabla")) {
+      stop(
+        "`dim_radar_tabla` fue retirado del flujo PPT. Use `p_dim_radar()` o `p_dim_heatmap()`.",
+        call. = FALSE
+      )
+    }
 
     fn_name <- paste0(".render_", etype)
     if (!exists(fn_name, mode = "function", inherits = TRUE)) {
@@ -1291,7 +1325,6 @@ reporte_ppt_plan <- function(
     pa_radar    <- presets$radar_tabla$args %||% list()
     pa_dim_heat <- presets$dim_heatmap$args %||% list()
     pa_dim_rad  <- presets$dim_radar$args %||% list()
-    pa_dim_rt   <- presets$dim_radar_tabla$args %||% list()
 
     # helper: llamar pasando SOLO args que la función soporte
     .call_keep_formals <- function(fun, args) {
@@ -1330,7 +1363,6 @@ reporte_ppt_plan <- function(
       radar_tabla      = pa_radar,
       dim_heatmap      = pa_dim_heat,
       dim_radar        = pa_dim_rad,
-      dim_radar_tabla  = pa_dim_rt,
       # default: si hay nuevos etypes, se intenta pasar lista vacía
       list()
     )
@@ -2848,6 +2880,17 @@ reporte_ppt_plan <- function(
       objetivo = el$objetivo,
       cruce = cruce_var,
       incluir_total = el$incluir_total %||% NULL,
+      brecha_filas = el$brecha_filas %||% FALSE,
+      etiq_brecha_filas = el$etiq_brecha_filas %||% "Brecha",
+      brecha_cols = el$brecha_cols %||% FALSE,
+      etiq_brecha_cols = el$etiq_brecha_cols %||% "Brecha",
+      aplicar_gradiente_brecha = el$aplicar_gradiente_brecha %||% TRUE,
+      brecha_colores = el$brecha_colores %||% c(bajo = "#FFFFFF", alto = "#F4B183"),
+      brecha_cortes = el$brecha_cortes %||% c(0, 30),
+      size_ejes_x = el$size_ejes_x %||% NULL,
+      titulo_total_x = el$titulo_total_x %||% "Total",
+      titulo_total_y = el$titulo_total_y %||% "Total cruce",
+      mostrar_n_cruce_x = el$mostrar_n_cruce_x %||% FALSE,
       filtros = el$filtros %||% list(),
       iter_var = iter_var,
       iter_level = el$iter_level %||% NULL,
@@ -2880,6 +2923,7 @@ reporte_ppt_plan <- function(
       objetivo = el$objetivo,
       cruce = cruce_var,
       incluir_total = el$incluir_total %||% NULL,
+      inicio_eje_pct = el$inicio_eje_pct %||% NULL,
       filtros = el$filtros %||% list(),
       iter_var = iter_var,
       iter_level = el$iter_level %||% NULL,
@@ -2892,39 +2936,6 @@ reporte_ppt_plan <- function(
     args <- .force_canvas_args(graficar_radar_dimensiones, args)
     args <- .keep_formals(graficar_radar_dimensiones, args)
     suppressWarnings(do.call(graficar_radar_dimensiones, args))
-  }
-
-  .render_dim_radar_tabla <- function(el, preset_args) {
-    if (!exists("graficar_radar_tabla_dimensiones", mode = "function", inherits = TRUE)) {
-      stop("No existe `graficar_radar_tabla_dimensiones()` en el entorno/paquete.", call. = FALSE)
-    }
-
-    source_use <- .element_source(el)
-    ctx_src <- .source_ctx(source_use)
-    cruce_var <- if (!is.null(el$cruce)) .resolve_ref(el$cruce, source = source_use, arg_name = "cruce")$var else NULL
-    iter_var <- if (!is.null(el$iter_var)) .resolve_ref(el$iter_var, source = source_use, arg_name = "iter_var")$var else NULL
-    data_dim <- .inject_dimensiones_palette(ctx_src$data, el$cruce %||% NULL, source = source_use)
-
-    base_args <- list(
-      data = data_dim,
-      instrumento = ctx_src$instrumento,
-      modo = el$modo,
-      objetivo = el$objetivo,
-      cruce = cruce_var,
-      incluir_total = el$incluir_total %||% NULL,
-      filtros = el$filtros %||% list(),
-      iter_var = iter_var,
-      iter_level = el$iter_level %||% NULL,
-      titulo = NULL,
-      subtitulo = NULL,
-      nota_pie = NULL,
-      titulo_tabla = el$titulo_tabla %||% "TOP TWO BOX"
-    )
-
-    args <- .merge_args(base_args, preset_args %||% list(), el$overrides %||% list())
-    args <- .force_canvas_args(graficar_radar_tabla_dimensiones, args)
-    args <- .keep_formals(graficar_radar_tabla_dimensiones, args)
-    suppressWarnings(do.call(graficar_radar_tabla_dimensiones, args))
   }
 
   # ---------------------------------------------------------------------------
@@ -3963,7 +3974,7 @@ reporte_ppt_plan <- function(
 #' @description
 #' Construye un objeto de presets que centraliza configuraciones por tipo:
 #' `base`, `barras_apiladas`, `multi_apiladas`, `barras_agrupadas`,
-#' `barras_numericas`, `pie`, `donut` y `radar_tabla`.
+#' `barras_numericas`, `pie`, `donut`, `radar_tabla`, `dim_heatmap` y `dim_radar`.
 #'
 #' Este helper refleja el contrato real que consume `reporte_ppt_plan()`, equivalente
 #' a pasar manualmente una lista con sublistas `args`.
@@ -3995,7 +4006,6 @@ p_presets <- function(
     radar_tabla      = list(),
     dim_heatmap      = list(),
     dim_radar        = list(),
-    dim_radar_tabla  = list(),
     numerico         = NULL,
     debug            = list(),
     ...
@@ -4034,7 +4044,6 @@ p_presets <- function(
     radar_tabla      = normalize_block(radar_tabla),
     dim_heatmap      = normalize_block(dim_heatmap),
     dim_radar        = normalize_block(dim_radar),
-    dim_radar_tabla  = normalize_block(dim_radar_tabla),
     debug            = normalize_block(debug)
   )
 
