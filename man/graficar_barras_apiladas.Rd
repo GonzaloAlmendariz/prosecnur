@@ -332,8 +332,12 @@ p <- graficar_barras_apiladas(
 Other graficador: 
 \code{\link{graficar_barras_agrupadas}()},
 \code{\link{graficar_barras_numericas}()},
+\code{\link{graficar_boxplot}()},
+\code{\link{graficar_foda_dimensiones}()},
 \code{\link{graficar_heatmap_dimensiones}()},
+\code{\link{graficar_pie}()},
 \code{\link{graficar_ppt}()},
+\code{\link{graficar_radar}()},
 \code{\link{graficar_radar_dimensiones}()},
 \code{\link{graficar_radar_tabla_dimensiones}()}
 }

@@ -78,6 +78,7 @@ reporte_indicadores(d, list(ind_demo), prefijo = "")
 \\code{\\link{reporte_frecuencias}}, \\code{\\link{reporte_cruces}}
 
 Other indicador: 
+\code{\link{graficar_foda_dimensiones}()},
 \code{\link{grupo}()},
 \code{\link{ind_helpers}},
 \code{\link{indicador}()},

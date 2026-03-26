@@ -665,6 +665,74 @@
   ), class = c("prosecnur_dim_context", "list"))
 }
 
+# =============================================================================
+# FODA helpers
+# =============================================================================
+
+#' @keywords internal
+.foda_compute_stats <- function(data, vars, labels, usar_pesos = TRUE, weight_col = NULL) {
+  n <- length(vars)
+  score_mean <- rep(NA_real_, n)
+  score_sd   <- rep(NA_real_, n)
+  n_valid    <- rep(0L, n)
+  usar_pesos <- isTRUE(usar_pesos)
+  w_all <- if (usar_pesos) .dim_safe_weights(data, weight_col = weight_col) else NULL
+
+  for (i in seq_len(n)) {
+    x <- suppressWarnings(as.numeric(data[[vars[i]]]))
+    if (!usar_pesos) {
+      x_ok <- x[!is.na(x) & is.finite(x)]
+      n_valid[i] <- length(x_ok)
+      if (length(x_ok) >= 1L) score_mean[i] <- mean(x_ok)
+      if (length(x_ok) >= 2L) score_sd[i]   <- stats::sd(x_ok)
+      next
+    }
+
+    w <- suppressWarnings(as.numeric(w_all))
+    ok <- !is.na(x) & is.finite(x) & !is.na(w) & is.finite(w) & w > 0
+    n_valid[i] <- sum(ok)
+    if (!any(ok)) next
+
+    x_ok <- x[ok]
+    w_ok <- w[ok]
+    sw <- sum(w_ok, na.rm = TRUE)
+    if (!is.finite(sw) || sw <= 0) next
+
+    mu <- sum(x_ok * w_ok, na.rm = TRUE) / sw
+    score_mean[i] <- mu
+    if (length(x_ok) >= 2L) {
+      # SD ponderada poblacional para comparar dispersión entre variables.
+      var_w <- sum(w_ok * (x_ok - mu)^2, na.rm = TRUE) / sw
+      score_sd[i] <- sqrt(max(0, var_w))
+    }
+  }
+
+  data.frame(
+    var        = vars,
+    label      = labels,
+    score_mean = score_mean,
+    score_sd   = score_sd,
+    n_valid    = n_valid,
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @keywords internal
+.foda_classify <- function(stats_df, corte_score, corte_sd) {
+  cuadrante <- rep(NA_character_, nrow(stats_df))
+  s   <- stats_df$score_mean
+  sd_ <- stats_df$score_sd
+  sd_[is.na(sd_)] <- 0
+
+  cuadrante[s >= corte_score & sd_ <  corte_sd] <- "fortaleza"
+  cuadrante[s >= corte_score & sd_ >= corte_sd] <- "oportunidad"
+  cuadrante[s <  corte_score & sd_ <  corte_sd] <- "debilidad"
+  cuadrante[s <  corte_score & sd_ >= corte_sd] <- "amenaza"
+
+  stats_df$cuadrante <- cuadrante
+  stats_df
+}
+
 #' @keywords internal
 .dim_empty_payload <- function(ctx, mode = NA_character_, objective = NA_character_) {
   list(

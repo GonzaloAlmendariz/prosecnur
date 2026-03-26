@@ -1141,7 +1141,7 @@ diapo <- function(slide, env = parent.frame()) {
 #'
 #' Devuelve el plan de diapositivas acumulado por `diapo()` en el entorno
 #' indicado. A diferencia de `reporte_ppt_plan()`, no borra el acumulador.
-#' Útil para capturar el plan y pasarlo luego a `plan_word()`
+#' Útil para capturar el plan y pasarlo luego a `reporte_word_plan()`
 #' sin necesidad de guardar el objeto pesado devuelto por `reporte_ppt_plan()`.
 #'
 #' @param env Entorno donde se buscará el acumulador (por defecto el entorno

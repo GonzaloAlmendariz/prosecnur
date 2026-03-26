@@ -10,11 +10,13 @@ p_presets(
   multi_apiladas = list(),
   barras_agrupadas = list(),
   barras_numericas = list(),
+  boxplot = list(),
   pie = list(),
   donut = list(),
   radar_tabla = list(),
   dim_heatmap = list(),
   dim_radar = list(),
+  dim_foda = list(),
   numerico = NULL,
   debug = list(),
   ...
@@ -31,11 +33,19 @@ p_presets(
 
 \item{barras_numericas}{Lista de parámetros por defecto para \code{graficar_barras_numericas()}.}
 
+\item{boxplot}{Lista de parámetros por defecto para \code{graficar_boxplot()}.}
+
 \item{pie}{Lista de parámetros por defecto para \code{graficar_pie(tipo_pie="pie")}.}
 
 \item{donut}{Lista de parámetros por defecto para \code{graficar_pie(tipo_pie="donut")}.}
 
 \item{radar_tabla}{Lista de parámetros por defecto para \code{graficar_radar()}.}
+
+\item{dim_heatmap}{Lista de parámetros por defecto para \code{graficar_heatmap_dimensiones()}.}
+
+\item{dim_radar}{Lista de parámetros por defecto para \code{graficar_radar_dimensiones()}.}
+
+\item{dim_foda}{Lista de parámetros por defecto para \code{graficar_foda_dimensiones()}.}
 
 \item{numerico}{Alias legado de \code{barras_numericas}. Se mantiene por compatibilidad.}
 
@@ -49,7 +59,8 @@ Objeto con clase \code{"ppt_presets"}.
 \description{
 Construye un objeto de presets que centraliza configuraciones por tipo:
 \code{base}, \code{barras_apiladas}, \code{multi_apiladas}, \code{barras_agrupadas},
-\code{barras_numericas}, \code{pie}, \code{donut}, \code{radar_tabla}, \code{dim_heatmap} y \code{dim_radar}.
+\code{barras_numericas}, \code{boxplot}, \code{pie}, \code{donut}, \code{radar_tabla}, \code{dim_heatmap},
+\code{dim_radar} y \code{dim_foda}.
 
 Este helper refleja el contrato real que consume \code{reporte_ppt_plan()}, equivalente
 a pasar manualmente una lista con sublistas \code{args}.
@@ -63,6 +74,8 @@ Other reporte:
 \code{\link{p_barras_agrupadas}()},
 \code{\link{p_barras_apiladas}()},
 \code{\link{p_barras_multiapiladas}()},
+\code{\link{p_boxplot}()},
+\code{\link{p_dim_foda}()},
 \code{\link{p_dim_heatmap}()},
 \code{\link{p_dim_radar}()},
 \code{\link{p_donut}()},
@@ -76,20 +89,15 @@ Other reporte:
 \code{\link{p_slide_section}()},
 \code{\link{p_slide_title}()},
 \code{\link{p_text}()},
-\code{\link{plan_word}()},
 \code{\link{reporte_codebook}()},
 \code{\link{reporte_cruces}()},
 \code{\link{reporte_data}()},
 \code{\link{reporte_enumeradores}()},
 \code{\link{reporte_frecuencias}()},
 \code{\link{reporte_instrumento}()},
-\code{\link{reporte_ppt}()},
-\code{\link{reporte_ppt_cruces}()},
-\code{\link{reporte_ppt_ops}()},
 \code{\link{reporte_ppt_plan}()},
 \code{\link{reporte_spss}()},
-\code{\link{reporte_word}()},
-\code{\link{reporte_word_cruces}()},
+\code{\link{reporte_word_plan}()},
 \code{\link{w_presets}()}
 }
 \concept{reporte}

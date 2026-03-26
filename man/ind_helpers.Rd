@@ -273,6 +273,7 @@ ind_todas_obs(P33_1, P33_2)
 }
 \seealso{
 Other indicador: 
+\code{\link{graficar_foda_dimensiones}()},
 \code{\link{grupo}()},
 \code{\link{indicador}()},
 \code{\link{indice}()},

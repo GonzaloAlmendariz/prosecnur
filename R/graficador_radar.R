@@ -12,6 +12,133 @@
 #    - Headers centrados (incluye 1ra celda) y cuerpo: 1ra col izquierda, demás centradas
 # =============================================================================
 
+#' Graficar radar comparativo con canvas, tabla derecha y exportación
+#'
+#' Construye un gráfico radar (spider chart) para comparar grupos sobre varios
+#' ejes y, opcionalmente, compone una tabla de porcentajes en el lado derecho.
+#' El insumo esperado es un `data.frame` en formato largo con una columna de eje,
+#' una de grupo y una de valor.
+#'
+#' La función está preparada para flujo editorial en PPT/Word:
+#' \itemize{
+#'   \item modo estándar (`usar_canvas = FALSE`) para obtener un `ggplot` directo;
+#'   \item modo canvas (`usar_canvas = TRUE`) para separar encabezado, panel,
+#'   leyenda y pie con control fino de layout;
+#'   \item exportación a `png`, `ppt` o `word` desde el mismo llamado.
+#' }
+#'
+#' Para exportaciones vectoriales (`ppt`/`word`), aplica salvaguardas internas
+#' de estabilidad (sanitización de coordenadas y límites seguros de viewport).
+#'
+#' @param data `data.frame` o `tibble` con columnas de eje, grupo y valor.
+#' @param var_eje,var_grupo,var_valor Nombres de columnas para eje, serie/grupo y valor.
+#'
+#' @param escala_valor Escala de `var_valor`: `"proporcion_1"` (0-1) o
+#'   `"proporcion_100"` (0-100).
+#' @param limites Vector numérico de longitud 2 para límites radiales
+#'   (`c(min, max)`). Si es `NULL`, se calcula automáticamente.
+#' @param cortes_grilla Número de anillos de grilla.
+#'
+#' @param mostrar_tela Si `TRUE`, dibuja la malla poligonal de fondo.
+#' @param mostrar_radios Si `TRUE`, dibuja radios desde el centro a cada eje.
+#' @param mostrar_niveles Si `TRUE`, muestra etiquetas de nivel radial.
+#'
+#' @param wrap_ejes Ancho de wrapping para etiquetas de ejes.
+#' @param eje_label_mult Multiplicador radial para separar etiquetas del borde.
+#' @param radar_scale Escala general del radar dentro del panel (clamp interno).
+#'
+#' @param mostrar_puntos Si `TRUE`, dibuja puntos en cada vértice.
+#' @param size_linea,size_punto Tamaños de líneas y puntos.
+#' @param alpha_relleno Transparencia del relleno cuando `rellenar_poligono = TRUE`.
+#' @param rellenar_poligono Si `TRUE`, rellena polígonos por grupo.
+#'
+#' @param etiquetas_series Vector nombrado para renombrar grupos en leyenda
+#'   (`nombre_original = "Etiqueta final"`).
+#' @param colores_series Vector nombrado de colores por etiqueta final de grupo.
+#'
+#' @param mostrar_leyenda Si `TRUE`, muestra la leyenda.
+#' @param leyenda_posicion Posición de leyenda: `"abajo"` o `"derecha"`.
+#' @param legend_n_por_fila Ítems por fila de leyenda.
+#' @param legend_key_cm Tamaño de key de leyenda (cm).
+#' @param legend_espaciado Espaciado lateral del texto de leyenda (pt).
+#' @param legend_key_spacing_x_cm Espaciado horizontal entre keys (cm).
+#'
+#' @param titulo,subtitulo,nota_pie Textos del gráfico.
+#' @param pos_titulo,pos_nota_pie Alineación horizontal de encabezado y pie.
+#' @param textos_negrita Tokens para forzar negrita (por ejemplo `"titulo"`,
+#'   `"leyenda"`, `"ejes"`).
+#' @param color_titulo,size_titulo,color_subtitulo,size_subtitulo
+#'   Estilos de título/subtítulo.
+#' @param color_nota_pie,size_nota_pie Estilos de pie.
+#' @param color_leyenda,size_leyenda Estilos de texto de leyenda.
+#' @param color_ejes,size_ejes Estilos de etiquetas de ejes.
+#' @param color_grilla,color_radios Colores de malla y radios.
+#' @param color_fondo Color de fondo del gráfico/canvas.
+#'
+#' @param mostrar_tabla_derecha Si `TRUE`, agrega tabla a la derecha del radar.
+#' @param titulo_tabla Título de la primera columna de la tabla.
+#' @param umbral_rojo_pct Umbral (%) para coloreado condicional en tabla.
+#' @param tabla_digits Decimales para porcentajes en tabla.
+#' @param tabla_header_fill,tabla_body_fill Colores de fondo en encabezado y cuerpo.
+#' @param tabla_grid_col Color de líneas de la tabla.
+#' @param tabla_text_blue Color principal de texto en tabla.
+#' @param tabla_font_family Familia tipográfica para tabla.
+#' @param tabla_header_size,tabla_body_size Tamaños de texto de encabezado/cuerpo.
+#' @param tabla_firstcol_bold Si `TRUE`, pone negrita en primera columna.
+#' @param tabla_firstcol_size Tamaño de texto de primera columna.
+#' @param tabla_firstcol_wrap Wrapping de primera columna (caracteres).
+#' @param tabla_firstcol_indent_npc Sangría horizontal de primera columna (npc).
+#' @param tabla_padding_mm Padding interno de celdas (mm).
+#' @param tabla_ph_ancho Ancho relativo del placeholder de tabla.
+#' @param tabla_ph_gap Separación horizontal entre panel radar y tabla.
+#' @param tabla_ph_margin_top,tabla_ph_margin_bot Márgenes verticales de tabla en canvas.
+#' @param tabla_firstcol_frac Proporción de ancho de la primera columna.
+#' @param tabla_wrap_header Wrapping de headers de columnas.
+#' @param tabla_height_frac Altura relativa usada por la tabla dentro de su placeholder.
+#' @param tabla_line_lwd Grosor de líneas de tabla.
+#' @param tabla_auto_fit Si `TRUE`, autoajusta escala de tabla al placeholder.
+#' @param tabla_fit_pad Factor de padding extra en autoajuste.
+#' @param tabla_allow_upscale Si `TRUE`, permite escalar tabla hacia arriba.
+#' @param tabla_clip Si `TRUE`, recorta tabla al placeholder para evitar desbordes.
+#'
+#' @param usar_canvas Si `TRUE`, compone encabezado/panel/leyenda/pie con `cowplot`.
+#' @param canvas_h_header_in,canvas_h_legend_in,canvas_h_caption_in
+#'   Alturas (in) de encabezado, leyenda y pie.
+#' @param canvas_h_panel_in Altura (in) del panel. Si `NULL`, se estima.
+#' @param alto_por_eje Alto sugerido (in) por eje para estimación de panel.
+#' @param encabezado_desplazamiento_in Ajuste vertical del encabezado.
+#' @param encabezado_separacion_in Separación vertical título/subtítulo.
+#' @param leyenda_desplazamiento_in Ajuste vertical de la leyenda.
+#' @param centro_cowplot Centro horizontal opcional para leyenda en canvas.
+#'
+#' @param debug_ph_bordes Si `TRUE`, dibuja bordes de depuración de placeholders.
+#' @param debug_ph_col,debug_ph_lwd Color y grosor de bordes de depuración.
+#'
+#' @param exportar Tipo de salida: `"rplot"`, `"png"`, `"ppt"` o `"word"`.
+#' @param path_salida Ruta de salida cuando `exportar != "rplot"`.
+#' @param ancho,alto,dpi Dimensiones y resolución de exportación.
+#' @param ppt_append Si `TRUE` y el archivo existe, agrega diapositiva/página.
+#' @param ppt_layout,ppt_master Layout y master en exportación PPT.
+#'
+#' @param debug_ppt Si `TRUE`, usa ruta de exportación aislada para depuración de PPT.
+#' @param debug_ppt_log Ruta del log de depuración cuando `debug_ppt = TRUE`.
+#'
+#' @return Si `exportar = "rplot"`, devuelve un objeto gráfico (`ggplot` o canvas
+#'   de `cowplot`). En otros modos, exporta a archivo y retorna invisiblemente.
+#'
+#' @examples
+#' \dontrun{
+#' graficar_radar(
+#'   data = df_radar,
+#'   var_eje = "eje",
+#'   var_grupo = "grupo",
+#'   var_valor = "valor",
+#'   escala_valor = "proporcion_100",
+#'   titulo = "Radar comparativo",
+#'   mostrar_tabla_derecha = TRUE
+#' )
+#' }
+#'
 #' @family graficador
 #' @export
 graficar_radar <- function(

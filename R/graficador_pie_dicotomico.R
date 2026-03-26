@@ -10,6 +10,89 @@
 #   * espaciado_vertical_cm -> separación vertical (legend.key.spacing.y)
 # =============================================================================
 
+#' Graficar pie/donut con canvas y exportación
+#'
+#' Construye gráficos circulares tipo `pie` o `donut` a partir de una tabla con
+#' categorías y proporciones. Si los valores vienen en escala 0-100, se
+#' normalizan automáticamente a 0-1.
+#'
+#' El flujo incluye:
+#' \itemize{
+#'   \item ordenamiento y recorte opcional por `top_k` (con categoría `"Otros"`),
+#'   \item etiquetas de porcentaje internas con umbral de visibilidad,
+#'   \item leyenda configurable y composición opcional por canvas (`cowplot`),
+#'   \item exportación directa a `png`, `ppt` o `word`.
+#' }
+#'
+#' @param data `data.frame` o `tibble` con columnas de categoría y porcentaje.
+#' @param var_categoria Nombre de columna con categorías.
+#' @param var_pct Nombre de columna con proporciones/porcentajes.
+#'
+#' @param tipo_pie Tipo de gráfico: `"donut"` o `"pie"`.
+#' @param donut_hole Tamaño del hueco del donut (0-1, clamp interno).
+#' @param donut_radio_etiqueta_out,donut_label_nudge_out Parámetros legacy de
+#'   compatibilidad para etiquetas externas en donut (se conservan por API).
+#'
+#' @param mostrar_etiquetas_pct Si `TRUE`, muestra etiquetas de porcentaje.
+#' @param size_etiquetas_pct,color_etiquetas_pct Estilo de etiquetas de porcentaje.
+#' @param etiquetas_negrita Si `TRUE`, aplica negrita a etiquetas de porcentaje.
+#' @param decimales_pct Decimales para el texto porcentual.
+#' @param umbral_etiqueta_pct Umbral mínimo (0-1) para mostrar etiqueta.
+#' @param pie_radio_etiqueta Posición radial relativa de etiquetas internas.
+#' @param nudge_radial_etiqueta Ajuste radial adicional (positivo hacia afuera).
+#'
+#' @param ordenar_categorias Orden del gráfico: `"desc"`, `"asc"` o `"ninguno"`.
+#' @param top_k Número de categorías top a conservar antes de agrupar.
+#' @param etiqueta_otros Etiqueta usada para agregación de categorías restantes.
+#'
+#' @param colores_categorias Vector de colores opcional por categoría.
+#'
+#' @param titulo,subtitulo,nota_pie Textos del gráfico.
+#' @param pos_titulo,pos_subtitulo,pos_nota_pie Alineación horizontal de textos.
+#' @param y_titulo,y_subtitulo Posición vertical relativa dentro del bloque de título.
+#' @param textos_negrita Tokens para forzar negrita por componente.
+#' @param color_titulo,size_titulo,color_subtitulo,size_subtitulo
+#'   Estilos de título/subtítulo.
+#' @param color_nota_pie,size_nota_pie Estilos de pie.
+#'
+#' @param color_leyenda,size_leyenda Estilos de texto de leyenda.
+#' @param tamano_key_cm Tamaño de key de leyenda (cm).
+#' @param espaciado_vertical_cm Espaciado vertical entre ítems de leyenda (cm).
+#' @param mostrar_leyenda Si `TRUE`, muestra leyenda.
+#' @param leyenda_posicion Posición de leyenda: `"derecha"` o `"abajo"`.
+#' @param invertir_leyenda Si `TRUE`, invierte orden de la leyenda.
+#' @param ncol_leyenda_bajo Número de columnas cuando leyenda está abajo.
+#'
+#' @param usar_canvas Si `TRUE`, compone título/panel/leyenda/pie con `cowplot`.
+#' @param canvas_h_title,canvas_h_caption Alturas relativas de título y pie.
+#' @param canvas_w_legend_right Ancho relativo de leyenda cuando está a la derecha.
+#' @param canvas_h_legend_bottom Altura relativa de leyenda cuando está abajo.
+#' @param canvas_pad_top Padding superior del canvas.
+#'
+#' @param debug_ph_bordes Si `TRUE`, dibuja bordes de depuración.
+#' @param debug_ph_col,debug_ph_lwd Color y grosor de bordes de depuración.
+#'
+#' @param exportar Tipo de salida: `"rplot"`, `"png"`, `"ppt"` o `"word"`.
+#' @param path_salida Ruta de salida cuando `exportar != "rplot"`.
+#' @param ancho,alto,dpi Dimensiones y resolución de exportación.
+#' @param color_fondo Color de fondo.
+#'
+#' @return Si `exportar = "rplot"`, devuelve un objeto gráfico (`ggplot` o
+#'   canvas `cowplot`). En otros modos, exporta a archivo y retorna
+#'   invisiblemente.
+#'
+#' @examples
+#' \dontrun{
+#' graficar_pie(
+#'   data = df_pie,
+#'   var_categoria = "opcion",
+#'   var_pct = "pct",
+#'   tipo_pie = "donut",
+#'   titulo = "Distribución",
+#'   mostrar_etiquetas_pct = TRUE
+#' )
+#' }
+#'
 #' @family graficador
 #' @export
 graficar_pie <- function(

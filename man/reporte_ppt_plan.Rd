@@ -32,8 +32,9 @@ hay una sola fuente.}
 
 \item{presets}{Lista de presets por tipo de gráfico. El contrato esperado es
 \code{base$args}, \code{barras_apiladas$args}, \code{multi_apiladas$args},
-\code{barras_agrupadas$args}, \code{barras_numericas$args}, \code{pie$args},
-\code{donut$args}, \code{radar_tabla$args}, \code{dim_heatmap$args} y \code{dim_radar$args}.
+\code{barras_agrupadas$args}, \code{barras_numericas$args}, \code{boxplot$args}, \code{pie$args},
+\code{donut$args}, \code{radar_tabla$args}, \code{dim_heatmap$args},
+\code{dim_radar$args} y \code{dim_foda$args}.
 También puede construirse con \code{p_presets()}.}
 
 \item{plan}{Lista de slides ya construidos con \code{p_plan()} o \code{list(diapo_001=..., ...)}.
@@ -90,6 +91,8 @@ Other reporte:
 \code{\link{p_barras_agrupadas}()},
 \code{\link{p_barras_apiladas}()},
 \code{\link{p_barras_multiapiladas}()},
+\code{\link{p_boxplot}()},
+\code{\link{p_dim_foda}()},
 \code{\link{p_dim_heatmap}()},
 \code{\link{p_dim_radar}()},
 \code{\link{p_donut}()},
@@ -104,19 +107,14 @@ Other reporte:
 \code{\link{p_slide_section}()},
 \code{\link{p_slide_title}()},
 \code{\link{p_text}()},
-\code{\link{plan_word}()},
 \code{\link{reporte_codebook}()},
 \code{\link{reporte_cruces}()},
 \code{\link{reporte_data}()},
 \code{\link{reporte_enumeradores}()},
 \code{\link{reporte_frecuencias}()},
 \code{\link{reporte_instrumento}()},
-\code{\link{reporte_ppt}()},
-\code{\link{reporte_ppt_cruces}()},
-\code{\link{reporte_ppt_ops}()},
 \code{\link{reporte_spss}()},
-\code{\link{reporte_word}()},
-\code{\link{reporte_word_cruces}()},
+\code{\link{reporte_word_plan}()},
 \code{\link{w_presets}()}
 }
 \concept{reporte}

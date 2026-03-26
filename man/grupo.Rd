@@ -18,6 +18,7 @@ ya no requiere \code{grupo()}.
 }
 \seealso{
 Other indicador: 
+\code{\link{graficar_foda_dimensiones}()},
 \code{\link{ind_helpers}},
 \code{\link{indicador}()},
 \code{\link{indice}()},

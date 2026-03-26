@@ -23,6 +23,7 @@ Constructor de un indice de segundo nivel. Un indice agrupa subindices
 }
 \seealso{
 Other indicador: 
+\code{\link{graficar_foda_dimensiones}()},
 \code{\link{grupo}()},
 \code{\link{ind_helpers}},
 \code{\link{indicador}()},

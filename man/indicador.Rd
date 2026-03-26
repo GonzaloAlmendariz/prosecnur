@@ -52,6 +52,7 @@ Compatibilidad (deprecada): también acepta la vía antigua
 }
 \seealso{
 Other indicador: 
+\code{\link{graficar_foda_dimensiones}()},
 \code{\link{grupo}()},
 \code{\link{ind_helpers}},
 \code{\link{indice}()},

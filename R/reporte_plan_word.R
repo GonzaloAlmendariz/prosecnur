@@ -61,7 +61,7 @@ w_presets <- function(
 #' @return Invisiblemente una lista con \code{doc}, \code{plan}, \code{log}.
 #' @family reporte
 #' @export
-plan_word <- function(
+reporte_word_plan <- function(
     data,
     instrumento        = NULL,
     path_docx          = "reporte.docx",

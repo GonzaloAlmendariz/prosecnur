@@ -44,6 +44,7 @@ nivel a partir de esos subindices. Requiere que \code{data} sea la salida de
 \code{\link[=graficar_radar_dimensiones]{graficar_radar_dimensiones()}}
 
 Other indicador: 
+\code{\link{graficar_foda_dimensiones}()},
 \code{\link{grupo}()},
 \code{\link{ind_helpers}},
 \code{\link{indicador}()},

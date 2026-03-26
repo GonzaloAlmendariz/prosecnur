@@ -75,6 +75,7 @@ Reglas para categorias especiales:
 \code{\link[=graficar_radar_dimensiones]{graficar_radar_dimensiones()}}
 
 Other indicador: 
+\code{\link{graficar_foda_dimensiones}()},
 \code{\link{grupo}()},
 \code{\link{ind_helpers}},
 \code{\link{indicador}()},

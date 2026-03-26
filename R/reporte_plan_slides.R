@@ -1100,6 +1100,56 @@ p_numerico <- function(
   el
 }
 
+#' @title Boxplot numerico por categoria
+#'
+#' @param var Variable numerica a resumir en el boxplot.
+#' @param cruce Variable categorica opcional para segmentar cajas.
+#' @param titulo Titulo opcional del elemento.
+#' @param overrides Lista de overrides para el renderer/graficador.
+#' @param base Lista de opciones de base (reservado para consistencia de API).
+#' @param filtros Lista nombrada de filtros por igualdad/inclusion.
+#'
+#' @return Objeto `"ppt_element"`.
+#' @family reporte
+#' @export
+p_boxplot <- function(
+    var,
+    cruce = NULL,
+    titulo = NULL,
+    overrides = list(),
+    base = list(),
+    filtros = list()
+) {
+  if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
+    stop("`var` debe ser character(1) no vacio.", call. = FALSE)
+  }
+  var <- trimws(var)
+
+  if (!is.null(cruce)) {
+    if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
+      stop("`cruce` debe ser NULL o character(1) no vacio.", call. = FALSE)
+    }
+    cruce <- trimws(cruce)
+  }
+
+  titulo <- .ppt_norm_text1(titulo, blank = NULL)
+  if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
+  if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+  filtros <- .ppt_norm_filters(filtros)
+
+  el <- list(
+    .element_type = "boxplot",
+    var           = var,
+    cruce         = cruce,
+    title_slide   = titulo,
+    overrides     = overrides,
+    base          = base,
+    filtros       = filtros
+  )
+  class(el) <- c("ppt_element", "list")
+  el
+}
+
 #' @title Radar + tabla derecha (SM o Top/Bottom 2 Box)
 #' @param filtros Lista nombrada de filtros por igualdad/inclusión.
 #' @family reporte
@@ -1418,6 +1468,247 @@ p_dim_radar <- function(
     filtros = filtros,
     iter_var = iter_var,
     iter_level = iter_level,
+    title_slide = .ppt_norm_text1(titulo, blank = NULL),
+    overrides = overrides,
+    base = base
+  )
+  class(el) <- c("ppt_element", "list")
+  el
+}
+
+#' @title Matriz FODA de dimensiones
+#' @family reporte
+#' @export
+p_dim_foda <- function(
+    nivel = c("subindices", "indicadores"),
+    objetivo = NULL,
+    modo_foda = c("matriz", "dispersion"),
+    cruce = NULL,
+    incluir_total = TRUE,
+    solo_indice_general_cruce = FALSE,
+    filtros = list(),
+    usar_pesos = TRUE,
+    ancho_tarjeta_base_rel = 0.72,
+    factor_ancho_matriz = 1.00,
+    factor_ancho_dispersion = 0.72,
+    ancho_recuadro_rel = NULL,
+    ancho_recuadro_auto = FALSE,
+    ancho_chip_rel = 0.18,
+    sufijo_puntaje = " pts",
+    cortes_chip = NULL,
+    tamano_texto_tarjeta = NULL,
+    tamano_letra_recuadro = NULL,
+    tamano_texto_chip = NULL,
+    tarjetas_color_solido = TRUE,
+    titulos_areas_foda = NULL,
+    mostrar_subtitulo_area = TRUE,
+    sd_tecnico = TRUE,
+    color_indice_total = "#FF6A00",
+    disposicion_recuadro = c("dos_lineas", "una_linea", "sin_cruce"),
+    etiqueta_cruce_en_dos_lineas = NULL,
+    jitter_x_rel = 0.06,
+    jitter_y_rel = 0.03,
+    iter_separacion = 12L,
+    factor_reduccion_tarjeta_dispersion = 0.85,
+    chip_width_rel = NULL,
+    score_suffix = NULL,
+    titulo = NULL,
+    overrides = list(),
+    base = list()
+) {
+  nivel <- match.arg(nivel)
+  modo_foda <- match.arg(modo_foda)
+  disposicion_recuadro <- as.character(disposicion_recuadro %||% "dos_lineas")[1]
+
+  if (!is.null(objetivo)) {
+    if (!is.character(objetivo) || length(objetivo) != 1L || !nzchar(trimws(objetivo))) {
+      stop("`objetivo` debe ser NULL o character(1) no vacio.", call. = FALSE)
+    }
+    objetivo <- trimws(objetivo)
+  }
+
+  if (identical(nivel, "indicadores") && (is.null(objetivo) || !nzchar(objetivo))) {
+    stop("`objetivo` es requerido cuando `nivel = 'indicadores'`.", call. = FALSE)
+  }
+  if (!is.null(cruce)) {
+    if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
+      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    cruce <- trimws(cruce)
+  }
+  if (identical(modo_foda, "matriz") && !is.null(cruce)) {
+    stop("`cruce` solo se admite con `modo_foda = 'dispersion'`.", call. = FALSE)
+  }
+  if (!is.logical(incluir_total) || length(incluir_total) != 1L || is.na(incluir_total)) {
+    stop("`incluir_total` debe ser logical(1).", call. = FALSE)
+  }
+  if (!is.logical(solo_indice_general_cruce) || length(solo_indice_general_cruce) != 1L || is.na(solo_indice_general_cruce)) {
+    stop("`solo_indice_general_cruce` debe ser logical(1).", call. = FALSE)
+  }
+
+  if (!is.logical(usar_pesos) || length(usar_pesos) != 1L || is.na(usar_pesos)) {
+    stop("`usar_pesos` debe ser logical(1).", call. = FALSE)
+  }
+  if (!is.null(chip_width_rel)) ancho_chip_rel <- chip_width_rel
+  if (!is.null(score_suffix)) sufijo_puntaje <- score_suffix
+
+  ancho_tarjeta_base_rel <- suppressWarnings(as.numeric(ancho_tarjeta_base_rel)[1])
+  if (!is.finite(ancho_tarjeta_base_rel) || is.na(ancho_tarjeta_base_rel) || ancho_tarjeta_base_rel <= 0) {
+    stop("`ancho_tarjeta_base_rel` debe ser numérico positivo.", call. = FALSE)
+  }
+  factor_ancho_matriz <- suppressWarnings(as.numeric(factor_ancho_matriz)[1])
+  if (!is.finite(factor_ancho_matriz) || is.na(factor_ancho_matriz) || factor_ancho_matriz <= 0) {
+    stop("`factor_ancho_matriz` debe ser numérico positivo.", call. = FALSE)
+  }
+  factor_ancho_dispersion <- suppressWarnings(as.numeric(factor_ancho_dispersion)[1])
+  if (!is.finite(factor_ancho_dispersion) || is.na(factor_ancho_dispersion) || factor_ancho_dispersion <= 0) {
+    stop("`factor_ancho_dispersion` debe ser numérico positivo.", call. = FALSE)
+  }
+  if (!is.null(ancho_recuadro_rel)) {
+    ancho_recuadro_rel <- suppressWarnings(as.numeric(ancho_recuadro_rel)[1])
+    if (!is.finite(ancho_recuadro_rel) || is.na(ancho_recuadro_rel) || ancho_recuadro_rel <= 0) {
+      stop("`ancho_recuadro_rel` debe ser NULL o numérico positivo.", call. = FALSE)
+    }
+  }
+  if (!is.logical(ancho_recuadro_auto) || length(ancho_recuadro_auto) != 1L || is.na(ancho_recuadro_auto)) {
+    stop("`ancho_recuadro_auto` debe ser logical(1).", call. = FALSE)
+  }
+  ancho_chip_rel <- suppressWarnings(as.numeric(ancho_chip_rel)[1])
+  if (!is.finite(ancho_chip_rel) || is.na(ancho_chip_rel) || ancho_chip_rel <= 0) {
+    stop("`ancho_chip_rel` debe ser numérico positivo.", call. = FALSE)
+  }
+  sufijo_puntaje <- as.character(sufijo_puntaje %||% " pts")[1]
+  if (is.na(sufijo_puntaje)) sufijo_puntaje <- " pts"
+  if (!is.null(tamano_letra_recuadro)) tamano_texto_tarjeta <- tamano_letra_recuadro
+  if (!is.null(cortes_chip)) {
+    cortes_chip <- suppressWarnings(as.numeric(cortes_chip))
+    cortes_chip <- cortes_chip[is.finite(cortes_chip)]
+    if (length(cortes_chip) < 2L) {
+      stop("`cortes_chip` debe ser NULL o numérico con al menos 2 valores.", call. = FALSE)
+    }
+    cortes_chip <- sort(unique(cortes_chip))[1:2]
+  }
+  if (!is.null(tamano_texto_tarjeta)) {
+    tamano_texto_tarjeta <- suppressWarnings(as.numeric(tamano_texto_tarjeta)[1])
+    if (!is.finite(tamano_texto_tarjeta) || is.na(tamano_texto_tarjeta) || tamano_texto_tarjeta <= 0) {
+      stop("`tamano_texto_tarjeta` debe ser NULL o numérico positivo.", call. = FALSE)
+    }
+  }
+  if (!is.null(tamano_texto_chip)) {
+    tamano_texto_chip <- suppressWarnings(as.numeric(tamano_texto_chip)[1])
+    if (!is.finite(tamano_texto_chip) || is.na(tamano_texto_chip) || tamano_texto_chip <= 0) {
+      stop("`tamano_texto_chip` debe ser NULL o numérico positivo.", call. = FALSE)
+    }
+  }
+  if (!is.logical(tarjetas_color_solido) || length(tarjetas_color_solido) != 1L || is.na(tarjetas_color_solido)) {
+    stop("`tarjetas_color_solido` debe ser logical(1).", call. = FALSE)
+  }
+  if (!is.logical(mostrar_subtitulo_area) || length(mostrar_subtitulo_area) != 1L || is.na(mostrar_subtitulo_area)) {
+    stop("`mostrar_subtitulo_area` debe ser logical(1).", call. = FALSE)
+  }
+  if (!is.logical(sd_tecnico) || length(sd_tecnico) != 1L || is.na(sd_tecnico)) {
+    stop("`sd_tecnico` debe ser logical(1).", call. = FALSE)
+  }
+  if (!is.null(etiqueta_cruce_en_dos_lineas)) {
+    if (!is.logical(etiqueta_cruce_en_dos_lineas) || length(etiqueta_cruce_en_dos_lineas) != 1L || is.na(etiqueta_cruce_en_dos_lineas)) {
+      stop("`etiqueta_cruce_en_dos_lineas` debe ser NULL o logical(1).", call. = FALSE)
+    }
+    disposicion_recuadro <- if (isTRUE(etiqueta_cruce_en_dos_lineas)) "dos_lineas" else "una_linea"
+  }
+  if (!nzchar(disposicion_recuadro) || is.na(disposicion_recuadro)) disposicion_recuadro <- "dos_lineas"
+  disposicion_recuadro <- match.arg(disposicion_recuadro, c("dos_lineas", "una_linea", "sin_cruce"))
+  color_indice_total <- as.character(color_indice_total %||% "#FF6A00")[1]
+  if (!nzchar(trimws(color_indice_total)) || is.na(color_indice_total)) {
+    stop("`color_indice_total` debe ser character(1) no vacío.", call. = FALSE)
+  }
+  if (!is.null(titulos_areas_foda)) {
+    if (!is.character(titulos_areas_foda) || !length(titulos_areas_foda)) {
+      stop("`titulos_areas_foda` debe ser NULL o un vector character.", call. = FALSE)
+    }
+    titulos_areas_foda <- as.character(titulos_areas_foda)
+    llaves <- c("fortaleza", "oportunidad", "debilidad", "amenaza")
+    nms <- names(titulos_areas_foda %||% character(0))
+    if (is.null(nms) || !any(nzchar(trimws(nms)))) {
+      if (length(titulos_areas_foda) < 4L) {
+        stop("`titulos_areas_foda` debe tener 4 valores o venir nombrado por cuadrante.", call. = FALSE)
+      }
+      titulos_areas_foda <- titulos_areas_foda[seq_along(llaves)]
+      names(titulos_areas_foda) <- llaves
+    } else {
+      nms <- tolower(trimws(as.character(nms)))
+      out <- setNames(rep(NA_character_, length(llaves)), llaves)
+      for (k in llaves) {
+        hit <- which(nms == k)
+        if (length(hit)) out[[k]] <- titulos_areas_foda[hit[1]]
+      }
+      if (all(is.na(out))) {
+        stop("`titulos_areas_foda` nombrado debe usar: fortaleza, oportunidad, debilidad, amenaza.", call. = FALSE)
+      }
+      titulos_areas_foda <- out
+    }
+  }
+  jitter_x_rel <- suppressWarnings(as.numeric(jitter_x_rel)[1])
+  if (!is.finite(jitter_x_rel) || is.na(jitter_x_rel) || jitter_x_rel < 0) {
+    stop("`jitter_x_rel` debe ser numérico en [0, +Inf).", call. = FALSE)
+  }
+  jitter_y_rel <- suppressWarnings(as.numeric(jitter_y_rel)[1])
+  if (!is.finite(jitter_y_rel) || is.na(jitter_y_rel) || jitter_y_rel < 0) {
+    stop("`jitter_y_rel` debe ser numérico en [0, +Inf).", call. = FALSE)
+  }
+  iter_separacion <- suppressWarnings(as.integer(iter_separacion)[1])
+  if (!is.finite(iter_separacion) || is.na(iter_separacion) || iter_separacion < 0L) {
+    stop("`iter_separacion` debe ser entero >= 0.", call. = FALSE)
+  }
+  factor_reduccion_tarjeta_dispersion <- suppressWarnings(as.numeric(factor_reduccion_tarjeta_dispersion)[1])
+  if (!is.finite(factor_reduccion_tarjeta_dispersion) ||
+      is.na(factor_reduccion_tarjeta_dispersion) ||
+      factor_reduccion_tarjeta_dispersion <= 0) {
+    stop("`factor_reduccion_tarjeta_dispersion` debe ser numérico positivo.", call. = FALSE)
+  }
+
+  filtros <- .ppt_norm_filters(filtros)
+  if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
+  if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+  if (is.null(overrides$modo_foda)) overrides$modo_foda <- modo_foda
+  if (!is.null(cruce) && is.null(overrides$cruce)) overrides$cruce <- cruce
+  if (is.null(overrides$incluir_total)) overrides$incluir_total <- isTRUE(incluir_total)
+  if (is.null(overrides$solo_indice_general_cruce)) overrides$solo_indice_general_cruce <- isTRUE(solo_indice_general_cruce)
+  if (is.null(overrides$ancho_tarjeta_base_rel)) overrides$ancho_tarjeta_base_rel <- ancho_tarjeta_base_rel
+  if (is.null(overrides$factor_ancho_matriz)) overrides$factor_ancho_matriz <- factor_ancho_matriz
+  if (is.null(overrides$factor_ancho_dispersion)) overrides$factor_ancho_dispersion <- factor_ancho_dispersion
+  if (!is.null(ancho_recuadro_rel) && is.null(overrides$ancho_recuadro_rel)) overrides$ancho_recuadro_rel <- ancho_recuadro_rel
+  if (is.null(overrides$ancho_recuadro_auto)) overrides$ancho_recuadro_auto <- isTRUE(ancho_recuadro_auto)
+  if (is.null(overrides$ancho_chip_rel)) overrides$ancho_chip_rel <- ancho_chip_rel
+  if (is.null(overrides$sufijo_puntaje)) overrides$sufijo_puntaje <- sufijo_puntaje
+  if (!is.null(cortes_chip) && is.null(overrides$cortes_chip)) overrides$cortes_chip <- cortes_chip
+  if (!is.null(tamano_texto_tarjeta) && is.null(overrides$tamano_texto_tarjeta)) overrides$tamano_texto_tarjeta <- tamano_texto_tarjeta
+  if (!is.null(tamano_texto_chip) && is.null(overrides$tamano_texto_chip)) overrides$tamano_texto_chip <- tamano_texto_chip
+  if (is.null(overrides$tarjetas_color_solido)) overrides$tarjetas_color_solido <- isTRUE(tarjetas_color_solido)
+  if (!is.null(titulos_areas_foda) && is.null(overrides$titulos_areas_foda)) overrides$titulos_areas_foda <- titulos_areas_foda
+  if (is.null(overrides$mostrar_subtitulo_area)) overrides$mostrar_subtitulo_area <- isTRUE(mostrar_subtitulo_area)
+  if (is.null(overrides$sd_tecnico)) overrides$sd_tecnico <- isTRUE(sd_tecnico)
+  if (is.null(overrides$color_indice_total)) overrides$color_indice_total <- color_indice_total
+  if (!is.null(overrides$etiqueta_cruce_en_dos_lineas) && is.null(overrides$disposicion_recuadro)) {
+    overrides$disposicion_recuadro <- if (isTRUE(overrides$etiqueta_cruce_en_dos_lineas)) "dos_lineas" else "una_linea"
+  }
+  if (is.null(overrides$disposicion_recuadro)) overrides$disposicion_recuadro <- disposicion_recuadro
+  overrides$etiqueta_cruce_en_dos_lineas <- NULL
+  if (is.null(overrides$jitter_x_rel)) overrides$jitter_x_rel <- jitter_x_rel
+  if (is.null(overrides$jitter_y_rel)) overrides$jitter_y_rel <- jitter_y_rel
+  if (is.null(overrides$iter_separacion)) overrides$iter_separacion <- iter_separacion
+  if (is.null(overrides$factor_reduccion_tarjeta_dispersion)) {
+    overrides$factor_reduccion_tarjeta_dispersion <- factor_reduccion_tarjeta_dispersion
+  }
+
+  el <- list(
+    .element_type = "dim_foda",
+    nivel = nivel,
+    objetivo = objetivo,
+    modo_foda = modo_foda,
+    cruce = cruce,
+    incluir_total = isTRUE(incluir_total),
+    filtros = filtros,
+    usar_pesos = isTRUE(usar_pesos),
     title_slide = .ppt_norm_text1(titulo, blank = NULL),
     overrides = overrides,
     base = base
