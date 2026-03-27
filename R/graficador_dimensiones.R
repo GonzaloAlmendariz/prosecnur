@@ -1886,11 +1886,11 @@ graficar_foda_dimensiones <- function(
   col_d <- if ("debilidad"   %in% nms_cf) colores_foda[["debilidad"]]   else "#FFEBEE"
   col_a <- if ("amenaza"     %in% nms_cf) colores_foda[["amenaza"]]     else "#FFF3E0"
 
-  .mix_col <- function(col, toward = "#0F2742", t = 0.72) {
-    x <- tryCatch(grDevices::col2rgb(col) / 255, error = function(e) matrix(c(0.2, 0.3, 0.4), nrow = 3))
-    y <- tryCatch(grDevices::col2rgb(toward) / 255, error = function(e) matrix(c(0.05, 0.12, 0.20), nrow = 3))
-    out <- (1 - t) * x + t * y
-    grDevices::rgb(out[1, 1], out[2, 1], out[3, 1])
+  .is_light_col <- function(col, threshold = 0.62) {
+    rgb <- tryCatch(grDevices::col2rgb(col) / 255, error = function(e) NULL)
+    if (is.null(rgb) || !ncol(rgb)) return(FALSE)
+    lum <- 0.2126 * rgb[1, 1] + 0.7152 * rgb[2, 1] + 0.0722 * rgb[3, 1]
+    is.finite(lum) && !is.na(lum) && lum >= threshold
   }
 
   # --- Color semáforo por score (independiente del corte de cuadrantes) ---
@@ -2234,16 +2234,15 @@ graficar_foda_dimensiones <- function(
         palette_override = ctx$paletas_cruce[[cruce]] %||% NULL,
         group_keys = as.character(grp_ref$grupo_key)
       )
-      grp_cols_dark <- vapply(grp_cols, function(cc) .mix_col(cc, toward = "#1A2E45", t = 0.45), character(1))
       plot_df$is_total <- !is.na(plot_df$is_total_global) & as.logical(plot_df$is_total_global)
-      plot_df$card_fill <- as.character(grp_cols_dark[plot_df$grupo])
+      plot_df$card_fill <- as.character(grp_cols[plot_df$grupo])
       plot_df$card_fill[!nzchar(plot_df$card_fill) | is.na(plot_df$card_fill)] <- "#2F4A66"
       idx_total <- which(!is.na(plot_df$is_total) & plot_df$is_total)
       if (length(idx_total)) plot_df$card_fill[idx_total] <- color_indice_total
 
       grp_ref$is_total <- (as.character(grp_ref$grupo_key) == "__total__") |
         (tolower(trimws(as.character(grp_ref$grupo))) %in% c("indice", "índice"))
-      grp_ref$color_leg <- as.character(grp_cols_dark[as.character(grp_ref$grupo)])
+      grp_ref$color_leg <- as.character(grp_cols[as.character(grp_ref$grupo)])
       keep_legend <- !grp_ref$is_total
       legend_cruce_labels <- as.character(grp_ref$grupo[keep_legend])
       legend_cruce_colors <- as.character(grp_ref$color_leg[keep_legend])
@@ -2254,7 +2253,11 @@ graficar_foda_dimensiones <- function(
       plot_df$card_fill <- if (isTRUE(tarjetas_color_solido)) "#2F4A66" else "#FFFFFF"
     }
     plot_df$card_border <- grDevices::adjustcolor(plot_df$card_fill, alpha.f = 0.92)
-    plot_df$title_col <- ifelse(plot_df$card_fill == "#FFFFFF", "#0D243E", "#FFFFFF")
+    plot_df$title_col <- ifelse(
+      vapply(plot_df$card_fill, .is_light_col, logical(1)),
+      "#0D243E",
+      "#FFFFFF"
+    )
     plot_df$chip_text_col <- "#FFFFFF"
     plot_df$score_txt <- paste0(.dim_fmt_int(plot_df$score_round), sufijo_puntaje)
 

@@ -5,7 +5,7 @@
 #'
 #' Incluye soporte para:
 #' - puntos jitter opcionales,
-#' - marcador de media,
+#' - chip semaforico para la media por categoria,
 #' - etiquetas de base por categoria,
 #' - composicion en canvas (titulo/panel/leyenda/pie),
 #' - exportacion a PNG/PPT/Word.
@@ -17,8 +17,19 @@
 #' @param colores_categorias Vector de colores por categoria (opcional).
 #' @param mostrar_puntos Si `TRUE`, superpone puntos jitter.
 #' @param alpha_puntos,size_puntos,jitter_width,jitter_height Estilo de puntos.
-#' @param mostrar_media Si `TRUE`, dibuja la media como marcador.
-#' @param color_media,size_media Estilo del marcador de media.
+#' @param mostrar_media Si `TRUE`, dibuja la media como chip.
+#' @param color_media,size_media Compatibilidad legacy: color de borde y tamaño
+#'   del texto del chip de media.
+#' @param cortes_chip Cortes del semaforo para clasificar la media en tres
+#'   estados (`rojo`, `ambar`, `verde`). Debe contener al menos 2 valores.
+#'   Si es `NULL`, se estima automaticamente desde los datos.
+#'   Cuando se define explicitamente, se agregan lineas punteadas en esos cortes
+#'   y se fuerzan como marcas del eje numerico.
+#' @param chip_colores Colores del semaforo para el chip de media. Puede ser un
+#'   vector nombrado con `rojo`, `ambar`, `verde`, o un vector de largo 3 en ese orden.
+#' @param chip_texto_color Color del texto dentro del chip.
+#' @param chip_decimales Decimales del valor mostrado en el chip.
+#' @param chip_sufijo Sufijo opcional del valor mostrado en el chip.
 #' @param mostrar_n_por_categoria Si `TRUE`, imprime base por categoria.
 #' @param prefijo_n,size_n,color_n Estilo de texto de base.
 #' @param titulo,subtitulo,nota_pie Textos del grafico.
@@ -27,6 +38,8 @@
 #'   Estilo de encabezado.
 #' @param color_nota_pie,size_nota_pie Estilo de pie.
 #' @param color_ejes,size_ejes Estilo de ejes.
+#' @param limites_y Vector numérico de largo 2 para fijar límites del eje de valores.
+#' @param cortes_y Vector numérico opcional con cortes del eje de valores.
 #' @param color_fondo Color de fondo.
 #' @param ancho_caja,tamano_linea_caja Estilo de cajas.
 #' @param mostrar_leyenda Si `TRUE`, muestra leyenda por categoria.
@@ -65,6 +78,11 @@ graficar_boxplot <- function(
     mostrar_media     = TRUE,
     color_media       = "#173B63",
     size_media        = 2.3,
+    cortes_chip       = NULL,
+    chip_colores      = c(rojo = "#C62828", ambar = "#EF6C00", verde = "#2E7D32"),
+    chip_texto_color  = "#FFFFFF",
+    chip_decimales    = 1,
+    chip_sufijo       = "",
     mostrar_n_por_categoria = FALSE,
     prefijo_n         = "N=",
     size_n            = 2.8,
@@ -82,6 +100,8 @@ graficar_boxplot <- function(
     size_nota_pie     = 8,
     color_ejes        = "#173B63",
     size_ejes         = 9,
+    limites_y         = NULL,
+    cortes_y          = NULL,
     color_fondo       = NA,
     ancho_caja        = 0.62,
     tamano_linea_caja = 0.45,
@@ -200,6 +220,60 @@ graficar_boxplot <- function(
   if (!is.data.frame(data)) stop("`data` debe ser data.frame/tibble.", call. = FALSE)
   if (!var_categoria %in% names(data)) stop("`var_categoria` no existe en `data`.", call. = FALSE)
   if (!var_valor %in% names(data)) stop("`var_valor` no existe en `data`.", call. = FALSE)
+  if (!is.null(limites_y)) {
+    if (!is.numeric(limites_y) || length(limites_y) != 2L) {
+      stop("`limites_y` debe ser numeric(2) o NULL.", call. = FALSE)
+    }
+    limites_y <- as.numeric(limites_y)
+    if (!all(is.finite(limites_y))) {
+      stop("`limites_y` debe contener dos valores finitos.", call. = FALSE)
+    }
+    limites_y <- sort(limites_y)
+    if (limites_y[1] >= limites_y[2]) {
+      stop("`limites_y` debe tener mínimo < máximo.", call. = FALSE)
+    }
+  }
+  if (!is.null(cortes_y)) {
+    if (!is.numeric(cortes_y)) stop("`cortes_y` debe ser numeric o NULL.", call. = FALSE)
+    cortes_y <- as.numeric(cortes_y)
+    cortes_y <- cortes_y[is.finite(cortes_y)]
+    if (!length(cortes_y)) stop("`cortes_y` no contiene valores numericos validos.", call. = FALSE)
+    cortes_y <- unique(cortes_y)
+  }
+  if (!is.null(cortes_chip)) {
+    if (!is.numeric(cortes_chip)) stop("`cortes_chip` debe ser numeric o NULL.", call. = FALSE)
+    cortes_chip <- as.numeric(cortes_chip)
+    cortes_chip <- cortes_chip[is.finite(cortes_chip)]
+    if (length(cortes_chip) < 2L) {
+      stop("`cortes_chip` debe contener al menos 2 valores finitos.", call. = FALSE)
+    }
+    cortes_chip <- sort(unique(cortes_chip))[1:2]
+  }
+  cortes_chip_eje <- cortes_chip
+  chip_decimales <- suppressWarnings(as.integer(chip_decimales)[1])
+  if (!is.finite(chip_decimales) || is.na(chip_decimales) || chip_decimales < 0L) {
+    chip_decimales <- 1L
+  }
+  chip_sufijo <- as.character(chip_sufijo %||% "")[1]
+  if (is.na(chip_sufijo)) chip_sufijo <- ""
+
+  .resolve_chip_colores <- function(x) {
+    out <- c(rojo = "#C62828", ambar = "#EF6C00", verde = "#2E7D32")
+    if (is.null(x) || !length(x)) return(out)
+    x <- as.character(x)
+    if (!is.null(names(x)) && any(nzchar(names(x)))) {
+      nms <- tolower(trimws(as.character(names(x))))
+      map <- stats::setNames(x, nms)
+      for (k in c("rojo", "ambar", "verde")) {
+        if (!is.null(map[[k]]) && nzchar(map[[k]])) out[[k]] <- map[[k]]
+      }
+      return(out)
+    }
+    if (length(x) >= 3L) {
+      out[] <- x[1:3]
+    }
+    out
+  }
 
   df <- data |>
     dplyr::select(
@@ -259,15 +333,49 @@ graficar_boxplot <- function(
   }
 
   if (isTRUE(mostrar_media)) {
+    chip_cols <- .resolve_chip_colores(chip_colores)
+    mean_df <- df |>
+      dplyr::group_by(.data$categoria) |>
+      dplyr::summarise(media = mean(.data$valor, na.rm = TRUE), .groups = "drop")
+
+    chip_cuts <- cortes_chip
+    if (is.null(chip_cuts)) {
+      q <- suppressWarnings(stats::quantile(mean_df$media, probs = c(1/3, 2/3), na.rm = TRUE, names = FALSE))
+      q <- as.numeric(q)
+      if (length(q) >= 2L && all(is.finite(q)) && q[1] < q[2]) {
+        chip_cuts <- q
+      } else {
+        rgv <- range(df$valor, na.rm = TRUE)
+        span <- rgv[2] - rgv[1]
+        if (!is.finite(span) || span <= 0) span <- 1
+        chip_cuts <- c(rgv[1] + span/3, rgv[1] + 2 * span/3)
+      }
+    }
+
+    mean_df$chip_fill <- ifelse(
+      mean_df$media >= chip_cuts[2], chip_cols[["verde"]],
+      ifelse(mean_df$media >= chip_cuts[1], chip_cols[["ambar"]], chip_cols[["rojo"]])
+    )
+    mean_df$chip_label <- paste0(
+      format(round(mean_df$media, chip_decimales), nsmall = chip_decimales, trim = TRUE),
+      chip_sufijo
+    )
+
     p_core <- p_core +
-      ggplot2::stat_summary(
-        fun = mean,
-        geom = "point",
-        shape = 23,
-        fill = "white",
-        colour = color_media,
+      ggplot2::geom_label(
+        data = mean_df,
+        ggplot2::aes(x = .data$categoria, y = .data$media, label = .data$chip_label),
+        inherit.aes = FALSE,
+        fill = mean_df$chip_fill,
+        text.colour = chip_texto_color,
+        border.colour = color_media,
+        fontface = "bold",
         size = size_media,
-        stroke = 0.8
+        linewidth = 0.30,
+        label.r = grid::unit(0.18, "lines"),
+        label.padding = grid::unit(0.20, "lines"),
+        alpha = 0.97,
+        show.legend = FALSE
       )
   }
 
@@ -294,9 +402,20 @@ graficar_boxplot <- function(
       )
   }
 
+  if (!is.null(cortes_chip_eje) && length(cortes_chip_eje)) {
+    p_core <- p_core +
+      ggplot2::geom_hline(
+        data = data.frame(yint = as.numeric(cortes_chip_eje)),
+        ggplot2::aes(yintercept = .data$yint),
+        inherit.aes = FALSE,
+        colour = "#C7CDD6",
+        linetype = "dashed",
+        linewidth = 0.36
+      )
+  }
+
   p_core <- p_core +
     ggplot2::scale_fill_manual(values = pal, drop = FALSE) +
-    ggplot2::scale_colour_manual(values = pal, drop = FALSE) +
     ggplot2::theme_minimal(base_size = 10) +
     ggplot2::theme(
       axis.title = ggplot2::element_blank(),
@@ -313,8 +432,29 @@ graficar_boxplot <- function(
       plot.margin = ggplot2::margin(2, 6, 2, 4)
     )
 
+  if (isTRUE(mostrar_puntos)) {
+    p_core <- p_core + ggplot2::scale_colour_manual(values = pal, drop = FALSE)
+  }
+
+  axis_breaks <- NULL
+  if (!is.null(cortes_y)) axis_breaks <- as.numeric(cortes_y)
+  if (!is.null(cortes_chip_eje) && length(cortes_chip_eje)) {
+    axis_breaks <- sort(unique(c(axis_breaks, as.numeric(cortes_chip_eje))))
+  }
+  if (!is.null(axis_breaks) && length(axis_breaks)) {
+    p_core <- p_core + ggplot2::scale_y_continuous(breaks = axis_breaks)
+  }
+
   if (identical(orientacion, "horizontal")) {
-    p_core <- p_core + ggplot2::coord_flip()
+    if (!is.null(limites_y)) {
+      # Con coord_flip, el eje numerico original (y) pasa a ser x.
+      p_core <- p_core + ggplot2::coord_flip(xlim = limites_y)
+    } else {
+      p_core <- p_core + ggplot2::coord_flip()
+    }
+  } else if (!is.null(limites_y)) {
+    # Zoom del eje sin recortar datos para el calculo estadistico del boxplot.
+    p_core <- p_core + ggplot2::coord_cartesian(ylim = limites_y)
   }
 
   p_out <- p_core

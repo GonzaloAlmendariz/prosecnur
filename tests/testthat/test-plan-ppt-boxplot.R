@@ -38,6 +38,10 @@ make_plan_boxplot_fixture <- function() {
 test_that("p_boxplot valida argumentos basicos", {
   expect_error(p_boxplot(var = ""), "`var`")
   expect_error(p_boxplot(var = "score", cruce = ""), "`cruce`")
+  expect_error(p_boxplot(var = "score", decimales_promedio = 3), "`decimales_promedio`")
+  expect_error(p_boxplot(var = "score", tamano_promedio = 0), "`tamano_promedio`")
+  expect_error(p_boxplot(var = "score", cortes_chip = 1), "`cortes_chip`")
+  expect_error(p_boxplot(var = "score", chip_colores = c("#111111", "#222222")), "`chip_colores`")
   expect_error(p_boxplot(var = "score", overrides = "x"), "`overrides`")
   expect_error(p_boxplot(var = "score", base = "x"), "`base`")
 
@@ -101,4 +105,207 @@ test_that("reporte_ppt_plan boxplot aplica etiquetas de cruce y render_meta", {
   expect_true(all(c("Norte", "Sur") %in% cats))
   expect_equal(out$render_meta[[1]]$etype, "boxplot")
   expect_equal(out$render_meta[[1]]$kind, "chart")
+})
+
+test_that("reporte_ppt_plan boxplot respeta paleta de cruce del plan", {
+  skip_if_not_installed("officer")
+  skip_if_not_installed("rvg")
+
+  fx <- make_plan_boxplot_fixture()
+  env_pal <- new.env(parent = baseenv())
+  assign(
+    "paleta_lst_region",
+    c(N = "#112233", S = "#AA5500"),
+    envir = env_pal
+  )
+
+  plan <- list(
+    diapo_001 = p_slide_1(
+      plot = p_boxplot(
+        "score",
+        cruce = "region",
+        mostrar_puntos = FALSE
+      )
+    )
+  )
+
+  out <- reporte_ppt_plan(
+    data = fx$data,
+    instrumento = fx$instrumento,
+    plan = plan,
+    presets = fx$presets,
+    env_diapos = env_pal,
+    solo_lista = TRUE,
+    mensajes_progreso = FALSE
+  )
+
+  p <- out$rendered[[1]]
+  gb <- ggplot2::ggplot_build(p)
+  fills <- unique(toupper(stats::na.omit(gb$data[[1]]$fill)))
+  expect_true(all(c("#112233", "#AA5500") %in% fills))
+})
+
+test_that("reporte_ppt_plan boxplot acepta cortes_y", {
+  skip_if_not_installed("officer")
+  skip_if_not_installed("rvg")
+
+  fx <- make_plan_boxplot_fixture()
+  plan <- list(
+    diapo_001 = p_slide_1(
+      plot = p_boxplot(
+        "score",
+        cortes_y = c(2.5, 3.0, 3.5, 4.0),
+        mostrar_puntos = FALSE
+      )
+    )
+  )
+
+  out <- reporte_ppt_plan(
+    data = fx$data,
+    instrumento = fx$instrumento,
+    plan = plan,
+    presets = fx$presets,
+    solo_lista = TRUE,
+    mensajes_progreso = FALSE
+  )
+
+  p <- out$rendered[[1]]
+  y_scale <- p$scales$get_scales("y")
+  expect_equal(y_scale$breaks, c(2.5, 3.0, 3.5, 4.0))
+})
+
+test_that("reporte_ppt_plan boxplot acepta limites_y", {
+  skip_if_not_installed("officer")
+  skip_if_not_installed("rvg")
+
+  fx <- make_plan_boxplot_fixture()
+  plan <- list(
+    diapo_001 = p_slide_1(
+      plot = p_boxplot(
+        "score",
+        limites_y = c(2.0, 4.5),
+        mostrar_puntos = FALSE
+      )
+    )
+  )
+
+  out <- reporte_ppt_plan(
+    data = fx$data,
+    instrumento = fx$instrumento,
+    plan = plan,
+    presets = fx$presets,
+    solo_lista = TRUE,
+    mensajes_progreso = FALSE
+  )
+
+  p <- out$rendered[[1]]
+  expect_equal(p$coordinates$limits$y, c(2.0, 4.5))
+})
+
+test_that("reporte_ppt_plan boxplot dibuja cortes_chip en lineas y eje", {
+  skip_if_not_installed("officer")
+  skip_if_not_installed("rvg")
+
+  fx <- make_plan_boxplot_fixture()
+  plan <- list(
+    diapo_001 = p_slide_1(
+      plot = p_boxplot(
+        "score",
+        cortes_chip = c(2.8, 3.6),
+        mostrar_puntos = FALSE
+      )
+    )
+  )
+
+  out <- reporte_ppt_plan(
+    data = fx$data,
+    instrumento = fx$instrumento,
+    plan = plan,
+    presets = fx$presets,
+    solo_lista = TRUE,
+    mensajes_progreso = FALSE
+  )
+
+  p <- out$rendered[[1]]
+  gb <- ggplot2::ggplot_build(p)
+  idx_hline <- which(vapply(gb$data, function(x) "yintercept" %in% names(x), logical(1)))[1]
+  expect_true(is.finite(idx_hline))
+
+  cuts_drawn <- sort(unique(as.numeric(gb$data[[idx_hline]]$yintercept)))
+  expect_equal(cuts_drawn, c(2.8, 3.6))
+
+  cols <- unique(toupper(stats::na.omit(as.character(gb$data[[idx_hline]]$colour))))
+  expect_true(length(cols) >= 1L)
+  expect_true(all(cols == "#C7CDD6"))
+
+  y_scale <- p$scales$get_scales("y")
+  expect_true(all(c(2.8, 3.6) %in% y_scale$breaks))
+})
+
+test_that("graficar_boxplot usa chip semaforico con colores/cortes personalizados", {
+  df <- data.frame(
+    categoria = c(rep("A", 4), rep("B", 4), rep("C", 4)),
+    valor = c(1.0, 1.2, 1.1, 1.3, 3.0, 3.1, 2.9, 3.2, 4.4, 4.5, 4.6, 4.7),
+    stringsAsFactors = FALSE
+  )
+
+  p <- graficar_boxplot(
+    data = df,
+    var_categoria = "categoria",
+    var_valor = "valor",
+    mostrar_puntos = FALSE,
+    mostrar_leyenda = FALSE,
+    cortes_chip = c(2, 4),
+    chip_colores = c(rojo = "#AA0000", ambar = "#BBBB00", verde = "#00AA00"),
+    usar_canvas = FALSE,
+    exportar = "rplot"
+  )
+
+  gb <- ggplot2::ggplot_build(p)
+  idx_chip <- which(vapply(gb$data, function(x) "label" %in% names(x) && "fill" %in% names(x), logical(1)))[1]
+  expect_true(is.finite(idx_chip))
+  fills <- unique(toupper(stats::na.omit(gb$data[[idx_chip]]$fill)))
+  expect_true(all(c("#AA0000", "#BBBB00", "#00AA00") %in% fills))
+})
+
+test_that("p_boxplot expone decimales/cortes/colores del chip", {
+  skip_if_not_installed("officer")
+  skip_if_not_installed("rvg")
+
+  fx <- make_plan_boxplot_fixture()
+  plan <- list(
+    diapo_001 = p_slide_1(
+      plot = p_boxplot(
+        "score",
+        cruce = "region",
+        decimales_promedio = 0,
+        tamano_promedio = 5.2,
+        cortes_chip = c(3.2, 3.8),
+        chip_colores = c(rojo = "#AA0000", ambar = "#BBBB00", verde = "#00AA00"),
+        mostrar_puntos = FALSE
+      )
+    )
+  )
+
+  out <- reporte_ppt_plan(
+    data = fx$data,
+    instrumento = fx$instrumento,
+    plan = plan,
+    presets = fx$presets,
+    solo_lista = TRUE,
+    mensajes_progreso = FALSE
+  )
+
+  gb <- ggplot2::ggplot_build(out$rendered[[1]])
+  idx_chip <- which(vapply(gb$data, function(x) "label" %in% names(x) && "fill" %in% names(x), logical(1)))[1]
+  expect_true(is.finite(idx_chip))
+
+  labels <- as.character(gb$data[[idx_chip]]$label)
+  expect_true(all(!grepl("\\.", labels)))
+  expect_true(all(abs(as.numeric(gb$data[[idx_chip]]$size) - 5.2) < 1e-9))
+
+  fills <- unique(toupper(stats::na.omit(gb$data[[idx_chip]]$fill)))
+  expected_palette <- c("#AA0000", "#BBBB00", "#00AA00")
+  expect_true(length(fills) >= 1L)
+  expect_true(all(fills %in% expected_palette))
 })

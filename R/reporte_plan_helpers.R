@@ -588,10 +588,31 @@
 # (usa el mismo patrón que tu .paleta_auto() del exportador)
 .paleta_auto_local <- function(list_name, env) {
   if (is.null(env) || !is.environment(env)) env <- parent.frame()
-  if (is.na(list_name) || !nzchar(list_name)) return(NULL)
-  obj_name <- paste0("paleta_", list_name)
-  if (!exists(obj_name, envir = env, inherits = TRUE)) return(NULL)
-  pal <- get(obj_name, envir = env, inherits = TRUE)
+  ln <- as.character(list_name)[1]
+  ln <- trimws(ln)
+  if (is.na(ln) || !nzchar(ln)) return(NULL)
+
+  .paleta_candidates <- function(x) {
+    x <- trimws(as.character(x))
+    x <- x[!is.na(x) & nzchar(x)]
+    if (!length(x)) return(character(0))
+    out <- x
+    if (grepl("s$", x[1])) out <- c(out, sub("s$", "", x[1]))
+    if (grepl("es$", x[1])) out <- c(out, sub("es$", "", x[1]))
+    out <- c(out, paste0(x[1], "s"), paste0(x[1], "es"))
+    out <- trimws(as.character(out))
+    unique(out[!is.na(out) & nzchar(out)])
+  }
+
+  obj_candidates <- paste0("paleta_", .paleta_candidates(ln))
+  hit <- obj_candidates[vapply(
+    obj_candidates,
+    function(obj_name) exists(obj_name, envir = env, inherits = TRUE),
+    logical(1)
+  )]
+  if (!length(hit)) return(NULL)
+
+  pal <- get(hit[1], envir = env, inherits = TRUE)
   if (!is.atomic(pal) || is.null(names(pal))) return(NULL)
   pal
 }

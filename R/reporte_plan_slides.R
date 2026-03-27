@@ -1104,10 +1104,21 @@ p_numerico <- function(
 #'
 #' @param var Variable numerica a resumir en el boxplot.
 #' @param cruce Variable categorica opcional para segmentar cajas.
+#' @param decimales_promedio Entero opcional para el chip de promedio:
+#'   solo permite `0`, `1` o `2` decimales.
+#' @param tamano_promedio Tamaño de texto opcional para el chip del promedio.
+#'   Se mapea a `size_media` del graficador y debe ser numérico positivo.
+#' @param cortes_chip Cortes semaforicos para clasificar el promedio en chip
+#'   (`rojo`/`ambar`/`verde`). Debe tener al menos 2 valores numericos.
+#' @param chip_colores Colores del chip semaforico. Puede ser un vector
+#'   nombrado con `rojo`, `ambar`, `verde`, o un vector de largo 3 en ese orden.
 #' @param titulo Titulo opcional del elemento.
 #' @param overrides Lista de overrides para el renderer/graficador.
 #' @param base Lista de opciones de base (reservado para consistencia de API).
 #' @param filtros Lista nombrada de filtros por igualdad/inclusion.
+#' @param ... Argumentos adicionales de conveniencia para `graficar_boxplot()`
+#'   (por ejemplo, `mostrar_puntos`, `mostrar_media`, `orientacion`). Se
+#'   incorporan como `overrides`.
 #'
 #' @return Objeto `"ppt_element"`.
 #' @family reporte
@@ -1115,10 +1126,15 @@ p_numerico <- function(
 p_boxplot <- function(
     var,
     cruce = NULL,
+    decimales_promedio = NULL,
+    tamano_promedio = NULL,
+    cortes_chip = NULL,
+    chip_colores = NULL,
     titulo = NULL,
     overrides = list(),
     base = list(),
-    filtros = list()
+    filtros = list(),
+    ...
 ) {
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
     stop("`var` debe ser character(1) no vacio.", call. = FALSE)
@@ -1136,6 +1152,57 @@ p_boxplot <- function(
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
   filtros <- .ppt_norm_filters(filtros)
+
+  if (!is.null(decimales_promedio)) {
+    decimales_promedio <- suppressWarnings(as.integer(decimales_promedio)[1])
+    if (!is.finite(decimales_promedio) || is.na(decimales_promedio) || !(decimales_promedio %in% 0:2)) {
+      stop("`decimales_promedio` debe ser NULL o entero en {0, 1, 2}.", call. = FALSE)
+    }
+  }
+  if (!is.null(tamano_promedio)) {
+    tamano_promedio <- suppressWarnings(as.numeric(tamano_promedio)[1])
+    if (!is.finite(tamano_promedio) || is.na(tamano_promedio) || tamano_promedio <= 0) {
+      stop("`tamano_promedio` debe ser NULL o numérico positivo.", call. = FALSE)
+    }
+  }
+  if (!is.null(cortes_chip)) {
+    cortes_chip <- suppressWarnings(as.numeric(cortes_chip))
+    cortes_chip <- cortes_chip[is.finite(cortes_chip)]
+    if (length(cortes_chip) < 2L) {
+      stop("`cortes_chip` debe ser NULL o numérico con al menos 2 valores.", call. = FALSE)
+    }
+    cortes_chip <- sort(unique(cortes_chip))[1:2]
+  }
+  if (!is.null(chip_colores)) {
+    if (!is.atomic(chip_colores) || !length(chip_colores)) {
+      stop("`chip_colores` debe ser NULL o vector atómico no vacío.", call. = FALSE)
+    }
+    chip_colores <- as.character(chip_colores)
+    if (length(chip_colores) < 3L) {
+      nms <- names(chip_colores)
+      ok_nms <- !is.null(nms) && all(c("rojo", "ambar", "verde") %in% tolower(trimws(as.character(nms))))
+      if (!ok_nms) {
+        stop("`chip_colores` debe tener largo >= 3 o nombres rojo/ambar/verde.", call. = FALSE)
+      }
+    }
+  }
+
+  dots <- list(...)
+  if (length(dots)) {
+    overrides <- modifyList(dots, overrides)
+  }
+  if (!is.null(decimales_promedio) && is.null(overrides$chip_decimales)) {
+    overrides$chip_decimales <- decimales_promedio
+  }
+  if (!is.null(tamano_promedio) && is.null(overrides$size_media)) {
+    overrides$size_media <- tamano_promedio
+  }
+  if (!is.null(cortes_chip) && is.null(overrides$cortes_chip)) {
+    overrides$cortes_chip <- cortes_chip
+  }
+  if (!is.null(chip_colores) && is.null(overrides$chip_colores)) {
+    overrides$chip_colores <- chip_colores
+  }
 
   el <- list(
     .element_type = "boxplot",

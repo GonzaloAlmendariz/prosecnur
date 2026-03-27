@@ -18,6 +18,11 @@ graficar_boxplot(
   mostrar_media = TRUE,
   color_media = "#173B63",
   size_media = 2.3,
+  cortes_chip = NULL,
+  chip_colores = c(rojo = "#C62828", ambar = "#EF6C00", verde = "#2E7D32"),
+  chip_texto_color = "#FFFFFF",
+  chip_decimales = 1,
+  chip_sufijo = "",
   mostrar_n_por_categoria = FALSE,
   prefijo_n = "N=",
   size_n = 2.8,
@@ -35,6 +40,8 @@ graficar_boxplot(
   size_nota_pie = 8,
   color_ejes = "#173B63",
   size_ejes = 9,
+  limites_y = NULL,
+  cortes_y = NULL,
   color_fondo = NA,
   ancho_caja = 0.62,
   tamano_linea_caja = 0.45,
@@ -74,9 +81,25 @@ graficar_boxplot(
 
 \item{alpha_puntos, size_puntos, jitter_width, jitter_height}{Estilo de puntos.}
 
-\item{mostrar_media}{Si \code{TRUE}, dibuja la media como marcador.}
+\item{mostrar_media}{Si \code{TRUE}, dibuja la media como chip.}
 
-\item{color_media, size_media}{Estilo del marcador de media.}
+\item{color_media, size_media}{Compatibilidad legacy: color de borde y tamaño
+del texto del chip de media.}
+
+\item{cortes_chip}{Cortes del semaforo para clasificar la media en tres
+estados (\code{rojo}, \code{ambar}, \code{verde}). Debe contener al menos 2 valores.
+Si es \code{NULL}, se estima automaticamente desde los datos.
+Cuando se define explicitamente, se agregan lineas punteadas en esos cortes
+y se fuerzan como marcas del eje numerico.}
+
+\item{chip_colores}{Colores del semaforo para el chip de media. Puede ser un
+vector nombrado con \code{rojo}, \code{ambar}, \code{verde}, o un vector de largo 3 en ese orden.}
+
+\item{chip_texto_color}{Color del texto dentro del chip.}
+
+\item{chip_decimales}{Decimales del valor mostrado en el chip.}
+
+\item{chip_sufijo}{Sufijo opcional del valor mostrado en el chip.}
 
 \item{mostrar_n_por_categoria}{Si \code{TRUE}, imprime base por categoria.}
 
@@ -91,6 +114,10 @@ graficar_boxplot(
 \item{color_nota_pie, size_nota_pie}{Estilo de pie.}
 
 \item{color_ejes, size_ejes}{Estilo de ejes.}
+
+\item{limites_y}{Vector numérico de largo 2 para fijar límites del eje de valores.}
+
+\item{cortes_y}{Vector numérico opcional con cortes del eje de valores.}
 
 \item{color_fondo}{Color de fondo.}
 
@@ -132,7 +159,7 @@ segmentada por categoria.
 Incluye soporte para:
 \itemize{
 \item puntos jitter opcionales,
-\item marcador de media,
+\item chip semaforico para la media por categoria,
 \item etiquetas de base por categoria,
 \item composicion en canvas (titulo/panel/leyenda/pie),
 \item exportacion a PNG/PPT/Word.

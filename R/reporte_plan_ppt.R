@@ -791,10 +791,31 @@ reporte_ppt_plan <- function(
   # 4) Helpers — paleta_<listname> auto desde env_diapos
   # ---------------------------------------------------------------------------
   .paleta_auto <- function(list_name, env = env_diapos) {
-    if (is.na(list_name) || !nzchar(list_name)) return(NULL)
-    obj_name <- paste0("paleta_", list_name)
-    if (!exists(obj_name, envir = env, inherits = TRUE)) return(NULL)
-    pal <- get(obj_name, envir = env, inherits = TRUE)
+    ln <- as.character(list_name %||% NA_character_)[1]
+    ln <- trimws(ln)
+    if (is.na(ln) || !nzchar(ln)) return(NULL)
+
+    .paleta_candidates <- function(x) {
+      x <- trimws(as.character(x))
+      x <- x[!is.na(x) & nzchar(x)]
+      if (!length(x)) return(character(0))
+      out <- x
+      if (grepl("s$", x[1])) out <- c(out, sub("s$", "", x[1]))
+      if (grepl("es$", x[1])) out <- c(out, sub("es$", "", x[1]))
+      out <- c(out, paste0(x[1], "s"), paste0(x[1], "es"))
+      out <- trimws(as.character(out))
+      unique(out[!is.na(out) & nzchar(out)])
+    }
+
+    obj_candidates <- paste0("paleta_", .paleta_candidates(ln))
+    hit <- obj_candidates[vapply(
+      obj_candidates,
+      function(obj_name) exists(obj_name, envir = env, inherits = TRUE),
+      logical(1)
+    )]
+    if (!length(hit)) return(NULL)
+
+    pal <- get(hit[1], envir = env, inherits = TRUE)
     if (!is.atomic(pal) || is.null(names(pal))) return(NULL)
     pal
   }
@@ -814,9 +835,7 @@ reporte_ppt_plan <- function(
     }
 
     cfg$paletas_cruce <- cfg$paletas_cruce %||% list()
-    if (is.null(cfg$paletas_cruce[[cr_ctx$var]]) || !length(cfg$paletas_cruce[[cr_ctx$var]])) {
-      cfg$paletas_cruce[[cr_ctx$var]] <- pal
-    }
+    cfg$paletas_cruce[[cr_ctx$var]] <- pal
 
     attr(dsrc, "dimensiones_config") <- cfg
     dsrc
@@ -2567,12 +2586,23 @@ reporte_ppt_plan <- function(
 
     if (!nrow(df_plot)) return(.blank_canvas(preset_args, overrides))
 
+    map_cruce <- if (!is.null(cruce)) .labels_from_inst(ctx_var$instrumento, cruce) else NULL
+
     list_name_use <- if (!is.null(ctx_cruce)) {
       .list_name_from_ctx(ctx_cruce)
     } else {
       .list_name_from_ctx(ctx_var)
     }
     colores_cat <- .paleta_auto(list_name_use, env_diapos)
+    if (!is.null(colores_cat) && length(colores_cat) && !is.null(names(colores_cat))) {
+      nms <- as.character(names(colores_cat))
+      nms <- trimws(nms)
+      if (!is.null(map_cruce) && length(map_cruce)) {
+        nms <- ifelse(nms %in% names(map_cruce), unname(map_cruce[nms]), nms)
+      }
+      names(colores_cat) <- nms
+      colores_cat <- colores_cat[!duplicated(names(colores_cat))]
+    }
 
     base_args <- list(
       data              = df_plot,

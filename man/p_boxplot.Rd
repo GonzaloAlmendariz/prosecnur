@@ -7,16 +7,33 @@
 p_boxplot(
   var,
   cruce = NULL,
+  decimales_promedio = NULL,
+  tamano_promedio = NULL,
+  cortes_chip = NULL,
+  chip_colores = NULL,
   titulo = NULL,
   overrides = list(),
   base = list(),
-  filtros = list()
+  filtros = list(),
+  ...
 )
 }
 \arguments{
 \item{var}{Variable numerica a resumir en el boxplot.}
 
 \item{cruce}{Variable categorica opcional para segmentar cajas.}
+
+\item{decimales_promedio}{Entero opcional para el chip de promedio:
+solo permite \code{0}, \code{1} o \code{2} decimales.}
+
+\item{tamano_promedio}{Tamaño de texto opcional para el chip del promedio.
+Se mapea a \code{size_media} del graficador y debe ser numérico positivo.}
+
+\item{cortes_chip}{Cortes semaforicos para clasificar el promedio en chip
+(\code{rojo}/\code{ambar}/\code{verde}). Debe tener al menos 2 valores numericos.}
+
+\item{chip_colores}{Colores del chip semaforico. Puede ser un vector
+nombrado con \code{rojo}, \code{ambar}, \code{verde}, o un vector de largo 3 en ese orden.}
 
 \item{titulo}{Titulo opcional del elemento.}
 
@@ -25,6 +42,10 @@ p_boxplot(
 \item{base}{Lista de opciones de base (reservado para consistencia de API).}
 
 \item{filtros}{Lista nombrada de filtros por igualdad/inclusion.}
+
+\item{...}{Argumentos adicionales de conveniencia para \code{graficar_boxplot()}
+(por ejemplo, \code{mostrar_puntos}, \code{mostrar_media}, \code{orientacion}). Se
+incorporan como \code{overrides}.}
 }
 \value{
 Objeto \code{"ppt_element"}.
