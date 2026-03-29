@@ -1217,6 +1217,108 @@ p_boxplot <- function(
   el
 }
 
+#' @title Media + rango por categorias
+#' @param ... Argumentos adicionales de conveniencia para `graficar_media_rango()`
+#'   (por ejemplo, `tipo_rango`, `limites_y`, `mostrar_chip`). Se incorporan
+#'   como `overrides`.
+#'
+#' @return Objeto `"ppt_element"`.
+#' @family reporte
+#' @export
+p_media_rango <- function(
+    var,
+    cruce = NULL,
+    decimales_promedio = NULL,
+    tamano_promedio = NULL,
+    cortes_chip = NULL,
+    chip_colores = NULL,
+    titulo = NULL,
+    overrides = list(),
+    base = list(),
+    filtros = list(),
+    ...
+) {
+  if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
+    stop("`var` debe ser character(1) no vacio.", call. = FALSE)
+  }
+  var <- trimws(var)
+
+  if (!is.null(cruce)) {
+    if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
+      stop("`cruce` debe ser NULL o character(1) no vacio.", call. = FALSE)
+    }
+    cruce <- trimws(cruce)
+  }
+
+  titulo <- .ppt_norm_text1(titulo, blank = NULL)
+  if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
+  if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+  filtros <- .ppt_norm_filters(filtros)
+
+  if (!is.null(decimales_promedio)) {
+    decimales_promedio <- suppressWarnings(as.integer(decimales_promedio)[1])
+    if (!is.finite(decimales_promedio) || is.na(decimales_promedio) || !(decimales_promedio %in% 0:2)) {
+      stop("`decimales_promedio` debe ser NULL o entero en {0, 1, 2}.", call. = FALSE)
+    }
+  }
+  if (!is.null(tamano_promedio)) {
+    tamano_promedio <- suppressWarnings(as.numeric(tamano_promedio)[1])
+    if (!is.finite(tamano_promedio) || is.na(tamano_promedio) || tamano_promedio <= 0) {
+      stop("`tamano_promedio` debe ser NULL o numérico positivo.", call. = FALSE)
+    }
+  }
+  if (!is.null(cortes_chip)) {
+    cortes_chip <- suppressWarnings(as.numeric(cortes_chip))
+    cortes_chip <- cortes_chip[is.finite(cortes_chip)]
+    if (length(cortes_chip) < 2L) {
+      stop("`cortes_chip` debe ser NULL o numérico con al menos 2 valores.", call. = FALSE)
+    }
+    cortes_chip <- sort(unique(cortes_chip))[1:2]
+  }
+  if (!is.null(chip_colores)) {
+    if (!is.atomic(chip_colores) || !length(chip_colores)) {
+      stop("`chip_colores` debe ser NULL o vector atómico no vacío.", call. = FALSE)
+    }
+    chip_colores <- as.character(chip_colores)
+    if (length(chip_colores) < 3L) {
+      nms <- names(chip_colores)
+      ok_nms <- !is.null(nms) && all(c("rojo", "ambar", "verde") %in% tolower(trimws(as.character(nms))))
+      if (!ok_nms) {
+        stop("`chip_colores` debe tener largo >= 3 o nombres rojo/ambar/verde.", call. = FALSE)
+      }
+    }
+  }
+
+  dots <- list(...)
+  if (length(dots)) {
+    overrides <- modifyList(dots, overrides)
+  }
+  if (!is.null(decimales_promedio) && is.null(overrides$chip_decimales)) {
+    overrides$chip_decimales <- decimales_promedio
+  }
+  if (!is.null(tamano_promedio) && is.null(overrides$size_media)) {
+    overrides$size_media <- tamano_promedio
+  }
+  if (!is.null(cortes_chip) && is.null(overrides$cortes_chip)) {
+    overrides$cortes_chip <- cortes_chip
+  }
+  if (!is.null(chip_colores) && is.null(overrides$chip_colores)) {
+    overrides$chip_colores <- chip_colores
+  }
+
+  el <- list(
+    .element_type = "media_rango",
+    var           = var,
+    cruce         = cruce,
+    title_slide   = titulo,
+    overrides     = overrides,
+    base          = base,
+    filtros       = filtros
+  )
+  class(el) <- c("ppt_element", "list")
+  el
+}
+
 #' @title Radar + tabla derecha (SM o Top/Bottom 2 Box)
 #' @param filtros Lista nombrada de filtros por igualdad/inclusión.
 #' @family reporte
@@ -1472,6 +1574,7 @@ p_dim_radar <- function(
     objetivo,
     cruce = NULL,
     incluir_total = NULL,
+    radar_min_ejes = NULL,
     inicio_eje_pct = NULL,
     filtros = list(),
     iter_var = NULL,
@@ -1525,17 +1628,111 @@ p_dim_radar <- function(
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
 
+  if (!is.null(radar_min_ejes)) {
+    radar_min_ejes <- suppressWarnings(as.integer(radar_min_ejes)[1])
+    if (!is.finite(radar_min_ejes) || is.na(radar_min_ejes) || radar_min_ejes < 1L) {
+      stop("`radar_min_ejes` debe ser NULL o entero >= 1.", call. = FALSE)
+    }
+  }
+
   el <- list(
     .element_type = "dim_radar",
     modo = modo,
     objetivo = objetivo,
     cruce = cruce,
     incluir_total = incluir_total,
+    radar_min_ejes = radar_min_ejes,
     inicio_eje_pct = inicio_eje_pct,
     filtros = filtros,
     iter_var = iter_var,
     iter_level = iter_level,
     title_slide = .ppt_norm_text1(titulo, blank = NULL),
+    overrides = overrides,
+    base = base
+  )
+  class(el) <- c("ppt_element", "list")
+  el
+}
+
+#' @title Comparativo radar/barras de dimensiones
+#' @family reporte
+#' @export
+p_dim_comparativo_radarbar <- function(
+    modo = c("general", "indicadores"),
+    objetivo,
+    cruce = NULL,
+    incluir_total = FALSE,
+    radar_min_ejes = 5L,
+    inicio_eje_pct = NULL,
+    filtros = list(),
+    iter_var = NULL,
+    iter_level = NULL,
+    titulo = NULL,
+    overrides = list(),
+    base = list()
+) {
+  modo <- match.arg(modo)
+
+  if (!is.character(objetivo) || length(objetivo) != 1L || !nzchar(trimws(objetivo))) {
+    stop("`objetivo` debe ser character(1) no vacío.", call. = FALSE)
+  }
+  objetivo <- trimws(objetivo)
+
+  if (!is.null(cruce)) {
+    if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
+      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    cruce <- trimws(cruce)
+  }
+
+  if (!is.null(iter_var)) {
+    if (!is.character(iter_var) || length(iter_var) != 1L || !nzchar(trimws(iter_var))) {
+      stop("`iter_var` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    iter_var <- trimws(iter_var)
+  }
+
+  if (!is.null(iter_level)) {
+    if (!is.character(iter_level) || length(iter_level) != 1L || !nzchar(trimws(iter_level))) {
+      stop("`iter_level` debe ser NULL o character(1) no vacío.", call. = FALSE)
+    }
+    iter_level <- trimws(iter_level)
+  }
+
+  if (!is.null(incluir_total)) {
+    if (!is.logical(incluir_total) || length(incluir_total) != 1L || is.na(incluir_total)) {
+      stop("`incluir_total` debe ser NULL o logical(1).", call. = FALSE)
+    }
+  }
+
+  radar_min_ejes <- suppressWarnings(as.integer(radar_min_ejes)[1])
+  if (!is.finite(radar_min_ejes) || is.na(radar_min_ejes) || radar_min_ejes < 1L) {
+    stop("`radar_min_ejes` debe ser entero >= 1.", call. = FALSE)
+  }
+
+  if (!is.null(inicio_eje_pct)) {
+    inicio_eje_pct <- suppressWarnings(as.numeric(inicio_eje_pct)[1])
+    if (!is.finite(inicio_eje_pct) || inicio_eje_pct < 0 || inicio_eje_pct >= 100) {
+      stop("`inicio_eje_pct` debe ser NULL o un número en [0, 100).", call. = FALSE)
+    }
+  }
+
+  filtros <- .ppt_norm_filters(filtros)
+  if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
+  if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
+
+  el <- list(
+    .element_type = "dim_comparativo_radarbar",
+    modo = modo,
+    objetivo = objetivo,
+    cruce = cruce,
+    incluir_total = incluir_total,
+    radar_min_ejes = radar_min_ejes,
+    inicio_eje_pct = inicio_eje_pct,
+    filtros = filtros,
+    iter_var = iter_var,
+    iter_level = iter_level,
+    titulo = titulo,
     overrides = overrides,
     base = base
   )

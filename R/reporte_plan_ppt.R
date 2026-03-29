@@ -200,6 +200,8 @@ reporte_ppt_plan <- function(
 
   presets$dim_radar <- presets$dim_radar %||% list(args = list())
   presets$dim_radar$args <- presets$dim_radar$args %||% list()
+  presets$dim_comparativo_radarbar <- presets$dim_comparativo_radarbar %||% list(args = list())
+  presets$dim_comparativo_radarbar$args <- presets$dim_comparativo_radarbar$args %||% list()
 
   presets$dim_foda <- presets$dim_foda %||% list(args = list())
   presets$dim_foda$args <- presets$dim_foda$args %||% list()
@@ -217,8 +219,8 @@ reporte_ppt_plan <- function(
   targets <- intersect(
     names(presets),
     c("barras_apiladas", "multi_apiladas", "barras_agrupadas",
-      "barras_numericas", "boxplot", "pie", "donut", "radar_tabla",
-      "dim_heatmap", "dim_radar", "dim_foda")
+      "barras_numericas", "boxplot", "media_rango", "pie", "donut", "radar_tabla",
+      "dim_heatmap", "dim_radar", "dim_comparativo_radarbar", "dim_foda")
   )
 
   for (nm in targets) {
@@ -987,7 +989,45 @@ reporte_ppt_plan <- function(
       ))
     }
 
-    if (etype %in% c("dim_heatmap", "dim_radar", "dim_foda")) {
+    if (identical(etype, "media_rango")) {
+      source_use <- .element_source(el)
+      var_ref <- el$var %||% NULL
+      if (is.null(var_ref) || !is.character(var_ref) || !nzchar(trimws(var_ref))) return(NULL)
+
+      ctx_var <- .resolve_ref(var_ref, source = source_use, arg_name = "var")
+      df_base <- .filter_data(el$filtros %||% list(), source = ctx_var$source)
+      if (!nrow(df_base) || !(ctx_var$var %in% names(df_base))) return(NULL)
+
+      x_raw <- df_base[[ctx_var$var]]
+      if (is.factor(x_raw)) x_raw <- as.character(x_raw)
+      x_num <- suppressWarnings(as.numeric(x_raw))
+      keep <- is.finite(x_num)
+
+      cruce_ref <- el$cruce %||% NULL
+      if (!is.null(cruce_ref) &&
+          is.character(cruce_ref) &&
+          length(cruce_ref) == 1L &&
+          nzchar(trimws(cruce_ref))) {
+        ctx_cruce <- .resolve_ref(cruce_ref, source = ctx_var$source, arg_name = "cruce")
+        if (!(ctx_cruce$var %in% names(df_base))) return(NULL)
+        g <- df_base[[ctx_cruce$var]]
+        keep <- keep & !is.na(g) & nzchar(trimws(as.character(g)))
+      }
+
+      N_total <- sum(keep, na.rm = TRUE)
+      if (!is.finite(N_total) || N_total <= 0) return(NULL)
+
+      N_pretty <- format(N_total, big.mark = ",", scientific = FALSE)
+      suf <- NULL
+      if (!is.null(sufijo_auto) && is.character(sufijo_auto) && length(sufijo_auto) == 1L) {
+        sufijo_auto <- trimws(sufijo_auto)
+        if (nzchar(sufijo_auto)) suf <- sufijo_auto
+      }
+      base_core <- if (is.null(suf)) N_pretty else paste(N_pretty, suf)
+      return(sprintf(formato, base_core))
+    }
+
+    if (etype %in% c("dim_heatmap", "dim_radar", "dim_comparativo_radarbar", "dim_foda")) {
       if (!exists(".dim_build_context", mode = "function", inherits = TRUE)) return(NULL)
 
       source_use <- .element_source(el)
@@ -995,7 +1035,7 @@ reporte_ppt_plan <- function(
       ctx <- .dim_build_context(ctx_src$data, instrumento = ctx_src$instrumento)
 
       N_total <- NA_real_
-      if (etype %in% c("dim_heatmap", "dim_radar")) {
+      if (etype %in% c("dim_heatmap", "dim_radar", "dim_comparativo_radarbar")) {
         if (!exists(".dim_build_payload", mode = "function", inherits = TRUE)) return(NULL)
 
         cruce_ref <- el$cruce %||% NULL
@@ -1372,11 +1412,13 @@ reporte_ppt_plan <- function(
     pa_agrup    <- presets$barras_agrupadas$args %||% list()
     pa_num      <- presets$barras_numericas$args %||% list()
     pa_box      <- presets$boxplot$args %||% list()
+    pa_media_rng <- presets$boxplot$args %||% list()
     pa_pie      <- presets$pie$args %||% list()
     pa_donut    <- presets$donut$args %||% list()
     pa_radar    <- presets$radar_tabla$args %||% list()
     pa_dim_heat <- presets$dim_heatmap$args %||% list()
     pa_dim_rad  <- presets$dim_radar$args %||% list()
+    pa_dim_comp <- presets$dim_comparativo_radarbar$args %||% list()
     pa_dim_foda <- presets$dim_foda$args %||% list()
 
     # helper: llamar pasando SOLO args que la función soporte
@@ -1412,11 +1454,13 @@ reporte_ppt_plan <- function(
       barras_agrupadas = pa_agrup,
       numerico         = pa_num,
       boxplot          = pa_box,
+      media_rango      = pa_media_rng,
       pie              = pa_pie,
       donut            = pa_donut,
       radar_tabla      = pa_radar,
       dim_heatmap      = pa_dim_heat,
       dim_radar        = pa_dim_rad,
+      dim_comparativo_radarbar = pa_dim_comp,
       dim_foda         = pa_dim_foda,
       # default: si hay nuevos etypes, se intenta pasar lista vacía
       list()
@@ -2633,6 +2677,179 @@ reporte_ppt_plan <- function(
     )
   }
 
+  .render_media_rango <- function(el, preset_args) {
+
+    `%||%` <- function(x, y) if (!is.null(x)) x else y
+
+    var <- el$var
+    if (is.null(var) || !nzchar(trimws(var))) return(NULL)
+
+    preset_args <- preset_args %||% list()
+    overrides   <- el$overrides %||% list()
+
+    ctx_var <- .resolve_ref(var, arg_name = "var")
+
+    cruce_ref <- overrides$cruce %||% el$cruce %||% preset_args$cruce %||% NULL
+    preset_args$cruce <- NULL
+    overrides$cruce   <- NULL
+
+    ctx_cruce <- NULL
+    cruce <- NULL
+    if (!is.null(cruce_ref) &&
+        is.character(cruce_ref) &&
+        length(cruce_ref) == 1L &&
+        nzchar(trimws(cruce_ref))) {
+      ctx_cruce <- .resolve_ref(cruce_ref, source = ctx_var$source, arg_name = "cruce")
+      cruce <- ctx_cruce$var
+    }
+
+    .labels_from_inst <- function(inst, varname) {
+      if (is.null(inst) || is.null(inst$survey)) return(NULL)
+      surv <- inst$survey
+      if (!("name" %in% names(surv))) return(NULL)
+
+      ln <- NA_character_
+      if ("list_name" %in% names(surv)) {
+        tmp <- surv$list_name[surv$name == varname]
+        if (length(tmp)) ln <- tmp[1]
+      } else if ("list_norm" %in% names(surv)) {
+        tmp <- surv$list_norm[surv$name == varname]
+        if (length(tmp)) ln <- tmp[1]
+      }
+      if (is.na(ln) || !nzchar(ln)) return(NULL)
+
+      ch <- inst$choices_raw %||% inst$choices %||% NULL
+      if (is.null(ch) || !("list_name" %in% names(ch)) || !("name" %in% names(ch))) return(NULL)
+
+      lab_col <- NULL
+      if ("label::Spanish (ES)" %in% names(ch)) lab_col <- "label::Spanish (ES)"
+      if (is.null(lab_col) && "label" %in% names(ch)) lab_col <- "label"
+      if (is.null(lab_col)) return(NULL)
+
+      sub <- ch[ch$list_name == ln, , drop = FALSE]
+      if (!nrow(sub)) return(NULL)
+
+      codes  <- as.character(sub$name)
+      labels <- as.character(sub[[lab_col]])
+      out <- stats::setNames(labels, codes)
+      attr(out, "levels_labels") <- labels
+      out
+    }
+
+    .apply_cruce_labels <- function(x_cruce, inst, cruce_name) {
+      if (requireNamespace("haven", quietly = TRUE) &&
+          inherits(x_cruce, "haven_labelled")) {
+        x_chr <- as.character(haven::as_factor(x_cruce, levels = "labels"))
+        lvls  <- unique(x_chr)
+        return(list(x = x_chr, lvls = lvls))
+      }
+
+      if (is.factor(x_cruce)) {
+        x_chr <- as.character(x_cruce)
+        return(list(x = x_chr, lvls = levels(x_cruce)))
+      }
+
+      map <- .labels_from_inst(inst, cruce_name)
+      if (!is.null(map)) {
+        x_chr <- as.character(x_cruce)
+        x_lab <- ifelse(x_chr %in% names(map), unname(map[x_chr]), x_chr)
+
+        lvls <- attr(map, "levels_labels")
+        lvls <- lvls[!is.na(lvls) & nzchar(lvls)]
+        extras <- setdiff(unique(x_lab), lvls)
+        lvls2  <- c(lvls, extras)
+
+        return(list(x = x_lab, lvls = lvls2))
+      }
+
+      x_chr <- as.character(x_cruce)
+      list(x = x_chr, lvls = unique(x_chr))
+    }
+
+    df <- .filter_data(el$filtros %||% list(), source = ctx_var$source)
+    if (!nrow(df)) return(.blank_canvas(preset_args, overrides))
+    if (!ctx_var$var %in% names(df)) return(NULL)
+
+    x_raw <- df[[ctx_var$var]]
+    if (is.factor(x_raw)) x_raw <- as.character(x_raw)
+    x_num <- suppressWarnings(as.numeric(x_raw))
+
+    df_plot <- NULL
+    if (is.null(cruce)) {
+      cat_label <- tryCatch(.title_of_var(ctx_var$raw_ref), error = function(e) ctx_var$var)
+      if (is.null(cat_label) || !nzchar(trimws(as.character(cat_label)[1]))) cat_label <- ctx_var$var
+      df_plot <- tibble::tibble(
+        categoria = as.character(cat_label)[1],
+        valor = x_num
+      )
+    } else {
+      if (!cruce %in% names(df)) return(.blank_canvas(preset_args, overrides))
+      cr <- .apply_cruce_labels(df[[cruce]], ctx_var$instrumento, cruce)
+      df_plot <- tibble::tibble(
+        categoria = cr$x,
+        valor = x_num
+      )
+      if (!is.null(cr$lvls) && length(cr$lvls)) {
+        df_plot$categoria <- factor(df_plot$categoria, levels = cr$lvls)
+      }
+    }
+
+    df_plot <- df_plot |>
+      dplyr::filter(
+        !is.na(.data$categoria),
+        nzchar(trimws(as.character(.data$categoria))),
+        is.finite(.data$valor)
+      )
+
+    if (!nrow(df_plot)) return(.blank_canvas(preset_args, overrides))
+
+    map_cruce <- if (!is.null(cruce)) .labels_from_inst(ctx_var$instrumento, cruce) else NULL
+
+    list_name_use <- if (!is.null(ctx_cruce)) {
+      .list_name_from_ctx(ctx_cruce)
+    } else {
+      .list_name_from_ctx(ctx_var)
+    }
+    colores_cat <- .paleta_auto(list_name_use, env_diapos)
+    if (!is.null(colores_cat) && length(colores_cat) && !is.null(names(colores_cat))) {
+      nms <- as.character(names(colores_cat))
+      nms <- trimws(nms)
+      if (!is.null(map_cruce) && length(map_cruce)) {
+        nms <- ifelse(nms %in% names(map_cruce), unname(map_cruce[nms]), nms)
+      }
+      names(colores_cat) <- nms
+      colores_cat <- colores_cat[!duplicated(names(colores_cat))]
+    }
+
+    base_args <- list(
+      data              = df_plot,
+      var_categoria     = "categoria",
+      var_valor         = "valor",
+      colores_categorias = colores_cat,
+      titulo            = NULL,
+      subtitulo         = NULL,
+      nota_pie          = NULL,
+      usar_canvas       = TRUE,
+      exportar          = "rplot"
+    )
+
+    if (!exists("graficar_media_rango", mode = "function", inherits = TRUE)) {
+      stop("No existe `graficar_media_rango()` en el entorno/paquete.", call. = FALSE)
+    }
+
+    fun  <- graficar_media_rango
+    args <- .merge_args(base_args, preset_args, overrides)
+    args <- .keep_formals(fun, args)
+
+    tryCatch(
+      suppressWarnings(do.call(fun, args)),
+      error = function(e) {
+        message("⚠️ .render_media_rango(): ", conditionMessage(e))
+        NULL
+      }
+    )
+  }
+
   .render_numerico <- function(el, preset_args) {
 
     `%||%` <- function(x, y) if (!is.null(x)) x else y
@@ -3165,6 +3382,40 @@ reporte_ppt_plan <- function(
     args <- .force_canvas_args(graficar_radar_dimensiones, args)
     args <- .keep_formals(graficar_radar_dimensiones, args)
     suppressWarnings(do.call(graficar_radar_dimensiones, args))
+  }
+
+  .render_dim_comparativo_radarbar <- function(el, preset_args) {
+    if (!exists("graficar_comparativo_radarbar_dimensiones", mode = "function", inherits = TRUE)) {
+      stop("No existe `graficar_comparativo_radarbar_dimensiones()` en el entorno/paquete.", call. = FALSE)
+    }
+
+    source_use <- .element_source(el)
+    ctx_src <- .source_ctx(source_use)
+    cruce_var <- if (!is.null(el$cruce)) .resolve_ref(el$cruce, source = source_use, arg_name = "cruce")$var else NULL
+    iter_var <- if (!is.null(el$iter_var)) .resolve_ref(el$iter_var, source = source_use, arg_name = "iter_var")$var else NULL
+    data_dim <- .inject_dimensiones_palette(ctx_src$data, el$cruce %||% NULL, source = source_use)
+
+    base_args <- list(
+      data = data_dim,
+      instrumento = ctx_src$instrumento,
+      modo = el$modo,
+      objetivo = el$objetivo,
+      cruce = cruce_var,
+      incluir_total = el$incluir_total %||% FALSE,
+      radar_min_ejes = el$radar_min_ejes %||% 5L,
+      inicio_eje_pct = el$inicio_eje_pct %||% NULL,
+      filtros = el$filtros %||% list(),
+      iter_var = iter_var,
+      iter_level = el$iter_level %||% NULL,
+      titulo = NULL,
+      subtitulo = NULL,
+      nota_pie = NULL
+    )
+
+    args <- .merge_args(base_args, preset_args %||% list(), el$overrides %||% list())
+    args <- .force_canvas_args(graficar_comparativo_radarbar_dimensiones, args)
+    args <- .keep_formals(graficar_comparativo_radarbar_dimensiones, args)
+    suppressWarnings(do.call(graficar_comparativo_radarbar_dimensiones, args))
   }
 
   .render_dim_foda <- function(el, preset_args) {

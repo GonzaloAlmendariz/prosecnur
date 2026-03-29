@@ -4,7 +4,7 @@
 \alias{indice}
 \title{Definir un indice dimensional}
 \usage{
-indice(nombre, etiqueta, subindices)
+indice(nombre, etiqueta, subindices, icono = NULL)
 }
 \arguments{
 \item{nombre}{Nombre interno del indice (sin prefijo). Sera usado como
@@ -13,6 +13,10 @@ clave y como sufijo de la columna creada (\verb{idx_<nombre>}).}
 \item{etiqueta}{Etiqueta humana del indice.}
 
 \item{subindices}{Vector de nombres de subindices que componen este indice.}
+
+\item{icono}{Ruta a un archivo PNG que representa visualmente este indice.
+Se usa en los graficadores de dimensiones para acompañar o reemplazar la
+etiqueta de texto. Si es \code{NULL} (por defecto) no se muestra ningún ícono.}
 }
 \value{
 Lista de clase \code{"prosecnur_indice"}.

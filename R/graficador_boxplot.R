@@ -352,9 +352,16 @@ graficar_boxplot <- function(
       }
     }
 
-    mean_df$chip_fill <- ifelse(
-      mean_df$media >= chip_cuts[2], chip_cols[["verde"]],
-      ifelse(mean_df$media >= chip_cuts[1], chip_cols[["ambar"]], chip_cols[["rojo"]])
+    mean_df$chip_fill <- .dim_semaforo_color(
+      x = mean_df$media,
+      cortes = chip_cuts,
+      colores = list(
+        rojo = chip_cols[["rojo"]],
+        ambar = chip_cols[["ambar"]],
+        verde = chip_cols[["verde"]]
+      ),
+      digits = 0,
+      na_color = NA_character_
     )
     mean_df$chip_label <- paste0(
       format(round(mean_df$media, chip_decimales), nsmall = chip_decimales, trim = TRUE),

@@ -285,22 +285,27 @@ reporte_dimensiones <- function(
 #'   clave y como sufijo de la columna creada (`sub_<nombre>`).
 #' @param etiqueta Etiqueta humana del subindice.
 #' @param vars Vector de nombres de variables que componen este subindice.
+#' @param icono Ruta a un archivo PNG que representa visualmente este subindice.
+#'   Se usa en los graficadores de dimensiones para acompañar o reemplazar la
+#'   etiqueta de texto. Si es `NULL` (por defecto) no se muestra ningún ícono.
 #'
 #' @return Lista de clase \code{"prosecnur_subindice"}.
 #' @family indicador
 #' @export
-subindice <- function(nombre, etiqueta, vars) {
+subindice <- function(nombre, etiqueta, vars, icono = NULL) {
   nombre   <- as.character(nombre)[1]
   etiqueta <- as.character(etiqueta)[1]
   vars     <- as.character(vars)
   vars     <- vars[!is.na(vars) & nzchar(trimws(vars))]
   vars     <- unique(vars)
 
+  if (!is.null(icono)) icono <- as.character(icono)[1]
+
   if (!nzchar(nombre)) stop("`nombre` no puede estar vacio.", call. = FALSE)
   if (!nzchar(etiqueta)) etiqueta <- nombre
   if (!length(vars)) stop("`vars` debe contener al menos una variable.", call. = FALSE)
 
-  out <- list(nombre = nombre, etiqueta = etiqueta, vars = vars)
+  out <- list(nombre = nombre, etiqueta = etiqueta, vars = vars, icono = icono)
   class(out) <- c("prosecnur_subindice", "list")
   out
 }
@@ -314,22 +319,27 @@ subindice <- function(nombre, etiqueta, vars) {
 #'   clave y como sufijo de la columna creada (`idx_<nombre>`).
 #' @param etiqueta Etiqueta humana del indice.
 #' @param subindices Vector de nombres de subindices que componen este indice.
+#' @param icono Ruta a un archivo PNG que representa visualmente este indice.
+#'   Se usa en los graficadores de dimensiones para acompañar o reemplazar la
+#'   etiqueta de texto. Si es `NULL` (por defecto) no se muestra ningún ícono.
 #'
 #' @return Lista de clase \code{"prosecnur_indice"}.
 #' @family indicador
 #' @export
-indice <- function(nombre, etiqueta, subindices) {
+indice <- function(nombre, etiqueta, subindices, icono = NULL) {
   nombre     <- as.character(nombre)[1]
   etiqueta   <- as.character(etiqueta)[1]
   subindices <- as.character(subindices)
   subindices <- subindices[!is.na(subindices) & nzchar(trimws(subindices))]
   subindices <- unique(subindices)
 
+  if (!is.null(icono)) icono <- as.character(icono)[1]
+
   if (!nzchar(nombre)) stop("`nombre` no puede estar vacio.", call. = FALSE)
   if (!nzchar(etiqueta)) etiqueta <- nombre
   if (!length(subindices)) stop("`subindices` debe contener al menos un subindice.", call. = FALSE)
 
-  out <- list(nombre = nombre, etiqueta = etiqueta, subindices = subindices)
+  out <- list(nombre = nombre, etiqueta = etiqueta, subindices = subindices, icono = icono)
   class(out) <- c("prosecnur_indice", "list")
   out
 }
@@ -423,6 +433,7 @@ reporte_dimensiones_indices <- function(
     meta_subindices[[id]] <- list(
       salida = out_name,
       etiqueta = s$etiqueta,
+      icono = s$icono,
       vars = vars_ok,
       n_vars = length(vars_ok)
     )
@@ -484,6 +495,7 @@ reporte_dimensiones_indices <- function(
       meta_indices[[id]] <- list(
         salida = out_name,
         etiqueta = idx$etiqueta,
+        icono = idx$icono,
         refs = refs,
         refs_resueltas = cols,
         n_refs = length(cols)

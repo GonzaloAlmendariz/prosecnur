@@ -4,7 +4,7 @@
 \alias{subindice}
 \title{Definir un subindice dimensional}
 \usage{
-subindice(nombre, etiqueta, vars)
+subindice(nombre, etiqueta, vars, icono = NULL)
 }
 \arguments{
 \item{nombre}{Nombre interno del subindice (sin prefijo). Sera usado como
@@ -13,6 +13,10 @@ clave y como sufijo de la columna creada (\verb{sub_<nombre>}).}
 \item{etiqueta}{Etiqueta humana del subindice.}
 
 \item{vars}{Vector de nombres de variables que componen este subindice.}
+
+\item{icono}{Ruta a un archivo PNG que representa visualmente este subindice.
+Se usa en los graficadores de dimensiones para acompañar o reemplazar la
+etiqueta de texto. Si es \code{NULL} (por defecto) no se muestra ningún ícono.}
 }
 \value{
 Lista de clase \code{"prosecnur_subindice"}.

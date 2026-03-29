@@ -57,13 +57,29 @@ graficar_foda_dimensiones(
   factor_reduccion_tarjeta_dispersion = 0.85,
   chip_width_rel = NULL,
   score_suffix = NULL,
+  icono_size_foda = 1,
+  icono_color_foda = NULL,
+  icono_color_leyenda_foda = NULL,
+  distancia_icono_chip_foda = 0.14,
+  distancia_minima_icono_chip_foda = 0.006,
+  padding_chip_foda = 1,
+  padding_texto_chip_foda = 0.08,
+  separacion_chip_icono_rel_foda = NULL,
+  separacion_chip_icono_min_foda = NULL,
+  padding_chip_rel_foda = NULL,
+  padding_chip_label_lineas_foda = NULL,
+  forma_bloque_dispersion = c("rectangular", "burbuja"),
+  radio_burbuja_rel = 1,
+  colorear_fondo_foda = TRUE,
   color_fondo = NA,
   mostrar_leyenda = TRUE,
+  mostrar_leyenda_iconos = TRUE,
   usar_canvas = TRUE,
   canvas_h_title = 0,
   canvas_h_legend = 0.09,
   canvas_h_caption = 0.06,
   canvas_pad_top = 0.01,
+  icono_modo = c("reemplazar", "acompanar"),
   debug_ph_bordes = FALSE,
   debug_ph_col = "#FF00FF",
   debug_ph_lwd = 0.6,
@@ -205,14 +221,54 @@ solapes de tarjetas en dispersión.}
 \item{factor_reduccion_tarjeta_dispersion}{Factor de reducción de tamaño de
 tarjetas en modo dispersión.}
 
+\item{icono_size_foda}{Escala relativa de íconos en FODA (matriz y
+dispersión).}
+
+\item{icono_color_foda}{Color opcional para tintar los íconos PNG del FODA.}
+
+\item{icono_color_leyenda_foda}{Color opcional para tintar íconos de la
+leyenda FODA. Si es \code{NULL}, mantiene el color original del PNG.}
+
+\item{distancia_icono_chip_foda}{Separación vertical relativa entre ícono y
+chip en burbuja (proporción del radio de la burbuja).}
+
+\item{distancia_minima_icono_chip_foda}{Separación vertical mínima absoluta
+entre ícono y chip en burbuja.}
+
+\item{padding_chip_foda}{Escala relativa del padding interno del chip.
+Afecta ancho y alto efectivo del chip.}
+
+\item{padding_texto_chip_foda}{Aire interno del texto del chip en burbuja.
+Se usa para ampliar el tamaño útil del chip alrededor del número.}
+
+\item{separacion_chip_icono_rel_foda, separacion_chip_icono_min_foda, padding_chip_rel_foda, padding_chip_label_lineas_foda}{Alias legados de compatibilidad para los parámetros anteriores.}
+
+\item{forma_bloque_dispersion}{Forma de bloque en \code{modo_foda="dispersion"}:
+\code{"rectangular"} (tarjeta) o \code{"burbuja"} (círculo).}
+
+\item{radio_burbuja_rel}{Escala relativa del radio de burbujas en
+\code{modo_foda="dispersion"} cuando \code{forma_bloque_dispersion="burbuja"}.
+\code{1} conserva el tamaño por defecto.}
+
+\item{colorear_fondo_foda}{Si \code{TRUE}, muestra color de fondo en los
+cuadrantes FODA. Si \code{FALSE}, los cuadrantes quedan sin relleno
+(solo bordes y líneas de referencia).}
+
 \item{color_fondo}{Color de fondo del gráfico.}
 
 \item{mostrar_leyenda}{Si \code{TRUE}, muestra leyenda explicativa.}
+
+\item{mostrar_leyenda_iconos}{Si \code{TRUE}, muestra el bloque de leyenda
+de íconos cuando \code{icono_modo="reemplazar"}.}
 
 \item{usar_canvas}{Si \code{TRUE}, compone con \code{cowplot}
 (título/panel/leyenda/pie).}
 
 \item{canvas_h_title, canvas_h_legend, canvas_h_caption, canvas_pad_top}{Proporciones de altura del canvas.}
+
+\item{icono_modo}{Modo de uso de íconos cuando existen rutas de PNG:
+\code{"reemplazar"} oculta texto y deja ícono; \code{"acompanar"}
+conserva texto + ícono.}
 
 \item{debug_ph_bordes, debug_ph_col, debug_ph_lwd}{Bordes de depuración.}
 

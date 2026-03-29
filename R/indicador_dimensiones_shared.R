@@ -68,6 +68,53 @@
 }
 
 #' @keywords internal
+.dim_semaforo_estado <- function(x, cortes, digits = 0L,
+                                 labels = c("rojo", "ambar", "verde")) {
+  cuts <- suppressWarnings(as.numeric(cortes))
+  cuts <- cuts[is.finite(cuts) & !is.na(cuts)]
+  if (length(cuts) < 2L) cuts <- c(50, 75)
+  cuts <- sort(unique(cuts))[1:2]
+  if (length(cuts) < 2L || cuts[1] >= cuts[2]) cuts <- c(50, 75)
+
+  labs <- as.character(labels %||% c("rojo", "ambar", "verde"))
+  if (length(labs) < 3L) labs <- c("rojo", "ambar", "verde")
+  labs <- labs[1:3]
+
+  x_round <- .dim_round_half_up(x, digits)
+  out <- ifelse(
+    is.na(x_round),
+    NA_character_,
+    ifelse(
+      x_round < cuts[1],
+      labs[1],
+      ifelse(x_round < cuts[2], labs[2], labs[3])
+    )
+  )
+  as.character(out)
+}
+
+#' @keywords internal
+.dim_semaforo_color <- function(x, cortes, colores, digits = 0L,
+                                na_color = NA_character_) {
+  est <- .dim_semaforo_estado(
+    x = x,
+    cortes = cortes,
+    digits = digits,
+    labels = c("rojo", "ambar", "verde")
+  )
+  cols <- colores %||% list()
+  col_rojo <- as.character(cols$rojo %||% "#D84B55")
+  col_ambar <- as.character(cols$ambar %||% "#E0B44C")
+  col_verde <- as.character(cols$verde %||% "#3A9A5B")
+  out <- ifelse(
+    is.na(est),
+    na_color,
+    ifelse(est == "rojo", col_rojo, ifelse(est == "ambar", col_ambar, col_verde))
+  )
+  as.character(out)
+}
+
+#' @keywords internal
 .dim_clamp <- function(x, lo, hi) max(lo, min(hi, x))
 
 #' @keywords internal
@@ -496,8 +543,13 @@
             key = key,
             mode = "general",
             label = label_idx(id_var, key),
+            icono = meta_indices[[key]]$icono %||% NULL,
             axis_vars = axis_vars,
-            axis_labels = vapply(axis_vars, label_sub, character(1))
+            axis_labels = vapply(axis_vars, label_sub, character(1)),
+            axis_iconos = lapply(axis_vars, function(av) {
+              sk <- .dim_nm_get(sub_var_to_key, av)
+              if (!is.null(sk) && nzchar(sk)) meta_subindices[[sk]]$icono else NULL
+            })
           )
         } else {
           key <- as.character(it$key %||% it$id %||% nm)[1]
@@ -511,9 +563,11 @@
             key = key,
             mode = "indicadores",
             label = label_sub(bvar, key),
+            icono = meta_subindices[[key]]$icono %||% NULL,
             block_var = bvar,
             axis_vars = axis_vars,
-            axis_labels = vapply(axis_vars, label_ind, character(1))
+            axis_labels = vapply(axis_vars, label_ind, character(1)),
+            axis_iconos = vector("list", length(axis_vars))
           )
         }
       }
@@ -555,8 +609,13 @@
         key = nm,
         mode = "general",
         label = label_idx(idx_var, nm),
+        icono = it$icono %||% NULL,
         axis_vars = axis_vars,
-        axis_labels = vapply(axis_vars, label_sub, character(1))
+        axis_labels = vapply(axis_vars, label_sub, character(1)),
+        axis_iconos = lapply(axis_vars, function(av) {
+          sk <- .dim_nm_get(sub_var_to_key, av)
+          if (!is.null(sk) && nzchar(sk)) meta_subindices[[sk]]$icono else NULL
+        })
       )
     }
   }
@@ -574,9 +633,11 @@
         key = sk,
         mode = "indicadores",
         label = label_sub(svar, sk),
+        icono = sl$icono %||% NULL,
         block_var = svar,
         axis_vars = axis_vars,
-        axis_labels = vapply(axis_vars, label_ind, character(1))
+        axis_labels = vapply(axis_vars, label_ind, character(1)),
+        axis_iconos = vector("list", length(axis_vars))
       )
     }
   }
@@ -893,6 +954,11 @@
   axis_labels <- as.character(obj$axis_labels %||% axis_vars)
   axis_labels <- axis_labels[match(axis_vars, as.character(obj$axis_vars))]
 
+  axis_iconos_raw <- obj$axis_iconos %||% vector("list", length(obj$axis_vars %||% character(0)))
+  axis_iconos <- axis_iconos_raw[match(axis_vars, as.character(obj$axis_vars %||% axis_vars))]
+  if (length(axis_iconos) != length(axis_vars)) axis_iconos <- vector("list", length(axis_vars))
+  names(axis_iconos) <- axis_labels
+
   include_total <- if (is.null(incluir_total)) {
     isTRUE(ctx$incluir_total_default)
   } else {
@@ -1038,6 +1104,8 @@
     group_order = group_order,
     group_colors = group_colors,
     semaforo = ctx$semaforo,
-    radar_min_ejes = ctx$radar_min_ejes
+    radar_min_ejes = ctx$radar_min_ejes,
+    axis_iconos = axis_iconos,
+    objective_icono = obj$icono %||% NULL
   )
 }

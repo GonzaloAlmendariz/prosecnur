@@ -110,6 +110,15 @@
 #' @param encabezado_separacion_in Separación vertical título/subtítulo.
 #' @param leyenda_desplazamiento_in Ajuste vertical de la leyenda.
 #' @param centro_cowplot Centro horizontal opcional para leyenda en canvas.
+#' @param axis_iconos Lista nombrada \code{eje -> ruta_png} para íconos de eje.
+#' @param icono_modo \code{"reemplazar"} oculta texto si hay ícono;
+#'   \code{"acompanar"} deja texto + ícono.
+#' @param icono_size_radar Escala relativa del ícono en ejes radar.
+#' @param icono_color_radar Color opcional para tintar los PNG de íconos.
+#' @param icono_color_leyenda_radar Color opcional para tintar los íconos de
+#'   la leyenda del radar. Si es \code{NULL}, conserva el color original.
+#' @param mostrar_leyenda_iconos Si \code{TRUE}, muestra bloque de leyenda de
+#'   íconos cuando \code{icono_modo = "reemplazar"}.
 #'
 #' @param debug_ph_bordes Si `TRUE`, dibuja bordes de depuración de placeholders.
 #' @param debug_ph_col,debug_ph_lwd Color y grosor de bordes de depuración.
@@ -266,6 +275,16 @@ graficar_radar <- function(
     ppt_master = "Office Theme",
 
     # -------------------------------------------------------------------------
+    # ÍCONOS
+    # -------------------------------------------------------------------------
+    axis_iconos   = NULL,   # named list: eje_label -> ruta PNG (NULL = sin icono)
+    icono_modo    = c("reemplazar", "acompanar"),
+    icono_size_radar = 0.12,  # fracción de lim_xy para radio del ícono
+    icono_color_radar = NULL,
+    icono_color_leyenda_radar = NULL,
+    mostrar_leyenda_iconos = TRUE,
+
+    # -------------------------------------------------------------------------
     # DEBUG PPT (callr / Rscript)
     # -------------------------------------------------------------------------
     debug_ppt = FALSE,
@@ -274,6 +293,44 @@ graficar_radar <- function(
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
   hjust_from_pos <- function(x) switch(x, "izquierda"=0, "centro"=0.5, "derecha"=1, 0.5)
+  normalize_optional_color <- function(color, arg_name = "color") {
+    if (exists(".dim_normalize_optional_color", mode = "function", inherits = TRUE)) {
+      return(.dim_normalize_optional_color(color, arg_name = arg_name))
+    }
+    if (is.null(color)) return(NULL)
+    color <- as.character(color)[1]
+    if (is.na(color) || !nzchar(trimws(color))) {
+      stop("`", arg_name, "` debe ser NULL o un color válido.", call. = FALSE)
+    }
+    ok <- !inherits(try(grDevices::col2rgb(color), silent = TRUE), "try-error")
+    if (!ok) stop("`", arg_name, "` debe ser NULL o un color válido.", call. = FALSE)
+    color
+  }
+  tint_icon_local <- function(img, tint_color = NULL) {
+    if (exists(".dim_tint_icon", mode = "function", inherits = TRUE)) {
+      return(.dim_tint_icon(img, tint_color = tint_color))
+    }
+    if (is.null(tint_color) || is.null(img)) return(img)
+    d <- dim(img)
+    if (is.null(d) || length(d) != 3L || d[3] < 3L) return(img)
+    tint <- as.numeric(grDevices::col2rgb(tint_color)) / 255
+    out <- img
+    lum <- (0.2126 * img[, , 1]) + (0.7152 * img[, , 2]) + (0.0722 * img[, , 3])
+    out[, , 1] <- pmax(0, pmin(1, tint[1] * lum))
+    out[, , 2] <- pmax(0, pmin(1, tint[2] * lum))
+    out[, , 3] <- pmax(0, pmin(1, tint[3] * lum))
+    out
+  }
+  load_icon_radar <- function(path, tint_color = NULL) {
+    if (exists(".dim_load_icon", mode = "function", inherits = TRUE)) {
+      return(.dim_load_icon(path, tint_color = tint_color))
+    }
+    if (is.null(path) || !nzchar(as.character(path %||% ""))) return(NULL)
+    path <- as.character(path)[1]
+    if (!file.exists(path) || !requireNamespace("png", quietly = TRUE)) return(NULL)
+    img <- tryCatch(png::readPNG(path), error = function(e) NULL)
+    tint_icon_local(img, tint_color = tint_color)
+  }
 
   textos_negrita <- textos_negrita %||% character(0)
 
@@ -287,6 +344,13 @@ graficar_radar <- function(
   escala_valor     <- match.arg(escala_valor)
   exportar         <- match.arg(exportar)
   leyenda_posicion <- match.arg(leyenda_posicion)
+  icono_modo       <- match.arg(icono_modo)
+  icono_color_radar <- normalize_optional_color(icono_color_radar, arg_name = "icono_color_radar")
+  icono_color_leyenda_radar <- normalize_optional_color(
+    icono_color_leyenda_radar,
+    arg_name = "icono_color_leyenda_radar"
+  )
+  mostrar_leyenda_iconos <- isTRUE(mostrar_leyenda_iconos)
   pos_titulo       <- match.arg(pos_titulo)
   pos_nota_pie     <- match.arg(pos_nota_pie)
   ppt_safe <- exportar %in% c("ppt","word", "rplot")
@@ -309,6 +373,12 @@ graficar_radar <- function(
 
   legend_key_spacing_x_cm <- suppressWarnings(as.numeric(legend_key_spacing_x_cm))
   if (!is.finite(legend_key_spacing_x_cm) || legend_key_spacing_x_cm < 0) legend_key_spacing_x_cm <- 0.10
+
+  icono_size_radar <- suppressWarnings(as.numeric(icono_size_radar)[1])
+  if (!is.finite(icono_size_radar) || is.na(icono_size_radar) || icono_size_radar <= 0) {
+    stop("`icono_size_radar` debe ser numérico positivo.", call. = FALSE)
+  }
+  icono_size_radar <- max(0.02, min(0.80, icono_size_radar))
 
   cortes_grilla <- suppressWarnings(as.integer(cortes_grilla))
   if (!is.finite(cortes_grilla) || cortes_grilla < 2L) cortes_grilla <- 5L
@@ -849,8 +919,25 @@ graficar_radar <- function(
     )
   }
 
+  # --- Íconos en ejes -------------------------------------------------------
+  has_iconos_radar <- is.list(axis_iconos) && any(
+    vapply(axis_iconos, function(x) !is.null(x) && nzchar(as.character(x %||% "")), logical(1))
+  )
+
+  # En modo "reemplazar", filtrar del texto los ejes que tienen ícono
+  lab_axes_text <- lab_axes
+  if (has_iconos_radar && identical(icono_modo, "reemplazar")) {
+    eje_orig_levels <- levels(df_plot$.eje)
+    has_icon_vec <- vapply(eje_orig_levels, function(lbl) {
+      ico <- axis_iconos[[lbl]]
+      !is.null(ico) && nzchar(as.character(ico %||% ""))
+    }, logical(1))
+    ejes_sin_icono <- eje_orig_levels[!has_icon_vec]
+    lab_axes_text <- lab_axes[lab_axes$eje %in% stringr::str_wrap(ejes_sin_icono, width = wrap_ejes), ]
+  }
+
   p <- p + ggplot2::geom_text(
-    data = lab_axes,
+    data = lab_axes_text,
     ggplot2::aes(
       x = .data$x,
       y = .data$y,
@@ -876,6 +963,39 @@ graficar_radar <- function(
   }
 
   lim_xy <- ring_max_plot * max(1.18, label_ring_mult * 1.05)
+
+  # --- Íconos en ejes (requiere lim_xy) -------------------------------------
+  if (has_iconos_radar) {
+    icon_r <- lim_xy * icono_size_radar
+    eje_orig_levels <- levels(df_plot$.eje)
+
+    for (k in seq_len(nrow(lab_axes))) {
+      eje_k_wrapped <- lab_axes$eje[k]
+      # Encontrar el label original que corresponde (antes del wrap)
+      eje_k_orig <- eje_orig_levels[k]
+      ico_path <- axis_iconos[[eje_k_orig]]
+      if (is.null(ico_path) || !nzchar(as.character(ico_path %||% ""))) next
+
+      img <- load_icon_radar(ico_path, tint_color = icono_color_radar)
+      if (is.null(img)) next
+
+      cx <- lab_axes$x[k]
+      cy <- lab_axes$y[k]
+
+      # En modo "acompanar", desplazar el ícono un poco más lejos del centro
+      if (identical(icono_modo, "acompanar")) {
+        push <- 1 + icon_r / max(abs(cx), abs(cy), 1e-6) * 1.1
+        cx <- cx * push
+        cy <- cy * push
+      }
+
+      p <- p + ggplot2::annotation_custom(
+        grid::rasterGrob(img, interpolate = TRUE),
+        xmin = cx - icon_r, xmax = cx + icon_r,
+        ymin = cy - icon_r, ymax = cy + icon_r
+      )
+    }
+  }
 
   clip_mode <- if (ppt_safe) "on" else "off"
 
@@ -1189,6 +1309,12 @@ graficar_radar <- function(
   # ---------------------------------------------------------------
   # LEYENDA CENTRADA SOLO EN EL PH DEL PANEL
   # ---------------------------------------------------------------
+  # Determinar si hay leyenda de íconos (modo reemplazar con íconos)
+  has_icono_leyenda_radar <- isTRUE(mostrar_leyenda_iconos) &&
+    isTRUE(mostrar_leyenda) &&
+    has_iconos_radar &&
+    identical(icono_modo, "reemplazar")
+
   if (has_legend && !is.null(leg_grob)) {
 
     # ancho del panel (izquierda)
@@ -1198,8 +1324,11 @@ graficar_radar <- function(
     legend_ph_x <- 0
     legend_ph_w <- panel_w
 
-    y_legend_center <- y_legend0 + legend_h * 0.5
     dy_leg <- leyenda_desplazamiento_in / h_total_in
+
+    # Cuando hay leyenda de íconos, reservar mitad inferior del slot para la leyenda de series
+    leg_frac  <- if (has_icono_leyenda_radar) 0.45 else 1.0
+    y_leg_center <- y_legend0 + legend_h * leg_frac * 0.5
 
     leg_w_npc <- suppressWarnings(
       grid::convertWidth(sum(leg_grob$widths), "npc", valueOnly = TRUE)
@@ -1209,15 +1338,48 @@ graficar_radar <- function(
     canvas <- canvas + cowplot::draw_grob(
       leg_grob,
       x = legend_ph_x + (legend_ph_w * 0.5),
-      y = y_legend_center + dy_leg,
+      y = y_leg_center + dy_leg,
       width  = legend_ph_w,
-      height = legend_h,
+      height = legend_h * leg_frac,
       hjust = 0.5,
       vjust = 0.5
     )
 
     if (debug_ph_bordes) {
       canvas <- canvas + .ph_border(legend_ph_x, y_legend0, legend_ph_w, legend_h)
+    }
+  }
+
+  # Leyenda de íconos (parte superior del slot de leyenda)
+  if (has_icono_leyenda_radar) {
+    panel_w_icleg <- if (isTRUE(mostrar_tabla_derecha) && exists("w_radar")) w_radar else 1
+    iconos_leg_radar <- axis_iconos[
+      vapply(axis_iconos, function(x) !is.null(x) && nzchar(as.character(x %||% "")), logical(1))
+    ]
+    if (length(iconos_leg_radar)) {
+      icono_leg_g <- if (exists(".dim_icono_leyenda_block", mode = "function", inherits = TRUE)) {
+        .dim_icono_leyenda_block(
+          iconos_leg_radar,
+          icon_size = max(0.02, min(0.18, icono_size_radar * 0.28)),
+          size_text = size_leyenda,
+          colour_text = color_leyenda,
+          icon_color = icono_color_leyenda_radar
+        )
+      } else NULL
+
+      if (!is.null(icono_leg_g)) {
+        # Ubicar en la parte superior del slot de leyenda (fracción 0.45-1.0)
+        y_ico_leg_top <- y_legend0 + legend_h
+        y_ico_leg_bot <- y_legend0 + legend_h * 0.50
+        h_ico_leg     <- y_ico_leg_top - y_ico_leg_bot
+        y_ico_leg_ctr <- y_ico_leg_bot + h_ico_leg * 0.5
+
+        canvas <- canvas + cowplot::draw_plot(
+          icono_leg_g,
+          x = 0, y = y_ico_leg_bot,
+          width = panel_w_icleg, height = h_ico_leg
+        )
+      }
     }
   }
 

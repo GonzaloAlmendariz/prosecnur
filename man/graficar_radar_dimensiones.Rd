@@ -18,6 +18,11 @@ graficar_radar_dimensiones(
   titulo = NULL,
   subtitulo = NULL,
   nota_pie = NULL,
+  icono_modo = c("reemplazar", "acompanar"),
+  icono_size_radar = 0.12,
+  icono_color_radar = NULL,
+  icono_color_leyenda_radar = NULL,
+  mostrar_leyenda_iconos_radar = TRUE,
   ...
 )
 }
@@ -44,6 +49,19 @@ falla con error si hay valores observados por debajo de ese piso.}
 \item{iter_var, iter_level}{Variable y nivel opcionales de iteración.}
 
 \item{titulo, subtitulo, nota_pie}{Textos del gráfico.}
+
+\item{icono_modo}{Modo de etiqueta por ícono: \code{"reemplazar"} o
+\code{"acompanar"}.}
+
+\item{icono_size_radar}{Escala relativa del ícono en los ejes del radar.}
+
+\item{icono_color_radar}{Color opcional para tintar íconos PNG del radar.}
+
+\item{icono_color_leyenda_radar}{Color opcional para tintar íconos de la
+leyenda del radar. Si es \code{NULL}, conserva el color original del PNG.}
+
+\item{mostrar_leyenda_iconos_radar}{Si \code{TRUE}, muestra la leyenda de
+íconos en radar cuando \code{icono_modo="reemplazar"}.}
 
 \item{...}{Argumentos adicionales para \code{graficar_radar()} o \code{graficar_barras_numericas()}.}
 }

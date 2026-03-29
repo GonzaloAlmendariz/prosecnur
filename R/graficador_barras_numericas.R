@@ -123,6 +123,7 @@ graficar_barras_numericas <- function(
     etiquetas_series,
 
     orientacion          = c("vertical", "horizontal"),
+    orden_categorias     = c("original", "nivel", "mayor_menor", "menor_mayor"),
 
     formato_valor        = c("numero", "moneda"),
     decimales            = 1,
@@ -161,6 +162,8 @@ graficar_barras_numericas <- function(
     color_leyenda        = "#000000",
     size_leyenda         = 8,
     color_texto_barras   = "#000000",
+    color_texto_barras_interno = NULL,
+    color_texto_barras_externo = NULL,
     size_texto_barras    = 3,
     color_ejes           = "#000000",
     size_ejes            = 9,
@@ -204,10 +207,13 @@ graficar_barras_numericas <- function(
   `%||%` <- function(x, y) if (!is.null(x)) x else y
 
   orientacion   <- match.arg(orientacion)
+  orden_categorias <- match.arg(orden_categorias)
   formato_valor <- match.arg(formato_valor)
   exportar      <- match.arg(exportar)
   pos_titulo    <- match.arg(pos_titulo)
   pos_nota_pie  <- match.arg(pos_nota_pie)
+  if (is.null(color_texto_barras_interno)) color_texto_barras_interno <- color_texto_barras
+  if (is.null(color_texto_barras_externo)) color_texto_barras_externo <- color_texto_barras
 
   if (!requireNamespace("ggplot2", quietly = TRUE) ||
       !requireNamespace("dplyr", quietly = TRUE) ||
@@ -253,6 +259,18 @@ graficar_barras_numericas <- function(
   # orden categorías
   cat_vec  <- df_long[[var_categoria]]
   cat_lvls <- unique(cat_vec)
+  if (!identical(orden_categorias, "original")) {
+    cat_rank <- df_long |>
+      dplyr::group_by(.data[[var_categoria]]) |>
+      dplyr::summarise(.nivel = mean(.data$.valor, na.rm = TRUE), .groups = "drop")
+    cat_rank[[var_categoria]] <- as.character(cat_rank[[var_categoria]])
+    if (identical(orden_categorias, "menor_mayor")) {
+      cat_rank <- dplyr::arrange(cat_rank, .data$.nivel, .data[[var_categoria]])
+    } else {
+      cat_rank <- dplyr::arrange(cat_rank, dplyr::desc(.data$.nivel), .data[[var_categoria]])
+    }
+    cat_lvls <- cat_rank[[var_categoria]]
+  }
   if (invertir_barras) cat_lvls <- rev(cat_lvls)
   df_long[[var_categoria]] <- factor(cat_vec, levels = cat_lvls)
 
@@ -332,7 +350,7 @@ graficar_barras_numericas <- function(
             position    = ggplot2::position_dodge(width = 0.7),
             vjust       = 0.5,
             hjust       = 0.5,
-            color       = color_texto_barras,
+            color       = color_texto_barras_interno,
             size        = size_texto_barras,
             fontface    = if ("valores" %in% textos_negrita) "bold" else "plain",
             show.legend = FALSE
@@ -356,7 +374,7 @@ graficar_barras_numericas <- function(
             position    = ggplot2::position_dodge(width = 0.7),
             vjust       = 0,
             hjust       = 0.5,
-            color       = color_texto_barras,
+            color       = color_texto_barras_externo,
             size        = size_texto_barras,
             fontface    = if ("valores" %in% textos_negrita) "bold" else "plain",
             show.legend = FALSE
@@ -381,7 +399,7 @@ graficar_barras_numericas <- function(
             position    = ggplot2::position_dodge(width = 0.7),
             hjust       = 0.5,
             vjust       = 0.5,
-            color       = color_texto_barras,
+            color       = color_texto_barras_interno,
             size        = size_texto_barras,
             fontface    = if ("valores" %in% textos_negrita) "bold" else "plain",
             show.legend = FALSE
@@ -405,7 +423,7 @@ graficar_barras_numericas <- function(
             position    = ggplot2::position_dodge(width = 0.7),
             hjust       = 0,
             vjust       = 0.5,
-            color       = color_texto_barras,
+            color       = color_texto_barras_externo,
             size        = size_texto_barras,
             fontface    = if ("valores" %in% textos_negrita) "bold" else "plain",
             show.legend = FALSE

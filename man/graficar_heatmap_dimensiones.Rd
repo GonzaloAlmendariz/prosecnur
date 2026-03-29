@@ -43,6 +43,8 @@ graficar_heatmap_dimensiones(
   titulo_total_y = "Total cruce",
   mostrar_n_cruce_x = FALSE,
   mostrar_leyenda = TRUE,
+  icono_modo = c("reemplazar", "acompanar"),
+  icono_size_cm = 0.55,
   usar_canvas = TRUE,
   canvas_h_title = 0.13,
   canvas_h_legend = 0.09,

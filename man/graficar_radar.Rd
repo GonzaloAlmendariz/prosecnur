@@ -99,6 +99,12 @@ graficar_radar(
   ppt_append = TRUE,
   ppt_layout = "Blank",
   ppt_master = "Office Theme",
+  axis_iconos = NULL,
+  icono_modo = c("reemplazar", "acompanar"),
+  icono_size_radar = 0.12,
+  icono_color_radar = NULL,
+  icono_color_leyenda_radar = NULL,
+  mostrar_leyenda_iconos = TRUE,
   debug_ppt = FALSE,
   debug_ppt_log = "radar_ppt_export_debug.log"
 )
@@ -251,6 +257,21 @@ graficar_radar(
 \item{ppt_append}{Si \code{TRUE} y el archivo existe, agrega diapositiva/página.}
 
 \item{ppt_layout, ppt_master}{Layout y master en exportación PPT.}
+
+\item{axis_iconos}{Lista nombrada \code{eje -> ruta_png} para íconos de eje.}
+
+\item{icono_modo}{\code{"reemplazar"} oculta texto si hay ícono;
+\code{"acompanar"} deja texto + ícono.}
+
+\item{icono_size_radar}{Escala relativa del ícono en ejes radar.}
+
+\item{icono_color_radar}{Color opcional para tintar los PNG de íconos.}
+
+\item{icono_color_leyenda_radar}{Color opcional para tintar los íconos de
+la leyenda del radar. Si es \code{NULL}, conserva el color original.}
+
+\item{mostrar_leyenda_iconos}{Si \code{TRUE}, muestra bloque de leyenda de
+íconos cuando \code{icono_modo = "reemplazar"}.}
 
 \item{debug_ppt}{Si \code{TRUE}, usa ruta de exportación aislada para depuración de PPT.}
 
