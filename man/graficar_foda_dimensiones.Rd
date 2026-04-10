@@ -241,7 +241,8 @@ Afecta ancho y alto efectivo del chip.}
 \item{padding_texto_chip_foda}{Aire interno del texto del chip en burbuja.
 Se usa para ampliar el tamaño útil del chip alrededor del número.}
 
-\item{separacion_chip_icono_rel_foda, separacion_chip_icono_min_foda, padding_chip_rel_foda, padding_chip_label_lineas_foda}{Alias legados de compatibilidad para los parámetros anteriores.}
+\item{separacion_chip_icono_rel_foda, separacion_chip_icono_min_foda, }{padding_chip_rel_foda,padding_chip_label_lineas_foda Alias legados de
+compatibilidad para los parámetros anteriores.}
 
 \item{forma_bloque_dispersion}{Forma de bloque en \code{modo_foda="dispersion"}:
 \code{"rectangular"} (tarjeta) o \code{"burbuja"} (círculo).}
@@ -321,7 +322,9 @@ Other graficador:
 \code{\link{graficar_barras_apiladas}()},
 \code{\link{graficar_barras_numericas}()},
 \code{\link{graficar_boxplot}()},
+\code{\link{graficar_comparativo_radarbar_dimensiones}()},
 \code{\link{graficar_heatmap_dimensiones}()},
+\code{\link{graficar_media_rango}()},
 \code{\link{graficar_pie}()},
 \code{\link{graficar_ppt}()},
 \code{\link{graficar_radar}()},

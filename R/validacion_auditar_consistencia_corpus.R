@@ -689,7 +689,7 @@ auditar_consistencia_corpus <- function(corpus,
 
   rows <- lapply(seq_len(nrow(cand)), function(i) {
     aud <- tryCatch(
-      auditar_regla(evaluacion = evaluacion, ids = cand$id_regla[[i]], inst = inst, verbose = FALSE),
+      auditar_regla(ev = evaluacion, ids = cand$id_regla[[i]], inst = inst, verbose = FALSE),
       error = function(e) NULL
     )
 

@@ -1,6 +1,6 @@
 # =============================================================================
 # Graficadores de Dimensiones
-# - Heatmap semafórico en canvas
+# - Heatmap semaforico en canvas
 # - Wrapper radar/barras con payloads de dimensiones
 # - Wrapper radar+tabla, sin tablas nativas de PowerPoint
 # =============================================================================
@@ -78,7 +78,7 @@
     return(invisible(canvas))
   }
 
-  stop("Tipo de exportación no soportado.", call. = FALSE)
+  stop("Tipo de exportacion no soportado.", call. = FALSE)
 }
 
 #' @keywords internal
@@ -147,7 +147,7 @@
 }
 
 # ---------------------------------------------------------------------------
-# Helpers de íconos PNG
+# Helpers de iconos PNG
 # ---------------------------------------------------------------------------
 
 #' @keywords internal
@@ -155,10 +155,10 @@
   if (is.null(color)) return(NULL)
   color <- as.character(color)[1]
   if (is.na(color) || !nzchar(trimws(color))) {
-    stop("`", arg_name, "` debe ser NULL o un color válido.", call. = FALSE)
+    stop("`", arg_name, "` debe ser NULL o un color valido.", call. = FALSE)
   }
   ok <- !inherits(try(grDevices::col2rgb(color), silent = TRUE), "try-error")
-  if (!ok) stop("`", arg_name, "` debe ser NULL o un color válido.", call. = FALSE)
+  if (!ok) stop("`", arg_name, "` debe ser NULL o un color valido.", call. = FALSE)
   color
 }
 
@@ -240,7 +240,7 @@
   solid <- a > alpha_threshold
   if (!any(solid)) return(img)
 
-  # Borde interno: píxeles sólidos que tocan el fondo transparente.
+  # Borde interno: pixeles solidos que tocan el fondo transparente.
   edge <- solid
   nr <- nrow(solid)
   nc <- ncol(solid)
@@ -308,6 +308,44 @@
   .dim_trim_icon_alpha(img, pad = 1L)
 }
 
+#' Genera un raster RGBA con texto renderizado, para usarlo como icono.
+#' @keywords internal
+.dim_text_to_icon <- function(
+    label,
+    colour = "#0E3B74",
+    fontsize = 44,
+    px_width = 420,
+    px_height = 220,
+    fontface = "bold",
+    lineheight = 0.9
+) {
+  tmp <- tempfile(fileext = ".png")
+  on.exit(unlink(tmp), add = TRUE)
+  grDevices::png(
+    tmp,
+    width = px_width,
+    height = px_height,
+    bg = "transparent",
+    type = "cairo"
+  )
+  grid::grid.newpage()
+  grid::grid.text(
+    label,
+    x = 0.5,
+    y = 0.5,
+    gp = grid::gpar(
+      fontsize = fontsize,
+      col = colour,
+      fontface = fontface,
+      lineheight = lineheight
+    )
+  )
+  grDevices::dev.off()
+  if (!requireNamespace("png", quietly = TRUE)) return(NULL)
+  img <- tryCatch(png::readPNG(tmp), error = function(e) NULL)
+  .dim_trim_icon_alpha(img, pad = 3L)
+}
+
 #' @keywords internal
 .dim_load_icon_contraste <- function(path, tint_color = NULL, aplicar_borde = FALSE) {
   img <- .dim_load_icon(path, tint_color = tint_color)
@@ -317,13 +355,13 @@
   img
 }
 
-# Devuelve TRUE si algún ícono de la lista (names = etiquetas) es no-NULL
+# Devuelve TRUE si algun icono de la lista (names = etiquetas) es no-NULL
 #' @keywords internal
 .dim_has_iconos <- function(iconos) {
   is.list(iconos) && any(vapply(iconos, function(x) !is.null(x) && nzchar(x), logical(1)))
 }
 
-# Construye un bloque de leyenda con íconos pequeños + etiquetas (para heatmap/radar)
+# Construye un bloque de leyenda con iconos pequenos + etiquetas (para heatmap/radar)
 #' @keywords internal
 .dim_icono_leyenda_block <- function(
     axis_iconos,
@@ -331,42 +369,87 @@
     gap_icon_text = 0.008,
     size_text = 9,
     colour_text = "#004B8D",
-    icon_color = NULL
+    icon_color = NULL,
+    max_rows = 2L,
+    row_gap = 0.30,
+    compact = FALSE,
+    icon_height_rel = NULL,
+    item_padding = 0.025
 ) {
   labels <- names(axis_iconos)
   n <- length(labels)
   if (!n) return(cowplot::ggdraw() + cowplot::theme_nothing())
 
-  # Calcular anchos: icono + gap + texto ~ proporcional a nchar
-  txt_w <- pmax(nchar(labels, type = "width"), 4) * 0.011 + 0.03
-  item_w <- icon_size + gap_icon_text + txt_w + 0.025
-  total_w <- sum(item_w)
-  usable <- min(0.96, total_w)
-  scale <- if (total_w > 0) usable / total_w else 1
-  item_w <- item_w * scale
+  max_rows <- max(1L, as.integer(max_rows)[1])
+  row_gap <- pmax(0.08, suppressWarnings(as.numeric(row_gap)[1]))
+  item_padding <- pmax(0.004, suppressWarnings(as.numeric(item_padding)[1]))
+  compact <- isTRUE(compact)
 
-  cur_x <- max(0.02, (1 - sum(item_w)) / 2)
+  txt_w <- pmax(nchar(labels, type = "width"), if (compact) 3 else 4) *
+    if (compact) 0.0088 else 0.011
+  txt_w <- txt_w + if (compact) 0.016 else 0.03
+  item_w <- icon_size + gap_icon_text + txt_w + item_padding
+  avail_w <- 0.94
+
+  row_id <- rep(1L, n)
+  if (max_rows > 1L) {
+    cur_row <- 1L
+    cur_sum <- 0
+    for (i in seq_len(n)) {
+      next_sum <- cur_sum + item_w[i]
+      if (cur_row < max_rows && cur_sum > 0 && next_sum > avail_w) {
+        cur_row <- cur_row + 1L
+        cur_sum <- 0
+      }
+      row_id[i] <- cur_row
+      cur_sum <- cur_sum + item_w[i]
+    }
+  }
+
+  n_rows <- max(row_id)
+  y_rows <- if (n_rows <= 1L) {
+    0.5
+  } else {
+    seq(0.5 + row_gap * (n_rows - 1L) / 2, 0.5 - row_gap * (n_rows - 1L) / 2, length.out = n_rows)
+  }
+
   g <- cowplot::ggdraw()
 
-  for (i in seq_len(n)) {
-    img <- .dim_load_icon(axis_iconos[[i]], tint_color = icon_color)
-    if (!is.null(img)) {
-      g <- g + cowplot::draw_image(
-        img,
-        x = cur_x, y = 0.5,
-        width = icon_size * scale, height = 0.5,
-        hjust = 0, vjust = 0.5
+  for (rr in seq_len(n_rows)) {
+    idx_row <- which(row_id == rr)
+    row_units <- item_w[idx_row]
+    row_total <- sum(row_units)
+    row_scale <- if (row_total > avail_w) avail_w / row_total else 1
+    icon_w <- icon_size * row_scale
+    icon_h <- icon_height_rel %||%
+      if (compact) {
+        min(0.34, max(0.18, icon_w / 0.035 * 0.18))
+      } else {
+        min(0.90, icon_w / 0.035 * 0.50)
+      }
+    cur_x <- max(0.02, (1 - sum(row_units * row_scale)) / 2)
+
+    for (i in idx_row) {
+      img <- .dim_load_icon(axis_iconos[[i]], tint_color = icon_color)
+      if (!is.null(img)) {
+        g <- g + cowplot::draw_image(
+          img,
+          x = cur_x, y = y_rows[rr],
+          width = icon_w, height = icon_h,
+          hjust = 0, vjust = 0.5,
+          interpolate = TRUE
+        )
+      }
+      g <- g + cowplot::draw_label(
+        label = labels[i],
+        x = cur_x + icon_w + gap_icon_text,
+        y = y_rows[rr],
+        hjust = 0, vjust = 0.5,
+        size = size_text,
+        colour = colour_text
       )
+      cur_x <- cur_x + item_w[i] * row_scale
     }
-    g <- g + cowplot::draw_label(
-      label = labels[i],
-      x = cur_x + icon_size * scale + gap_icon_text,
-      y = 0.5,
-      hjust = 0, vjust = 0.5,
-      size = size_text,
-      colour = colour_text
-    )
-    cur_x <- cur_x + item_w[i]
   }
   g
 }
@@ -442,6 +525,328 @@
     data = wide,
     vars_valor = series_cols,
     etiquetas_series = stats::setNames(grupos, series_cols)
+  )
+}
+
+#' @keywords internal
+.dim_normalize_visual_mode <- function(modo, default = "auto") {
+  out <- as.character(modo %||% default)[1]
+  if (is.na(out) || !nzchar(trimws(out))) out <- default
+  out <- tolower(trimws(out))
+  if (out %in% c("chip", "barras_chip", "total_cruce_chip", "barras_total_chip")) {
+    out <- "barras_chip_total"
+  }
+  if (out %in% c("chip_ejes", "barras_chip_ejes", "axis_chip", "barras_axis_chip")) {
+    out <- "barras_chip_ejes"
+  }
+  if (!out %in% c("auto", "radar", "barras", "barras_chip_total", "barras_chip_ejes")) out <- default
+  out
+}
+
+#' @keywords internal
+.dim_primary_bar_color <- function(payload, fallback = "#1F5563") {
+  fill_one <- as.character(fallback)[1]
+  if (is.na(fill_one) || !nzchar(trimws(fill_one))) fill_one <- fallback
+  fill_one
+}
+
+#' @keywords internal
+.dim_payload_to_total_cruce_df <- function(payload) {
+  df <- payload$score_heat |>
+    dplyr::filter(.data$tipo == "total_cruce") |>
+    dplyr::transmute(
+      categoria = as.character(.data$grupo),
+      valor_raw = as.numeric(.data$score_raw),
+      valor_round = as.numeric(.data$score_round),
+      base = as.numeric(.data$base)
+    )
+
+  if (!nrow(df)) return(df)
+
+  ord <- payload$group_order_natural %||% payload$group_order %||% unique(as.character(df$categoria))
+  ord <- ord[ord %in% unique(as.character(df$categoria))]
+  if (!length(ord)) ord <- unique(as.character(df$categoria))
+
+  df$categoria <- factor(df$categoria, levels = ord)
+  fill_one <- .dim_primary_bar_color(payload, fallback = "#1F5563")
+  df$fill_bar <- rep(fill_one, nrow(df))
+  df
+}
+
+#' @keywords internal
+.dim_payload_to_axis_total_df <- function(payload) {
+  df <- payload$score_plot |>
+    dplyr::transmute(
+      categoria = as.character(.data$axis_label),
+      grupo = as.character(.data$grupo),
+      valor_raw = as.numeric(.data$score_raw),
+      valor_round = as.numeric(.data$score_round),
+      base = as.numeric(.data$base)
+    )
+
+  if (!nrow(df)) return(df)
+
+  grupo_pref <- payload$group_order_natural %||% payload$group_order %||% character(0)
+  grupo_ref <- if ("Total" %in% grupo_pref) "Total" else if (length(grupo_pref)) grupo_pref[1] else unique(df$grupo)[1]
+  df <- df[df$grupo == grupo_ref, , drop = FALSE]
+  if (!nrow(df)) return(df)
+
+  ord <- payload$axis_order_plot %||% unique(as.character(df$categoria))
+  ord <- ord[ord %in% unique(as.character(df$categoria))]
+  if (!length(ord)) ord <- unique(as.character(df$categoria))
+
+  df$categoria <- factor(df$categoria, levels = ord)
+  fill_one <- .dim_primary_bar_color(payload, fallback = "#1F5563")
+  df$fill_bar <- rep(fill_one, nrow(df))
+  df
+}
+
+#' @keywords internal
+.dim_plot_barras_chip_df <- function(
+    df,
+    payload,
+    titulo = NULL,
+    subtitulo = NULL,
+    nota_pie = NULL,
+    note_outside = FALSE,
+    ...
+) {
+  if (!nrow(df)) return(.dim_blank_canvas("Sin datos para mostrar"))
+  extra_args <- list(...)
+  color_barra_unica <- as.character(extra_args$color_barra_unica %||% .dim_primary_bar_color(payload, fallback = "#1F5563"))[1]
+  if (!is.na(color_barra_unica) && nzchar(trimws(color_barra_unica))) {
+    df$fill_bar <- rep(color_barra_unica, nrow(df))
+  }
+
+  df$categoria <- factor(as.character(df$categoria), levels = levels(df$categoria) %||% unique(as.character(df$categoria)))
+
+  sem <- payload$semaforo %||% list()
+  cortes_chip <- suppressWarnings(as.numeric(extra_args$cortes_chip %||% sem$cortes %||% c(60, 80)))
+  cortes_chip <- cortes_chip[is.finite(cortes_chip) & !is.na(cortes_chip)]
+  if (length(cortes_chip) < 2L) cortes_chip <- c(60, 80)
+  cortes_chip <- sort(unique(cortes_chip))[1:2]
+  if (length(cortes_chip) < 2L || cortes_chip[1] >= cortes_chip[2]) cortes_chip <- c(60, 80)
+
+  chip_colores <- extra_args$chip_colores %||% sem$colores %||% list(
+    rojo = "#D84B55",
+    ambar = "#E0B44C",
+    verde = "#3A9A5B"
+  )
+  semaforo_anclas_degradado <- extra_args$semaforo_anclas_degradado %||% sem$anclas_degradado %||% NULL
+  semaforo_gradiente_colores <- extra_args$semaforo_gradiente_colores %||% sem$gradiente_colores %||% NULL
+  semaforo_gradiente_valores <- extra_args$semaforo_gradiente_valores %||% sem$gradiente_valores %||% NULL
+  semaforo_gradiente_limites <- extra_args$semaforo_gradiente_limites %||% sem$gradiente_limites %||% NULL
+  semaforo_gradiente_segmentos <- extra_args$semaforo_gradiente_segmentos %||% sem$gradiente_segmentos %||% 20L
+  modo_semaforo <- .dim_normalize_semaforo_modo(extra_args$modo_semaforo %||% sem$modo %||% "grupos")
+  chip_decimales <- suppressWarnings(as.integer(extra_args$chip_decimales %||% extra_args$decimales %||% 0L)[1])
+  if (!is.finite(chip_decimales) || is.na(chip_decimales) || chip_decimales < 0L) chip_decimales <- 0L
+
+  df$chip_fill <- .dim_semaforo_color(
+    x = df$valor_raw,
+    cortes = cortes_chip,
+    colores = chip_colores,
+    digits = chip_decimales,
+    modo = modo_semaforo,
+    anclas_degradado = semaforo_anclas_degradado,
+    gradiente_colores = semaforo_gradiente_colores,
+    gradiente_valores = semaforo_gradiente_valores,
+    gradiente_limites = semaforo_gradiente_limites,
+    gradiente_segmentos = semaforo_gradiente_segmentos
+  )
+  df$chip_label <- ifelse(
+    is.na(df$valor_raw),
+    "",
+    format(.dim_round_half_up(df$valor_raw, chip_decimales), nsmall = chip_decimales, trim = TRUE)
+  )
+
+  size_titulo <- suppressWarnings(as.numeric(extra_args$size_titulo %||% 10.5)[1])
+  if (!is.finite(size_titulo) || is.na(size_titulo) || size_titulo <= 0) size_titulo <- 10.5
+  size_subtitulo <- suppressWarnings(as.numeric(extra_args$size_subtitulo %||% 8.6)[1])
+  if (!is.finite(size_subtitulo) || is.na(size_subtitulo) || size_subtitulo <= 0) size_subtitulo <- 8.6
+  size_ejes <- suppressWarnings(as.numeric(extra_args$size_ejes %||% 8.8)[1])
+  if (!is.finite(size_ejes) || is.na(size_ejes) || size_ejes <= 0) size_ejes <- 8.8
+  size_chip <- suppressWarnings(as.numeric(extra_args$size_texto_chip %||% 3.2)[1])
+  if (!is.finite(size_chip) || is.na(size_chip) || size_chip <= 0) size_chip <- 3.2
+  chip_texto_color <- as.character(extra_args$chip_texto_color %||% "#FFFFFF")[1]
+  if (is.na(chip_texto_color) || !nzchar(trimws(chip_texto_color))) chip_texto_color <- "#FFFFFF"
+  ancho_barras <- suppressWarnings(as.numeric(extra_args$ancho_barras %||% 0.62)[1])
+  if (!is.finite(ancho_barras) || is.na(ancho_barras) || ancho_barras <= 0) ancho_barras <- 0.62
+  wrap_width <- suppressWarnings(as.integer(extra_args$ancho_max_eje_cat %||% 14L)[1])
+  if (!is.finite(wrap_width) || is.na(wrap_width) || wrap_width < 8L) wrap_width <- 14L
+
+  max_val <- max(df$valor_raw, na.rm = TRUE)
+  if (!is.finite(max_val) || is.na(max_val)) max_val <- 100
+
+  limites_y <- suppressWarnings(as.numeric(extra_args$limites_y %||% c(55, 100)))
+  limites_y <- limites_y[is.finite(limites_y) & !is.na(limites_y)]
+  if (length(limites_y) >= 2L) {
+    y_min <- min(limites_y[1:2], na.rm = TRUE)
+    y_max <- max(limites_y[1:2], na.rm = TRUE)
+  } else {
+    y_min <- max(0, min(cortes_chip, na.rm = TRUE) - 5)
+    y_max <- 100
+  }
+  if (!is.finite(y_min) || is.na(y_min) || y_min < 0) y_min <- 0
+  if (!is.finite(y_max) || is.na(y_max)) y_max <- 100
+  y_max <- max(y_max, max_val * 1.06, max(cortes_chip, na.rm = TRUE) * 1.03)
+  if (y_max <= y_min) y_max <- y_min + 10
+
+  y_breaks <- suppressWarnings(as.numeric(extra_args$cortes_y %||% seq(60, 100, by = 10)))
+  y_breaks <- y_breaks[is.finite(y_breaks) & !is.na(y_breaks)]
+  if (!length(y_breaks)) {
+    y_breaks <- pretty(c(y_min, y_max), n = 5)
+  }
+  y_breaks <- sort(unique(c(y_breaks, cortes_chip)))
+  y_breaks <- y_breaks[y_breaks >= y_min & y_breaks <= y_max]
+  label_offset <- max(2, (y_max - y_min) * 0.06)
+  df$valor_plot <- pmax(0, df$valor_raw - y_min)
+  df$y_chip <- pmin(y_max - label_offset * 0.25, df$valor_raw + label_offset)
+  df$y_chip_plot <- pmax(0, df$y_chip - y_min)
+  cortes_plot <- pmax(0, cortes_chip - y_min)
+  y_breaks_plot <- pmax(0, y_breaks - y_min)
+
+  label_fun <- function(x) {
+    if (!requireNamespace("stringr", quietly = TRUE)) return(x)
+    stringr::str_wrap(x, width = wrap_width)
+  }
+
+  label_y_fun <- function(x) {
+    out <- x + y_min
+    out <- .dim_round_half_up(out, 0)
+    format(out, trim = TRUE, scientific = FALSE)
+  }
+
+  p <- ggplot2::ggplot(
+    df,
+    ggplot2::aes(x = .data$categoria, y = .data$valor_plot, fill = .data$categoria)
+  ) +
+    ggplot2::geom_hline(
+      data = data.frame(yint = cortes_plot),
+      ggplot2::aes(yintercept = .data$yint),
+      inherit.aes = FALSE,
+      colour = "#D6DEE8",
+      linewidth = 0.45,
+      linetype = "22"
+    ) +
+    ggplot2::geom_col(width = ancho_barras, show.legend = FALSE) +
+    ggplot2::geom_label(
+      data = df,
+      ggplot2::aes(x = .data$categoria, y = .data$y_chip_plot, label = .data$chip_label),
+      inherit.aes = FALSE,
+      fill = df$chip_fill,
+      colour = chip_texto_color,
+      label.size = 0,
+      label.padding = grid::unit(0.20, "lines"),
+      size = size_chip,
+      fontface = "bold",
+      show.legend = FALSE
+    ) +
+    ggplot2::scale_fill_manual(values = stats::setNames(df$fill_bar, as.character(df$categoria))) +
+    ggplot2::scale_x_discrete(labels = label_fun) +
+    ggplot2::scale_y_continuous(
+      breaks = y_breaks_plot,
+      labels = label_y_fun,
+      expand = ggplot2::expansion(mult = c(0, 0.03))
+    ) +
+    ggplot2::labs(
+      title = titulo %||% NULL,
+      subtitle = subtitulo %||% NULL,
+      caption = if (isTRUE(note_outside)) NULL else nota_pie %||% NULL
+    ) +
+    ggplot2::theme_minimal(base_size = 9) +
+    ggplot2::theme(
+      panel.grid.minor = ggplot2::element_blank(),
+      panel.grid.major.x = ggplot2::element_blank(),
+      panel.grid.major.y = ggplot2::element_line(colour = "#E4EAF1", linewidth = 0.35),
+      axis.title.x = ggplot2::element_blank(),
+      axis.title.y = ggplot2::element_blank(),
+      axis.text.x = ggplot2::element_text(
+        colour = "#35516C",
+        size = size_ejes,
+        hjust = 0.5,
+        vjust = 1,
+        margin = ggplot2::margin(t = 8)
+      ),
+      axis.text.y = ggplot2::element_text(colour = "#6D7F91", size = size_ejes),
+      plot.title = ggplot2::element_text(
+        colour = "#004B8D",
+        size = size_titulo,
+        face = "bold",
+        hjust = 0.5,
+        margin = ggplot2::margin(b = 3)
+      ),
+      plot.subtitle = ggplot2::element_text(
+        colour = "#4A5F75",
+        size = size_subtitulo,
+        hjust = 0.5,
+        margin = ggplot2::margin(b = 5)
+      ),
+      plot.caption = ggplot2::element_text(
+        colour = "#4A5F75",
+        size = 7.8,
+        hjust = 1
+      ),
+      plot.background = ggplot2::element_rect(fill = "transparent", colour = NA),
+      panel.background = ggplot2::element_rect(fill = "transparent", colour = NA),
+      legend.background = ggplot2::element_rect(fill = "transparent", colour = NA),
+      plot.margin = ggplot2::margin(8, 10, 14, 10)
+    ) +
+    ggplot2::coord_cartesian(ylim = c(0, y_max - y_min), clip = "off")
+
+  alto_word_sugerido <- suppressWarnings(as.numeric(extra_args$alto_word_sugerido %||% 2.8)[1])
+  if (!is.finite(alto_word_sugerido) || is.na(alto_word_sugerido) || alto_word_sugerido <= 0) {
+    alto_word_sugerido <- 2.8
+  }
+  attr(p, "alto_word_sugerido") <- alto_word_sugerido
+  ancho_word_sugerido <- suppressWarnings(as.numeric(extra_args$ancho_word_sugerido %||% 5.8)[1])
+  if (is.finite(ancho_word_sugerido) && !is.na(ancho_word_sugerido) && ancho_word_sugerido > 0) {
+    attr(p, "ancho_word_sugerido") <- ancho_word_sugerido
+  }
+  if (isTRUE(note_outside) && !is.null(nota_pie) && nzchar(trimws(as.character(nota_pie)[1]))) {
+    attr(p, "note_outside") <- trimws(as.character(nota_pie)[1])
+  }
+  p
+}
+
+#' @keywords internal
+.dim_plot_total_cruce_barras_chip <- function(
+    payload,
+    titulo = NULL,
+    subtitulo = NULL,
+    nota_pie = NULL,
+    note_outside = FALSE,
+    ...
+) {
+  df <- .dim_payload_to_total_cruce_df(payload)
+  .dim_plot_barras_chip_df(
+    df = df,
+    payload = payload,
+    titulo = titulo,
+    subtitulo = subtitulo,
+    nota_pie = nota_pie,
+    note_outside = note_outside,
+    ...
+  )
+}
+
+#' @keywords internal
+.dim_plot_axis_total_barras_chip <- function(
+    payload,
+    titulo = NULL,
+    subtitulo = NULL,
+    nota_pie = NULL,
+    note_outside = FALSE,
+    ...
+) {
+  df <- .dim_payload_to_axis_total_df(payload)
+  .dim_plot_barras_chip_df(
+    df = df,
+    payload = payload,
+    titulo = titulo,
+    subtitulo = subtitulo,
+    nota_pie = nota_pie,
+    note_outside = note_outside,
+    ...
   )
 }
 
@@ -566,7 +971,11 @@
           tg$grobs[[kj]]$just <- "center"
           tg$grobs[[kj]]$x <- grid::unit(0.5, "npc")
           tg$grobs[[kj]]$y <- grid::unit(0.5, "npc")
-          tg$grobs[[kj]]$gp <- grid::gpar(col = text_blue, fontface = "plain", fontsize = body_size)
+          tg$grobs[[kj]]$gp <- grid::gpar(
+            col = text_blue,
+            fontface = if (i == 1L) "bold" else "plain",
+            fontsize = body_size
+          )
         }
       }
     }
@@ -651,39 +1060,42 @@
   canvas
 }
 
-#' Heatmap semafórico de dimensiones en canvas
+#' Heatmap semaforico de dimensiones en canvas
 #'
-#' Visualiza indices y subindices de dimensiones como heatmap semafórico (rojo /
-#' ámbar / verde). Requiere que `data` sea la salida encadenada de
+#' Visualiza indices y subindices de dimensiones como heatmap semaforico (rojo /
+#' ambar / verde). Requiere que `data` sea la salida encadenada de
 #' [reporte_dimensiones()] y [reporte_dimensiones_indices()].
 #'
 #' @param data Base recodificada e indexada; salida de
 #'   `reporte_dimensiones() |> reporte_dimensiones_indices()`.
-#' @param modo `"general"` (índices por subindices) o `"indicadores"` (subindices por ítem).
-#' @param objetivo Id técnico del catálogo (columna `idx_*` o clave de bloque).
+#' @param modo `"general"` (indices por subindices) o `"indicadores"` (subindices por item).
+#' @param objetivo Id tecnico del catalogo (columna `idx_*` o clave de bloque).
 #' @param instrumento Instrumento opcional. Si es `NULL`, se usa `attr(data, "instrumento_reporte")`.
-#' @param cruce Variable de comparación opcional (columna en `data`).
-#' @param incluir_total Si es `NULL`, usa el default de la configuración interna.
+#' @param cruce Variable de comparacion opcional (columna en `data`).
+#' @param incluir_total Si es `NULL`, usa el default de la configuracion interna.
+#' @param modo_semaforo Modo del semaforo para el heatmap: `"grupos"` mantiene
+#'   la clasificacion discreta actual y `"degradado"` interpola colores
+#'   alrededor de los cortes de referencia.
 #' @param brecha_filas,brecha_cols Si `TRUE`, agrega fila/columna de brecha
 #'   calculada como `(max - min)` en la matriz del heatmap.
 #' @param etiq_brecha_filas,etiq_brecha_cols Etiquetas para fila/columna de brecha.
 #' @param aplicar_gradiente_brecha Si `TRUE`, colorea celdas de brecha con gradiente.
 #' @param brecha_colores Vector de colores para brecha (`bajo`, `alto`).
-#' @param brecha_cortes Cortes numéricos (mín, máx) para escalar el gradiente de brecha.
+#' @param brecha_cortes Cortes numericos (min, max) para escalar el gradiente de brecha.
 #' @param filtros Lista nombrada de filtros por variable.
-#' @param iter_var Variable opcional de iteración (columna en `data`).
-#' @param iter_level Nivel específico de iteración.
-#' @param titulo,subtitulo,nota_pie Textos del gráfico.
-#' @param size_ejes_x Tamaño opcional de etiquetas del eje X. Si es `NULL`, usa `size_ejes`.
+#' @param iter_var Variable opcional de iteracion (columna en `data`).
+#' @param iter_level Nivel especifico de iteracion.
+#' @param titulo,subtitulo,nota_pie Textos del grafico.
+#' @param size_ejes_x Tamano opcional de etiquetas del eje X. Si es `NULL`, usa `size_ejes`.
 #' @param titulo_total_x,titulo_total_y Etiquetas para los totales en eje X y eje Y.
 #' @param mostrar_n_cruce_x Si `TRUE`, agrega `(N=...)` en etiquetas del eje X por cruce.
 #' @param usar_canvas Si `TRUE`, compone encabezado, panel, leyenda y pie con `cowplot`.
-#' @param debug_ph_bordes,debug_ph_col,debug_ph_lwd Borde de depuración del canvas.
-#' @param exportar Tipo de exportación: `"rplot"`, `"png"`, `"ppt"` o `"word"`.
+#' @param debug_ph_bordes,debug_ph_col,debug_ph_lwd Borde de depuracion del canvas.
+#' @param exportar Tipo de exportacion: `"rplot"`, `"png"`, `"ppt"` o `"word"`.
 #' @param path_salida Ruta de salida cuando `exportar != "rplot"`.
-#' @param ancho,alto,dpi Tamaño y resolución de exportación.
+#' @param ancho,alto,dpi Tamano y resolucion de exportacion.
 #'
-#' @return Objeto gráfico (canvas cowplot) o exportación invisible.
+#' @return Objeto grafico (canvas cowplot) o exportacion invisible.
 #' @family graficador
 #' @seealso [reporte_dimensiones()], [reporte_dimensiones_indices()],
 #'   [reporte_dimensiones_config()], [graficar_radar_dimensiones()]
@@ -695,6 +1107,7 @@ graficar_heatmap_dimensiones <- function(
     instrumento = NULL,
     cruce = NULL,
     incluir_total = NULL,
+    modo_semaforo = NULL,
     brecha_filas = FALSE,
     etiq_brecha_filas = "Brecha",
     brecha_cols = FALSE,
@@ -723,7 +1136,7 @@ graficar_heatmap_dimensiones <- function(
     size_texto_celdas = 10,
     color_fondo = NA,
     angle_x = 0,
-    titulo_total_x = "Total",
+    titulo_total_x = "Promedio\ngeneral",
     titulo_total_y = "Total cruce",
     mostrar_n_cruce_x = FALSE,
     mostrar_leyenda = TRUE,
@@ -767,7 +1180,7 @@ graficar_heatmap_dimensiones <- function(
   }
 
   titulo_total_x <- as.character(titulo_total_x %||% "Total")[1]
-  if (!nzchar(trimws(titulo_total_x))) titulo_total_x <- "Total"
+  if (!nzchar(trimws(titulo_total_x))) titulo_total_x <- "Promedio\ngeneral"
   titulo_total_y <- as.character(titulo_total_y %||% "Total cruce")[1]
   if (!nzchar(trimws(titulo_total_y))) titulo_total_y <- "Total cruce"
 
@@ -846,6 +1259,7 @@ graficar_heatmap_dimensiones <- function(
   }
 
   sem <- payload$semaforo
+  sem_modo <- .dim_normalize_semaforo_modo(modo_semaforo %||% sem$modo %||% "grupos")
   cuts_lab <- .dim_range_labels(sem$cortes[1], sem$cortes[2])
   legend_breaks <- cuts_lab
   legend_limits <- c(cuts_lab[1], cuts_lab[2], cuts_lab[3], "Sin dato")
@@ -901,7 +1315,7 @@ graficar_heatmap_dimensiones <- function(
   sc$grupo[sc$grupo == "Total"] <- titulo_total_x
   sc$axis_label[sc$axis_label == "Total cruce"] <- titulo_total_y
 
-  group_order <- payload$group_order %||% unique(as.character(sc_base$grupo))
+  group_order <- payload$group_order_natural %||% payload$group_order %||% unique(as.character(sc_base$grupo))
   group_order <- as.character(group_order)
   group_order[group_order == "Total"] <- titulo_total_x
   if (isTRUE(brecha_cols) && !(etiq_brecha_cols %in% group_order)) {
@@ -946,7 +1360,29 @@ graficar_heatmap_dimensiones <- function(
     group_order <- unique(group_order_new)
   }
 
-  sc$grupo <- factor(sc$grupo, levels = group_order)
+  # Ajusta automáticamente etiquetas largas del eje X para evitar solapes.
+  .wrap_heatmap_group <- function(x, width) {
+    x <- as.character(x %||% "")
+    if (!nzchar(trimws(x))) return(x)
+    if (!is.finite(width) || is.na(width) || width < 4) return(x)
+    paste(base::strwrap(x, width = width), collapse = "\n")
+  }
+
+  n_groups_plot <- max(1L, length(group_order))
+  wrap_width_x <- .dim_clamp(floor(44 / n_groups_plot), 8, 18)
+  group_order_display <- vapply(group_order, .wrap_heatmap_group, character(1), width = wrap_width_x)
+  map_group_display <- stats::setNames(group_order_display, group_order)
+  sc_grupo_raw <- as.character(sc$grupo)
+  sc$grupo <- unname(map_group_display[sc_grupo_raw])
+  miss_group_display <- is.na(sc$grupo) | !nzchar(sc$grupo)
+  sc$grupo[miss_group_display] <- sc_grupo_raw[miss_group_display]
+  max_lines_x <- max(
+    lengths(strsplit(group_order_display, "\n", fixed = TRUE)),
+    na.rm = TRUE
+  )
+  bottom_margin <- 8 + (max(1L, max_lines_x) - 1L) * 11
+
+  sc$grupo <- factor(sc$grupo, levels = group_order_display)
   sc$axis_label <- factor(sc$axis_label, levels = rev(axis_order_heat))
   sc$is_brecha <- as.character(sc$tipo %||% "") %in% c("brecha_cols", "brecha_filas", "brecha_corner")
   sc$estado <- .dim_semaforo_estado(
@@ -958,11 +1394,18 @@ graficar_heatmap_dimensiones <- function(
   sc$estado[is.na(sc$score_raw)] <- "Sin dato"
   sc$estado <- factor(sc$estado, levels = c(cuts_lab[1], cuts_lab[2], cuts_lab[3], "Sin dato"))
 
-  fill_std <- dplyr::case_when(
-    sc$estado == cuts_lab[1] ~ sem$rojo,
-    sc$estado == cuts_lab[2] ~ sem$ambar,
-    sc$estado == cuts_lab[3] ~ sem$verde,
-    TRUE ~ sem$na
+  fill_std <- .dim_semaforo_color(
+    x = sc$score_raw,
+    cortes = sem$cortes,
+    colores = list(rojo = sem$rojo, ambar = sem$ambar, verde = sem$verde),
+    digits = 0,
+    na_color = sem$na,
+    modo = sem_modo,
+    anclas_degradado = sem$anclas_degradado %||% NULL,
+    gradiente_colores = sem$gradiente_colores %||% NULL,
+    gradiente_valores = sem$gradiente_valores %||% NULL,
+    gradiente_limites = sem$gradiente_limites %||% NULL,
+    gradiente_segmentos = sem$gradiente_segmentos %||% 20L
   )
   fill_brecha <- rep(col_brecha_alto, nrow(sc))
   if (isTRUE(aplicar_gradiente_brecha)) {
@@ -1011,7 +1454,7 @@ graficar_heatmap_dimensiones <- function(
       legend.key = ggplot2::element_rect(fill = color_fondo, color = NA),
       plot.background = ggplot2::element_rect(fill = color_fondo, color = NA),
       panel.background = ggplot2::element_rect(fill = color_fondo, color = NA),
-      plot.margin = ggplot2::margin(8, 12, 8, 8)
+      plot.margin = ggplot2::margin(8, 12, bottom_margin, 8)
     )
 
   if (!isTRUE(usar_canvas)) {
@@ -1030,30 +1473,45 @@ graficar_heatmap_dimensiones <- function(
 
   p_panel <- p_panel + ggplot2::theme(legend.position = "none")
 
-  # --- Íconos en el heatmap --------------------------------------------------
+  # --- Iconos en el heatmap --------------------------------------------------
   axis_iconos_heat <- payload$axis_iconos %||% list()
   has_iconos_heat  <- .dim_has_iconos(axis_iconos_heat)
 
   if (has_iconos_heat) {
     n_rows_heat <- length(axis_order_heat)
+    .heat_row_icon <- function(i, lbl) {
+      if (i == 1L) return(NULL)
+      if (length(axis_iconos_heat) >= (i - 1L)) {
+        ico_pos <- axis_iconos_heat[[i - 1L]]
+        if (!is.null(ico_pos) && nzchar(as.character(ico_pos))) return(ico_pos)
+      }
+      ico_lbl <- axis_iconos_heat[[lbl]]
+      if (!is.null(ico_lbl) && nzchar(as.character(ico_lbl))) return(ico_lbl)
+      NULL
+    }
 
-    # Quitar etiquetas de texto del eje Y (en ambos modos el label panel lo reemplaza)
-    p_panel <- p_panel + ggplot2::theme(
-      axis.text.y  = ggplot2::element_blank(),
-      axis.ticks.y = ggplot2::element_blank()
-    )
+    if (identical(icono_modo, "reemplazar")) {
+      p_panel <- p_panel +
+        ggplot2::scale_y_discrete(
+          labels = stats::setNames(rep("", length(axis_order_heat)), axis_order_heat)
+        ) +
+        ggplot2::theme(axis.ticks.y = ggplot2::element_blank())
+    } else {
+      p_panel <- p_panel + ggplot2::theme(
+        axis.text.y  = ggplot2::element_blank(),
+        axis.ticks.y = ggplot2::element_blank()
+      )
+    }
 
-    icon_ac <- cowplot::axis_canvas(p_panel, axis = "y")
+    if (identical(icono_modo, "acompanar")) {
+      icon_ac <- cowplot::axis_canvas(p_panel, axis = "y")
 
-    for (i in seq_len(n_rows_heat)) {
-      lbl_heat <- axis_order_heat[[i]]
-      # La primera fila es "Total cruce" (renombrado), sin ícono
-      ico_path <- if (i == 1L) NULL else axis_iconos_heat[[lbl_heat]]
-      img      <- .dim_load_icon(ico_path)
-      y_pos    <- n_rows_heat + 1L - i   # posición entera en escala discreta
+      for (i in seq_len(n_rows_heat)) {
+        lbl_heat <- axis_order_heat[[i]]
+        ico_path <- .heat_row_icon(i, lbl_heat)
+        img      <- .dim_load_icon(ico_path)
+        y_pos    <- n_rows_heat + 1L - i
 
-      if (identical(icono_modo, "acompanar")) {
-        # Ícono pequeño a la izquierda + etiqueta a la derecha
         if (!is.null(img)) {
           icon_ac <- icon_ac + ggplot2::annotation_custom(
             grid::rasterGrob(img, interpolate = TRUE),
@@ -1070,24 +1528,63 @@ graficar_heatmap_dimensiones <- function(
           size  = size_ejes / 3,
           colour = color_ejes
         )
-      } else {
-        # "reemplazar": solo ícono (la leyenda lleva el texto)
+      }
+    } else {
+      icon_ac <- cowplot::ggdraw()
+      row_h_npc <- 1 / max(1, n_rows_heat)
+      icon_h_npc <- min(0.13, row_h_npc * 0.56)
+      y_npc_rows <- rev(((seq_len(n_rows_heat) - 0.5) / n_rows_heat))
+
+      for (i in seq_len(n_rows_heat)) {
+        lbl_heat <- axis_order_heat[[i]]
+        ico_path <- .heat_row_icon(i, lbl_heat)
+        img      <- .dim_load_icon(ico_path)
+        is_text_icon <- FALSE
+
+        # Para filas sin icono (ej. indice general), generar imagen del texto
+        if (is.null(img)) {
+          img <- .dim_text_to_icon(
+            paste(strwrap(lbl_heat, width = 10), collapse = "\n"),
+            colour = color_ejes,
+            fontsize = 52,
+            px_width = 520,
+            px_height = 220,
+            fontface = "bold",
+            lineheight = 0.88
+          )
+          is_text_icon <- TRUE
+        }
+
+        y_npc <- y_npc_rows[[i]]
+
         if (!is.null(img)) {
-          icon_ac <- icon_ac + ggplot2::annotation_custom(
-            grid::rasterGrob(img, interpolate = TRUE),
-            xmin = 0.1, xmax = 0.9,
-            ymin = y_pos - 0.42, ymax = y_pos + 0.42
+          img_width <- if (isTRUE(is_text_icon)) 0.72 else 0.38
+          img_x <- if (isTRUE(is_text_icon)) (0.41 - img_width / 2) else 0.22
+          img_height <- if (isTRUE(is_text_icon)) min(0.16, row_h_npc * 0.78) else icon_h_npc
+          icon_ac <- icon_ac + cowplot::draw_image(
+            img,
+            x = img_x, y = y_npc - (img_height / 2),
+            width = img_width, height = img_height,
+            interpolate = TRUE
           )
         }
       }
     }
 
-    # Calcular ancho del panel de íconos
+    # Calcular ancho del panel de iconos
     icon_panel_cm <- if (identical(icono_modo, "acompanar")) {
       max_chars <- max(nchar(axis_order_heat, type = "width"), na.rm = TRUE)
       max(2.5, 0.22 * max_chars + icono_size_cm + 0.3)
     } else {
-      icono_size_cm
+      labels_sin_icono <- axis_order_heat[vapply(seq_along(axis_order_heat), function(i) {
+        ico <- .heat_row_icon(i, axis_order_heat[[i]])
+        is.null(ico) || !nzchar(as.character(ico))
+      }, logical(1))]
+      if (length(labels_sin_icono)) {
+        max(icono_size_cm, 1.20)
+      } else {
+        icono_size_cm
+      }
     }
 
     p_panel <- cowplot::insert_yaxis_grob(
@@ -1126,10 +1623,10 @@ graficar_heatmap_dimensiones <- function(
     cowplot::ggdraw() + cowplot::theme_nothing()
   }
 
-  # Cuando hay íconos en modo "reemplazar" añadir leyenda de íconos
+  # Cuando hay iconos en modo "reemplazar" anadir leyenda de iconos
   has_icono_legend <- has_iconos_heat && identical(icono_modo, "reemplazar")
   icono_legend_block <- if (has_icono_legend) {
-    # Solo los ítems con ícono (excluir Total cruce)
+    # Solo los items con icono (excluir Total cruce)
     iconos_legend <- axis_iconos_heat[
       !is.na(names(axis_iconos_heat)) &
       vapply(axis_iconos_heat, function(x) !is.null(x) && nzchar(x), logical(1))
@@ -1194,33 +1691,38 @@ graficar_heatmap_dimensiones <- function(
 #' Radar o barras de dimensiones en canvas
 #'
 #' Visualiza indices y bloques de dimensiones como radar (cuando hay 3+ ejes)
-#' o barras numéricas comparativas. Requiere que `data` sea la salida encadenada
+#' o barras numericas comparativas. Requiere que `data` sea la salida encadenada
 #' de [reporte_dimensiones()] y [reporte_dimensiones_indices()].
 #'
 #' @param data Base recodificada e indexada; salida de
 #'   `reporte_dimensiones() |> reporte_dimensiones_indices()`.
-#' @param modo `"general"` (índices por subindices) o `"indicadores"` (subindices por ítem).
-#' @param objetivo Id técnico del catálogo (columna `idx_*` o clave de bloque).
+#' @param modo `"general"` (indices por subindices) o `"indicadores"` (subindices por item).
+#' @param objetivo Id tecnico del catalogo (columna `idx_*` o clave de bloque).
 #' @param instrumento Instrumento opcional. Si es `NULL`, se usa `attr(data, "instrumento_reporte")`.
-#' @param cruce Variable de comparación opcional (columna en `data`).
+#' @param cruce Variable de comparacion opcional (columna en `data`).
 #' @param incluir_total Si es `NULL`, usa el default interno.
 #' @param inicio_eje_pct Piso visual del eje radial en porcentaje (0-99). Si se
 #'   define, se mapea internamente a `limites = c(inicio_eje_pct/100, 1)` y
 #'   falla con error si hay valores observados por debajo de ese piso.
 #' @param filtros Lista nombrada de filtros por variable.
-#' @param iter_var,iter_level Variable y nivel opcionales de iteración.
-#' @param titulo,subtitulo,nota_pie Textos del gráfico.
-#' @param icono_modo Modo de etiqueta por ícono: \code{"reemplazar"} o
+#' @param iter_var,iter_level Variable y nivel opcionales de iteracion.
+#' @param titulo,subtitulo,nota_pie Textos del grafico.
+#' @param icono_modo Modo de etiqueta por icono: \code{"reemplazar"} o
 #'   \code{"acompanar"}.
-#' @param icono_size_radar Escala relativa del ícono en los ejes del radar.
-#' @param icono_color_radar Color opcional para tintar íconos PNG del radar.
-#' @param icono_color_leyenda_radar Color opcional para tintar íconos de la
+#' @param icono_size_radar Escala relativa del icono en los ejes del radar.
+#' @param icono_color_radar Color opcional para tintar iconos PNG del radar.
+#' @param icono_color_leyenda_radar Color opcional para tintar iconos de la
 #'   leyenda del radar. Si es \code{NULL}, conserva el color original del PNG.
 #' @param mostrar_leyenda_iconos_radar Si \code{TRUE}, muestra la leyenda de
-#'   íconos en radar cuando \code{icono_modo="reemplazar"}.
+#'   iconos en radar cuando \code{icono_modo="reemplazar"}.
+#' @param filtrar_ejes_incompletos Si \code{TRUE}, excluye ejes que tengan
+#'   datos faltantes en alguno de los grupos comparados.
+#' @param agregar_nota_ejes_incompletos Si \code{TRUE} y
+#'   \code{filtrar_ejes_incompletos = TRUE}, agrega una nota con los ejes
+#'   excluidos y los grupos que si tenian dato.
 #' @param ... Argumentos adicionales para `graficar_radar()` o `graficar_barras_numericas()`.
 #'
-#' @return Objeto gráfico (canvas cowplot) o exportación invisible.
+#' @return Objeto grafico (canvas cowplot) o exportacion invisible.
 #' @family graficador
 #' @seealso [reporte_dimensiones()], [reporte_dimensiones_indices()],
 #'   [reporte_dimensiones_config()], [graficar_heatmap_dimensiones()]
@@ -1245,12 +1747,14 @@ graficar_radar_dimensiones <- function(
     icono_color_radar = NULL,
     icono_color_leyenda_radar = NULL,
     mostrar_leyenda_iconos_radar = TRUE,
+    filtrar_ejes_incompletos = TRUE,
+    agregar_nota_ejes_incompletos = TRUE,
     ...
 ) {
   icono_modo <- match.arg(icono_modo)
   icono_size_radar <- suppressWarnings(as.numeric(icono_size_radar)[1])
   if (!is.finite(icono_size_radar) || is.na(icono_size_radar) || icono_size_radar <= 0) {
-    stop("`icono_size_radar` debe ser numérico positivo.", call. = FALSE)
+    stop("`icono_size_radar` debe ser numerico positivo.", call. = FALSE)
   }
   icono_color_radar <- .dim_normalize_optional_color(icono_color_radar, arg_name = "icono_color_radar")
   icono_color_leyenda_radar <- .dim_normalize_optional_color(
@@ -1258,6 +1762,8 @@ graficar_radar_dimensiones <- function(
     arg_name = "icono_color_leyenda_radar"
   )
   mostrar_leyenda_iconos_radar <- isTRUE(mostrar_leyenda_iconos_radar)
+  filtrar_ejes_incompletos <- isTRUE(filtrar_ejes_incompletos)
+  agregar_nota_ejes_incompletos <- isTRUE(agregar_nota_ejes_incompletos)
   modo <- match.arg(modo)
   ctx <- .dim_build_context(data, instrumento = instrumento)
   payload <- .dim_build_payload(
@@ -1271,16 +1777,65 @@ graficar_radar_dimensiones <- function(
     iter_level = iter_level
   )
 
+  # --- Filtro de ejes comunes -----------------------------------------------
+  # Si algun cruce no tiene dato en una dimension (score_raw = NA), se excluye
+  # esa dimension del payload. Se auto-genera una nota al pie por eje excluido
+  # indicando que cruces si tienen dato.
+  if (isTRUE(filtrar_ejes_incompletos) && nrow(payload$score_plot)) {
+    sc_plot <- payload$score_plot
+
+    ejes_sin_dato <- sc_plot |>
+      dplyr::filter(is.na(.data$score_raw)) |>
+      dplyr::pull(.data$axis_label) |>
+      unique()
+
+    if (length(ejes_sin_dato) > 0) {
+      notas_filtro <- vapply(ejes_sin_dato, function(ej) {
+        gps_con_dato <- sc_plot |>
+          dplyr::filter(.data$axis_label == ej, !is.na(.data$score_raw)) |>
+          dplyr::pull(.data$grupo) |>
+          unique()
+        if (length(gps_con_dato) == 0) {
+          paste0("En ", ej, " no hay dato disponible")
+        } else {
+          paste0("En ", ej, " dato disponible solo para ",
+                 paste(gps_con_dato, collapse = ", "))
+        }
+      }, character(1))
+
+      if (isTRUE(agregar_nota_ejes_incompletos)) {
+        nota_filtro_str <- paste(notas_filtro, collapse = "\n")
+        nota_pie <- if (!is.null(nota_pie) && nzchar(nota_pie %||% "")) {
+          paste(nota_pie, nota_filtro_str, sep = "\n")
+        } else {
+          nota_filtro_str
+        }
+      }
+
+      ejes_comunes_labels <- setdiff(
+        unique(as.character(payload$axis_order_plot)),
+        ejes_sin_dato
+      )
+      payload$score_plot      <- sc_plot[!(sc_plot$axis_label %in% ejes_sin_dato), , drop = FALSE]
+      payload$axis_order_plot <- ejes_comunes_labels
+    }
+  }
+  # --------------------------------------------------------------------------
+
   radar_min_ejes_use <- suppressWarnings(as.integer(radar_min_ejes)[1])
   if (!is.finite(radar_min_ejes_use) || is.na(radar_min_ejes_use) || radar_min_ejes_use < 1L) {
     radar_min_ejes_use <- payload$radar_min_ejes %||% ctx$radar_min_ejes %||% 3L
   }
   n_ejes_plot <- length(unique(as.character(payload$axis_order_plot %||% character(0))))
-  payload$visual_mode <- if (n_ejes_plot >= radar_min_ejes_use) "radar" else "barras"
-  payload$radar_min_ejes <- radar_min_ejes_use
-
   extra_args <- list(...)
   extra_args <- .dim_alias_radar_extra_args(extra_args)
+  nota_pie_externa <- isTRUE(extra_args$nota_pie_externa %||% FALSE)
+  extra_args$nota_pie_externa <- NULL
+  visual_mode_pref <- .dim_normalize_visual_mode(extra_args$visual_mode %||% NULL, default = "auto")
+  extra_args$visual_mode <- NULL
+  visual_mode_auto <- if (n_ejes_plot >= radar_min_ejes_use) "radar" else "barras"
+  payload$visual_mode <- if (identical(visual_mode_pref, "auto")) visual_mode_auto else visual_mode_pref
+  payload$radar_min_ejes <- radar_min_ejes_use
 
   if (!nrow(payload$score_plot)) {
     blank <- .dim_blank_canvas("Sin datos para mostrar")
@@ -1297,6 +1852,34 @@ graficar_radar_dimensiones <- function(
     ))
   }
 
+  if (identical(payload$visual_mode, "barras_chip_total")) {
+    args_total_chip <- c(
+      list(
+        payload = payload,
+        titulo = titulo,
+        subtitulo = subtitulo,
+        nota_pie = nota_pie,
+        note_outside = nota_pie_externa
+      ),
+      extra_args
+    )
+    return(do.call(.dim_plot_total_cruce_barras_chip, args_total_chip))
+  }
+
+  if (identical(payload$visual_mode, "barras_chip_ejes")) {
+    args_axis_chip <- c(
+      list(
+        payload = payload,
+        titulo = titulo,
+        subtitulo = subtitulo,
+        nota_pie = nota_pie,
+        note_outside = nota_pie_externa
+      ),
+      extra_args
+    )
+    return(do.call(.dim_plot_axis_total_barras_chip, args_axis_chip))
+  }
+
   if (identical(payload$visual_mode, "radar")) {
     if (!exists("graficar_radar", mode = "function", inherits = TRUE)) {
       stop("No existe `graficar_radar()`.", call. = FALSE)
@@ -1307,7 +1890,7 @@ graficar_radar_dimensiones <- function(
     if (!is.null(inicio_eje_pct)) {
       inicio_eje_pct <- suppressWarnings(as.numeric(inicio_eje_pct)[1])
       if (!is.finite(inicio_eje_pct) || inicio_eje_pct < 0 || inicio_eje_pct >= 100) {
-        stop("`inicio_eje_pct` debe ser NULL o un número en [0, 100).", call. = FALSE)
+        stop("`inicio_eje_pct` debe ser NULL o un numero en [0, 100).", call. = FALSE)
       }
       vals <- suppressWarnings(as.numeric(df_plot$valor))
       vals <- vals[is.finite(vals) & !is.na(vals)]
@@ -1316,7 +1899,7 @@ graficar_radar_dimensiones <- function(
         if (is.finite(min_obs) && min_obs < inicio_eje_pct) {
           stop(
             "`inicio_eje_pct`=", format(inicio_eje_pct, trim = TRUE),
-            " no es válido: el mínimo observado es ",
+            " no es valido: el minimo observado es ",
             format(round(min_obs, 1), trim = TRUE),
             ". Ajuste el piso o revise los datos.",
             call. = FALSE
@@ -1327,6 +1910,7 @@ graficar_radar_dimensiones <- function(
         extra_args$limites <- c(inicio_eje_pct / 100, 1)
       }
     }
+    note_outside_txt <- nota_pie
     base_args <- list(
       data = df_plot,
       var_eje = "eje",
@@ -1336,7 +1920,7 @@ graficar_radar_dimensiones <- function(
       colores_series = payload$group_colors,
       titulo = titulo,
       subtitulo = subtitulo,
-      nota_pie = nota_pie,
+      nota_pie = if (isTRUE(nota_pie_externa)) NULL else nota_pie,
       axis_iconos = payload$axis_iconos %||% NULL,
       icono_modo = icono_modo,
       icono_size_radar = icono_size_radar,
@@ -1361,8 +1945,18 @@ graficar_radar_dimensiones <- function(
     )
 
     args <- .merge_args(base_args, extra_args)
+    if (isTRUE(nota_pie_externa)) {
+      # Blindaje: un `nota_pie` que venga desde presets/overrides no debe
+      # reingresar al grafico cuando la nota ya se externalizo.
+      args$nota_pie <- NULL
+      args$canvas_h_caption_in <- 0
+    }
     args <- .keep_formals(graficar_radar, args)
-    return(suppressWarnings(do.call(graficar_radar, args)))
+    out <- suppressWarnings(do.call(graficar_radar, args))
+    if (isTRUE(nota_pie_externa) && !is.null(note_outside_txt) && nzchar(trimws(note_outside_txt))) {
+      attr(out, "note_outside") <- trimws(as.character(note_outside_txt)[1])
+    }
+    return(out)
   }
 
   if (!exists("graficar_barras_numericas", mode = "function", inherits = TRUE)) {
@@ -1382,13 +1976,20 @@ graficar_radar_dimensiones <- function(
     mostrar_n_sobre_barras = FALSE,
     titulo = titulo,
     subtitulo = subtitulo,
-    nota_pie = nota_pie,
+    nota_pie = if (isTRUE(nota_pie_externa)) NULL else nota_pie,
     usar_canvas = TRUE
   )
 
   args <- .merge_args(base_args, extra_args)
+  if (isTRUE(nota_pie_externa)) {
+    args$nota_pie <- NULL
+  }
   args <- .keep_formals(graficar_barras_numericas, args)
-  suppressWarnings(do.call(graficar_barras_numericas, args))
+  out <- suppressWarnings(do.call(graficar_barras_numericas, args))
+  if (isTRUE(nota_pie_externa) && !is.null(nota_pie) && nzchar(trimws(nota_pie))) {
+    attr(out, "note_outside") <- trimws(as.character(nota_pie)[1])
+  }
+  out
 }
 
 #' @title Comparativo de dimensiones con radar o barras
@@ -1443,23 +2044,23 @@ graficar_comparativo_radarbar_dimensiones <- function(
 #' Radar + tabla de dimensiones en canvas
 #'
 #' Visualiza indices y bloques de dimensiones como radar o barras, con una
-#' tabla adjunta de valores numéricos. Requiere que `data` sea la salida
+#' tabla adjunta de valores numericos. Requiere que `data` sea la salida
 #' encadenada de [reporte_dimensiones()] y [reporte_dimensiones_indices()].
 #'
 #' @param data Base recodificada e indexada; salida de
 #'   `reporte_dimensiones() |> reporte_dimensiones_indices()`.
-#' @param modo `"general"` (índices por subindices) o `"indicadores"` (subindices por ítem).
-#' @param objetivo Id técnico del catálogo (columna `idx_*` o clave de bloque).
+#' @param modo `"general"` (indices por subindices) o `"indicadores"` (subindices por item).
+#' @param objetivo Id tecnico del catalogo (columna `idx_*` o clave de bloque).
 #' @param instrumento Instrumento opcional. Si es `NULL`, se usa `attr(data, "instrumento_reporte")`.
-#' @param cruce Variable de comparación opcional (columna en `data`).
+#' @param cruce Variable de comparacion opcional (columna en `data`).
 #' @param incluir_total Si es `NULL`, usa el default interno.
 #' @param filtros Lista nombrada de filtros por variable.
-#' @param iter_var,iter_level Variable y nivel opcionales de iteración.
-#' @param titulo,subtitulo,nota_pie Textos del gráfico.
-#' @param titulo_tabla Título de la primera columna de la tabla adjunta.
+#' @param iter_var,iter_level Variable y nivel opcionales de iteracion.
+#' @param titulo,subtitulo,nota_pie Textos del grafico.
+#' @param titulo_tabla Titulo de la primera columna de la tabla adjunta.
 #' @param ... Argumentos adicionales del radar, barras y tabla.
 #'
-#' @return Objeto gráfico (canvas cowplot) o exportación invisible.
+#' @return Objeto grafico (canvas cowplot) o exportacion invisible.
 #' @family graficador
 #' @seealso [reporte_dimensiones()], [reporte_dimensiones_indices()],
 #'   [reporte_dimensiones_config()], [graficar_heatmap_dimensiones()]
@@ -1581,7 +2182,7 @@ graficar_radar_tabla_dimensiones <- function(
     header_size = extra_args$tabla_header_size %||% 8,
     body_size = extra_args$tabla_body_size %||% 7,
     firstcol_bold = extra_args$tabla_firstcol_bold %||% TRUE,
-    highlight_threshold = extra_args$umbral_rojo_pct %||% 60,
+    highlight_threshold = extra_args$umbral_rojo_pct %||% 50,
     padding_mm = extra_args$tabla_padding_mm %||% 3,
     firstcol_frac = extra_args$tabla_firstcol_frac %||% 0.55,
     wrap_header = extra_args$tabla_wrap_header %||% 14
@@ -1634,19 +2235,19 @@ graficar_radar_tabla_dimensiones <- function(
 # FODA dimensiones
 # =============================================================================
 
-#' Matriz FODA automática de dimensiones
+#' Matriz FODA automatica de dimensiones
 #'
-#' Clasifica indicadores o subíndices en una matriz 2x2 FODA (Fortalezas,
-#' Oportunidades, Debilidades, Amenazas) basándose en dos ejes derivados de
-#' los datos: el puntaje promedio (0-100) y la variabilidad (desviación
-#' estándar) entre respondentes.
+#' Clasifica indicadores o subindices en una matriz 2x2 FODA (Fortalezas,
+#' Oportunidades, Debilidades, Amenazas) basandose en dos ejes derivados de
+#' los datos: el puntaje promedio (0-100) y la variabilidad (desviacion
+#' estandar) entre respondentes.
 #'
-#' La clasificación es automática:
+#' La clasificacion es automatica:
 #' \itemize{
 #'   \item \strong{Fortaleza}: puntaje alto + SD baja (consolidado y fuerte).
 #'   \item \strong{Oportunidad}: puntaje alto + SD alta (fuerte pero desigual).
 #'   \item \strong{Debilidad}: puntaje bajo + SD baja (rezago estructural).
-#'   \item \strong{Amenaza}: puntaje bajo + SD alta (rezago con alta dispersión).
+#'   \item \strong{Amenaza}: puntaje bajo + SD alta (rezago con alta dispersion).
 #' }
 #'
 #' @param data Base recodificada e indexada; salida de
@@ -1654,16 +2255,16 @@ graficar_radar_tabla_dimensiones <- function(
 #' @param nivel \code{"subindices"} para clasificar columnas \verb{sub_*},
 #'   o \code{"indicadores"} para clasificar columnas \verb{r100_*} de un bloque.
 #' @param objetivo Para \code{nivel = "indicadores"}: clave del bloque en el
-#'   catálogo de indicadores. Para \code{nivel = "subindices"} es opcional (si
-#'   se provee, usa solo los axis_vars de ese índice).
-#' @param modo_foda Modo de visualización: \code{"matriz"} (cuadrantes con
+#'   catalogo de indicadores. Para \code{nivel = "subindices"} es opcional (si
+#'   se provee, usa solo los axis_vars de ese indice).
+#' @param modo_foda Modo de visualizacion: \code{"matriz"} (cuadrantes con
 #'   tarjetas) o \code{"dispersion"} (scatter con coordenadas reales).
 #' @param instrumento Instrumento opcional. Si es \code{NULL}, se usa
 #'   \code{attr(data, "instrumento_reporte")}.
 #' @param cruce Variable opcional de cruce. Solo se aplica cuando
 #'   \code{modo_foda = "dispersion"}.
 #' @param incluir_total Si \code{TRUE}, agrega el grupo total en modo
-#'   dispersión combinada con cruce.
+#'   dispersion combinada con cruce.
 #' @param solo_indice_general_cruce Reservado para compatibilidad. En
 #'   \code{nivel = "subindices"} con \code{modo_foda = "dispersion"} no se usa
 #'   para evitar reemplazar el desglose por cruce.
@@ -1671,113 +2272,116 @@ graficar_radar_tabla_dimensiones <- function(
 #' @param usar_pesos Si \code{TRUE} y existe columna de peso, calcula media y
 #'   SD ponderadas para clasificar cuadrantes.
 #' @param corte_score Corte de puntaje para clasificar alto/bajo. Si es
-#'   \code{NULL}, usa \code{semaforo$cortes[2]} (default 75), salvo en
+#'   \code{NULL}, usa \code{semaforo$cortes[2]} (default 80), salvo en
 #'   \code{modo_foda = "dispersion"} donde es obligatorio.
 #' @param corte_sd Corte de SD para clasificar variabilidad alta/baja. Si es
 #'   \code{NULL}, usa la mediana de las SDs calculadas.
 #' @param colores_foda Vector nombrado de 4 colores de fondo para los
 #'   cuadrantes (\code{fortaleza}, \code{oportunidad}, \code{debilidad},
 #'   \code{amenaza}).
-#' @param titulo,subtitulo,nota_pie Textos del gráfico.
-#' @param color_titulo,size_titulo Estilo del título.
-#' @param color_subtitulo,size_subtitulo Estilo del subtítulo.
-#' @param color_nota_pie,size_nota_pie Estilo del pie de página.
-#' @param color_cuadrante_titulo,size_cuadrante_titulo Estilo de los títulos
+#' @param titulo,subtitulo,nota_pie Textos del grafico.
+#' @param color_titulo,size_titulo Estilo del titulo.
+#' @param color_subtitulo,size_subtitulo Estilo del subtitulo.
+#' @param color_nota_pie,size_nota_pie Estilo del pie de pagina.
+#' @param color_cuadrante_titulo,size_cuadrante_titulo Estilo de los titulos
 #'   de cuadrante (FORTALEZAS, OPORTUNIDADES, etc.).
-#' @param titulos_areas_foda Vector nombrado con los títulos por cuadrante
+#' @param titulos_areas_foda Vector nombrado con los titulos por cuadrante
 #'   (\code{fortaleza}, \code{oportunidad}, \code{debilidad}, \code{amenaza}).
-#'   Si se omite, usa los títulos tradicionales por defecto.
-#' @param mostrar_subtitulo_area Si \code{TRUE}, muestra el subtítulo
-#'   descriptivo dentro de cada área del FODA.
-#' @param sd_tecnico Si \code{TRUE}, muestra el corte técnico de SD y eje X
-#'   numérico. Si \code{FALSE}, oculta el corte SD y usa extremos narrativos
-#'   en X (\code{"Menor dispersión"} / \code{"Mayor dispersión"}).
+#'   Si se omite, usa los titulos tradicionales por defecto.
+#' @param mostrar_subtitulo_area Si \code{TRUE}, muestra el subtitulo
+#'   descriptivo dentro de cada area del FODA.
+#' @param sd_tecnico Si \code{TRUE}, muestra el corte tecnico de SD y eje X
+#'   numerico. Si \code{FALSE}, oculta el corte SD y usa extremos narrativos
+#'   en X (\code{"Menor dispersion"} / \code{"Mayor dispersion"}).
 #' @param color_indice_total Color de la tarjeta del \code{"Indice"} total
-#'   global en modo dispersión con cruce.
-#' @param disposicion_recuadro Disposición del texto en tarjetas de dispersión
-#'   con cruce: \code{"dos_lineas"} (\code{subíndice} arriba y \code{cruce}
-#'   abajo), \code{"una_linea"} (ambos en una línea) o \code{"sin_cruce"}
-#'   (solo subíndice). El \code{Indice} total global siempre se muestra en una
-#'   sola línea con su nombre agregado.
+#'   global en modo dispersion con cruce.
+#' @param disposicion_recuadro Disposicion del texto en tarjetas de dispersion
+#'   con cruce: \code{"dos_lineas"} (\code{subindice} arriba y \code{cruce}
+#'   abajo), \code{"una_linea"} (ambos en una linea) o \code{"sin_cruce"}
+#'   (solo subindice). El \code{Indice} total global siempre se muestra en una
+#'   sola linea con su nombre agregado.
 #' @param etiqueta_cruce_en_dos_lineas Alias legado opcional para
 #'   compatibilidad. Si se define, \code{TRUE} equivale a
 #'   \code{disposicion_recuadro = "dos_lineas"} y \code{FALSE} a
 #'   \code{"una_linea"}.
-#' @param color_items,size_items Estilo de los ítems dentro de cada cuadrante.
+#' @param color_items,size_items Estilo de los items dentro de cada cuadrante.
 #' @param ancho_tarjeta_base_rel Ancho base relativo de tarjetas.
 #' @param factor_ancho_matriz Multiplicador del ancho de tarjeta para modo
 #'   \code{"matriz"}.
 #' @param factor_ancho_dispersion Multiplicador del ancho de tarjeta para modo
 #'   \code{"dispersion"}.
 #' @param ancho_recuadro_rel Ajuste relativo opcional del ancho de recuadro
-#'   respecto al cálculo automático (\code{1 = automático}).
-#' @param ancho_recuadro_auto Si \code{TRUE}, ajusta automáticamente el ancho
-#'   de cada recuadro según su contenido para reducir espacio sobrante entre
+#'   respecto al calculo automatico (\code{1 = automatico}).
+#' @param ancho_recuadro_auto Si \code{TRUE}, ajusta automaticamente el ancho
+#'   de cada recuadro segun su contenido para reducir espacio sobrante entre
 #'   texto y chip.
 #' @param ancho_chip_rel Ancho relativo del chip de puntaje dentro del recuadro.
 #'   Se acota internamente para preservar legibilidad.
 #' @param sufijo_puntaje Sufijo del puntaje mostrado en el chip (por ejemplo
 #'   \code{" pts"}).
-#' @param cortes_chip Cortes del semáforo para los chips de puntaje
-#'   (vector numérico de longitud 2). Si es \code{NULL}, usa
+#' @param cortes_chip Cortes del semaforo para los chips de puntaje
+#'   (vector numerico de longitud 2). Si es \code{NULL}, usa
 #'   \code{c(semaforo$cortes[1], corte_score)} para mantener consistencia con
 #'   el corte principal de puntaje.
-#' @param tamano_texto_tarjeta Tamaño base del texto del subíndice dentro de la
+#' @param modo_semaforo Modo del semaforo para chips y heatmap asociado:
+#'   \code{"grupos"} mantiene la clasificacion discreta actual y
+#'   \code{"degradado"} interpola colores alrededor de los cortes de referencia.
+#' @param tamano_texto_tarjeta Tamano base del texto del subindice dentro de la
 #'   tarjeta.
-#' @param tamano_letra_recuadro Alias opcional en español para
+#' @param tamano_letra_recuadro Alias opcional en espanol para
 #'   \code{tamano_texto_tarjeta}. Si se define, tiene prioridad.
-#' @param tamano_texto_chip Tamaño base del texto del chip de puntaje.
-#' @param tarjetas_color_solido Si \code{TRUE}, aplica color sólido a las
-#'   tarjetas según cuadrante FODA y texto blanco.
-#' @param jitter_x_rel Intensidad relativa del jitter horizontal en dispersión.
-#' @param jitter_y_rel Intensidad relativa del jitter vertical en dispersión.
-#' @param iter_separacion Número de iteraciones de separación para reducir
-#'   solapes de tarjetas en dispersión.
-#' @param factor_reduccion_tarjeta_dispersion Factor de reducción de tamaño de
-#'   tarjetas en modo dispersión.
-#' @param icono_modo Modo de uso de íconos cuando existen rutas de PNG:
-#'   \code{"reemplazar"} oculta texto y deja ícono; \code{"acompanar"}
-#'   conserva texto + ícono.
-#' @param icono_size_foda Escala relativa de íconos en FODA (matriz y
-#'   dispersión).
-#' @param icono_color_foda Color opcional para tintar los íconos PNG del FODA.
-#' @param icono_color_leyenda_foda Color opcional para tintar íconos de la
+#' @param tamano_texto_chip Tamano base del texto del chip de puntaje.
+#' @param tarjetas_color_solido Si \code{TRUE}, aplica color solido a las
+#'   tarjetas segun cuadrante FODA y texto blanco.
+#' @param jitter_x_rel Intensidad relativa del jitter horizontal en dispersion.
+#' @param jitter_y_rel Intensidad relativa del jitter vertical en dispersion.
+#' @param iter_separacion Numero de iteraciones de separacion para reducir
+#'   solapes de tarjetas en dispersion.
+#' @param factor_reduccion_tarjeta_dispersion Factor de reduccion de tamano de
+#'   tarjetas en modo dispersion.
+#' @param icono_modo Modo de uso de iconos cuando existen rutas de PNG:
+#'   \code{"reemplazar"} oculta texto y deja icono; \code{"acompanar"}
+#'   conserva texto + icono.
+#' @param icono_size_foda Escala relativa de iconos en FODA (matriz y
+#'   dispersion).
+#' @param icono_color_foda Color opcional para tintar los iconos PNG del FODA.
+#' @param icono_color_leyenda_foda Color opcional para tintar iconos de la
 #'   leyenda FODA. Si es \code{NULL}, mantiene el color original del PNG.
-#' @param distancia_icono_chip_foda Separación vertical relativa entre ícono y
-#'   chip en burbuja (proporción del radio de la burbuja).
-#' @param distancia_minima_icono_chip_foda Separación vertical mínima absoluta
-#'   entre ícono y chip en burbuja.
+#' @param distancia_icono_chip_foda Separacion vertical relativa entre icono y
+#'   chip en burbuja (proporcion del radio de la burbuja).
+#' @param distancia_minima_icono_chip_foda Separacion vertical minima absoluta
+#'   entre icono y chip en burbuja.
 #' @param padding_chip_foda Escala relativa del padding interno del chip.
 #'   Afecta ancho y alto efectivo del chip.
 #' @param padding_texto_chip_foda Aire interno del texto del chip en burbuja.
-#'   Se usa para ampliar el tamaño útil del chip alrededor del número.
+#'   Se usa para ampliar el tamano util del chip alrededor del numero.
 #' @param separacion_chip_icono_rel_foda,separacion_chip_icono_min_foda,
 #'   padding_chip_rel_foda,padding_chip_label_lineas_foda Alias legados de
-#'   compatibilidad para los parámetros anteriores.
+#'   compatibilidad para los parametros anteriores.
 #' @param forma_bloque_dispersion Forma de bloque en \code{modo_foda="dispersion"}:
-#'   \code{"rectangular"} (tarjeta) o \code{"burbuja"} (círculo).
+#'   \code{"rectangular"} (tarjeta) o \code{"burbuja"} (circulo).
 #' @param radio_burbuja_rel Escala relativa del radio de burbujas en
 #'   \code{modo_foda="dispersion"} cuando \code{forma_bloque_dispersion="burbuja"}.
-#'   \code{1} conserva el tamaño por defecto.
+#'   \code{1} conserva el tamano por defecto.
 #' @param colorear_fondo_foda Si \code{TRUE}, muestra color de fondo en los
 #'   cuadrantes FODA. Si \code{FALSE}, los cuadrantes quedan sin relleno
-#'   (solo bordes y líneas de referencia).
-#' @param color_fondo Color de fondo del gráfico.
+#'   (solo bordes y lineas de referencia).
+#' @param color_fondo Color de fondo del grafico.
 #' @param mostrar_leyenda Si \code{TRUE}, muestra leyenda explicativa.
 #' @param mostrar_leyenda_iconos Si \code{TRUE}, muestra el bloque de leyenda
-#'   de íconos cuando \code{icono_modo="reemplazar"}.
+#'   de iconos cuando \code{icono_modo="reemplazar"}.
 #' @param usar_canvas Si \code{TRUE}, compone con \code{cowplot}
-#'   (título/panel/leyenda/pie).
+#'   (titulo/panel/leyenda/pie).
 #' @param canvas_h_title,canvas_h_legend,canvas_h_caption,canvas_pad_top
 #'   Proporciones de altura del canvas.
-#' @param debug_ph_bordes,debug_ph_col,debug_ph_lwd Bordes de depuración.
-#' @param exportar Tipo de exportación: \code{"rplot"}, \code{"png"},
+#' @param debug_ph_bordes,debug_ph_col,debug_ph_lwd Bordes de depuracion.
+#' @param exportar Tipo de exportacion: \code{"rplot"}, \code{"png"},
 #'   \code{"ppt"} o \code{"word"}.
 #' @param path_salida Ruta de salida para \code{exportar != "rplot"}.
-#' @param ancho,alto,dpi Tamaño y resolución de exportación.
-#' @param ppt_append,ppt_layout,ppt_master Parámetros de exportación PPT.
+#' @param ancho,alto,dpi Tamano y resolucion de exportacion.
+#' @param ppt_append,ppt_layout,ppt_master Parametros de exportacion PPT.
 #'
-#' @return Objeto gráfico (canvas cowplot) o exportación invisible.
+#' @return Objeto grafico (canvas cowplot) o exportacion invisible.
 #' @family indicador
 #' @family graficador
 #' @seealso [reporte_dimensiones()], [reporte_dimensiones_indices()],
@@ -1833,6 +2437,7 @@ graficar_foda_dimensiones <- function(
     ancho_chip_rel = 0.18,
     sufijo_puntaje = " pts",
     cortes_chip = NULL,
+    modo_semaforo = NULL,
     tamano_texto_tarjeta = NULL,
     tamano_letra_recuadro = NULL,
     tamano_texto_chip = NULL,
@@ -1844,6 +2449,7 @@ graficar_foda_dimensiones <- function(
     chip_width_rel = NULL,
     score_suffix = NULL,
     icono_size_foda = 1,
+    icono_size_leyenda_foda = NULL,
     icono_color_foda = NULL,
     icono_color_leyenda_foda = NULL,
     distancia_icono_chip_foda = 0.14,
@@ -1856,6 +2462,7 @@ graficar_foda_dimensiones <- function(
     padding_chip_label_lineas_foda = NULL,
     forma_bloque_dispersion = c("rectangular", "burbuja"),
     radio_burbuja_rel = 1,
+    score_max_disp = 110,
     colorear_fondo_foda = TRUE,
     color_fondo = NA,
     mostrar_leyenda = TRUE,
@@ -1966,7 +2573,7 @@ graficar_foda_dimensiones <- function(
   if (!is.null(score_suffix)) sufijo_puntaje <- score_suffix
   ancho_chip_rel <- suppressWarnings(as.numeric(ancho_chip_rel)[1])
   if (!is.finite(ancho_chip_rel) || is.na(ancho_chip_rel)) ancho_chip_rel <- 0.18
-  ancho_chip_rel <- .dim_clamp(ancho_chip_rel, 0.10, 0.36)
+  ancho_chip_rel <- .dim_clamp(ancho_chip_rel, 0.04, 0.36)
   sufijo_puntaje <- as.character(sufijo_puntaje %||% " pts")[1]
   if (is.na(sufijo_puntaje)) sufijo_puntaje <- " pts"
   if (!is.null(tamano_letra_recuadro)) tamano_texto_tarjeta <- tamano_letra_recuadro
@@ -1987,7 +2594,7 @@ graficar_foda_dimensiones <- function(
   jitter_y_rel <- .dim_clamp(jitter_y_rel, 0, 0.20)
   iter_separacion <- suppressWarnings(as.integer(iter_separacion)[1])
   if (!is.finite(iter_separacion) || is.na(iter_separacion) || iter_separacion < 0L) iter_separacion <- 12L
-  iter_separacion <- max(0L, min(30L, iter_separacion))
+  iter_separacion <- max(0L, min(60L, iter_separacion))
   factor_reduccion_tarjeta_dispersion <- suppressWarnings(as.numeric(factor_reduccion_tarjeta_dispersion)[1])
   if (!is.finite(factor_reduccion_tarjeta_dispersion) || is.na(factor_reduccion_tarjeta_dispersion)) {
     factor_reduccion_tarjeta_dispersion <- 0.85
@@ -1995,9 +2602,26 @@ graficar_foda_dimensiones <- function(
   factor_reduccion_tarjeta_dispersion <- .dim_clamp(factor_reduccion_tarjeta_dispersion, 0.55, 1.00)
   icono_size_foda <- suppressWarnings(as.numeric(icono_size_foda)[1])
   if (!is.finite(icono_size_foda) || is.na(icono_size_foda) || icono_size_foda <= 0) {
-    stop("`icono_size_foda` debe ser numérico positivo.", call. = FALSE)
+    stop("`icono_size_foda` debe ser numerico positivo.", call. = FALSE)
   }
   icono_size_foda <- .dim_clamp(icono_size_foda, 0.40, 3.20)
+  # Tamano de iconos en la leyenda: parametro propio o derivado de icono_size_foda.
+  icono_size_leyenda_foda <- if (!is.null(icono_size_leyenda_foda)) {
+    v <- suppressWarnings(as.numeric(icono_size_leyenda_foda)[1])
+    if (!is.finite(v) || is.na(v) || v <= 0) {
+      stop("`icono_size_leyenda_foda` debe ser numerico positivo.", call. = FALSE)
+    }
+    .dim_clamp(v, 0.016, 0.14)
+  } else {
+    max(0.024, min(0.07, 0.030 * icono_size_foda))
+  }
+  if (
+    is.null(icono_color_leyenda_foda) &&
+    identical(modo_foda, "dispersion") &&
+    identical(icono_modo, "reemplazar")
+  ) {
+    icono_color_leyenda_foda <- "#35516C"
+  }
   # Alias legados -> nombres nuevos (si vienen definidos).
   if (!is.null(separacion_chip_icono_rel_foda)) {
     distancia_icono_chip_foda <- separacion_chip_icono_rel_foda
@@ -2015,37 +2639,41 @@ graficar_foda_dimensiones <- function(
   distancia_icono_chip_foda <- suppressWarnings(as.numeric(distancia_icono_chip_foda)[1])
   if (!is.finite(distancia_icono_chip_foda) || is.na(distancia_icono_chip_foda) ||
       distancia_icono_chip_foda < 0) {
-    stop("`distancia_icono_chip_foda` debe ser numérico >= 0.", call. = FALSE)
+    stop("`distancia_icono_chip_foda` debe ser numerico >= 0.", call. = FALSE)
   }
   distancia_icono_chip_foda <- .dim_clamp(distancia_icono_chip_foda, 0, 0.40)
   distancia_minima_icono_chip_foda <- suppressWarnings(as.numeric(distancia_minima_icono_chip_foda)[1])
   if (!is.finite(distancia_minima_icono_chip_foda) || is.na(distancia_minima_icono_chip_foda) ||
       distancia_minima_icono_chip_foda < 0) {
-    stop("`distancia_minima_icono_chip_foda` debe ser numérico >= 0.", call. = FALSE)
+    stop("`distancia_minima_icono_chip_foda` debe ser numerico >= 0.", call. = FALSE)
   }
   distancia_minima_icono_chip_foda <- .dim_clamp(distancia_minima_icono_chip_foda, 0, 0.08)
   padding_chip_foda <- suppressWarnings(as.numeric(padding_chip_foda)[1])
   if (!is.finite(padding_chip_foda) || is.na(padding_chip_foda) || padding_chip_foda <= 0) {
-    stop("`padding_chip_foda` debe ser numérico positivo.", call. = FALSE)
+    stop("`padding_chip_foda` debe ser numerico positivo.", call. = FALSE)
   }
   padding_chip_foda <- .dim_clamp(padding_chip_foda, 0.70, 1.60)
   padding_texto_chip_foda <- suppressWarnings(as.numeric(padding_texto_chip_foda)[1])
   if (!is.finite(padding_texto_chip_foda) || is.na(padding_texto_chip_foda) ||
       padding_texto_chip_foda < 0) {
-    stop("`padding_texto_chip_foda` debe ser numérico >= 0.", call. = FALSE)
+    stop("`padding_texto_chip_foda` debe ser numerico >= 0.", call. = FALSE)
   }
   padding_texto_chip_foda <- .dim_clamp(padding_texto_chip_foda, 0, 0.30)
 
-  # Variables internas de layout (compatibilidad con implementación existente).
+  # Variables internas de layout (compatibilidad con implementacion existente).
   separacion_chip_icono_rel_foda <- distancia_icono_chip_foda
   separacion_chip_icono_min_foda <- distancia_minima_icono_chip_foda
   padding_chip_rel_foda <- padding_chip_foda
   padding_chip_label_lineas_foda <- padding_texto_chip_foda
   radio_burbuja_rel <- suppressWarnings(as.numeric(radio_burbuja_rel)[1])
   if (!is.finite(radio_burbuja_rel) || is.na(radio_burbuja_rel) || radio_burbuja_rel <= 0) {
-    stop("`radio_burbuja_rel` debe ser numérico positivo.", call. = FALSE)
+    stop("`radio_burbuja_rel` debe ser numerico positivo.", call. = FALSE)
   }
   radio_burbuja_rel <- .dim_clamp(radio_burbuja_rel, 0.70, 2.30)
+  score_max_disp <- suppressWarnings(as.numeric(score_max_disp)[1])
+  if (!is.finite(score_max_disp) || is.na(score_max_disp) || score_max_disp <= 100) {
+    score_max_disp <- 110
+  }
   if (!is.logical(colorear_fondo_foda) || length(colorear_fondo_foda) != 1L || is.na(colorear_fondo_foda)) {
     stop("`colorear_fondo_foda` debe ser logical(1).", call. = FALSE)
   }
@@ -2111,10 +2739,10 @@ graficar_foda_dimensiones <- function(
   vars <- vars[keep_vars]
   labels <- labels[keep_vars]
 
-  # --- Mapa de íconos: var -> path (o NULL) ----------------------------------
+  # --- Mapa de iconos: var -> path (o NULL) ----------------------------------
   iconos_map <- setNames(vector("list", length(vars)), vars)
   if (!is.null(obj)) {
-    # objetivo explícito: tomar icons de obj$axis_iconos
+    # objetivo explicito: tomar icons de obj$axis_iconos
     ovars  <- as.character(obj$axis_vars  %||% character(0))
     oicons <- obj$axis_iconos %||% vector("list", length(ovars))
     for (.ii in seq_along(ovars)) {
@@ -2198,7 +2826,7 @@ graficar_foda_dimensiones <- function(
 
     if ((is.na(out_var) || !nzchar(out_var)) && ("idx_indice_general" %in% names(data))) {
       out_var <- "idx_indice_general"
-      out_lbl <- "Índice General"
+      out_lbl <- "Indice General"
     }
     if ((is.na(out_var) || !nzchar(out_var)) && !is.null(obj) && identical(nivel, "subindices")) {
       id_obj <- as.character(obj$id %||% NA_character_)[1]
@@ -2238,7 +2866,7 @@ graficar_foda_dimensiones <- function(
   cruce <- trimws(as.character(cruce %||% "")[1])
   if (identical(cruce, "NA")) cruce <- ""
   if (identical(modo_foda, "matriz") && nzchar(cruce)) {
-    stop("`cruce` solo está disponible cuando `modo_foda = 'dispersion'`.", call. = FALSE)
+    stop("`cruce` solo esta disponible cuando `modo_foda = 'dispersion'`.", call. = FALSE)
   }
 
   df <- .dim_apply_filters(ctx$data, filters = filtros)
@@ -2296,7 +2924,7 @@ graficar_foda_dimensiones <- function(
     if (!nrow(lev_df)) {
       return(.dim_export_canvas(
         .dim_blank_canvas(
-          mensaje = "Sin niveles válidos para el cruce en modo dispersión",
+          mensaje = "Sin niveles validos para el cruce en modo dispersion",
           debug_ph_bordes = debug_ph_bordes,
           debug_ph_col = debug_ph_col,
           debug_ph_lwd = debug_ph_lwd
@@ -2464,7 +3092,7 @@ graficar_foda_dimensiones <- function(
     is.finite(lum) && !is.na(lum) && lum >= threshold
   }
 
-  # --- Color semáforo por score (independiente del corte de cuadrantes) ---
+  # --- Color semaforo por score (independiente del corte de cuadrantes) ---
   chip_cortes <- suppressWarnings(as.numeric(cortes_chip))
   chip_cortes <- chip_cortes[is.finite(chip_cortes)]
   if (length(chip_cortes) >= 2L) {
@@ -2480,10 +3108,11 @@ graficar_foda_dimensiones <- function(
   }
   chip_cortes <- pmax(-Inf, pmin(Inf, chip_cortes))
   if (length(chip_cortes) < 2L || chip_cortes[1] >= chip_cortes[2]) {
-    chip_cortes <- c(60, max(75, corte_score_val))
+    chip_cortes <- c(60, max(80, corte_score_val))
   }
 
   sem_keys <- c("rojo", "ambar", "verde")
+  sem_modo <- .dim_normalize_semaforo_modo(modo_semaforo %||% sem$modo %||% "grupos")
   stats_df$score_round <- .dim_round_half_up(stats_df$score_mean, 0)
   stats_df$sem_key <- .dim_semaforo_estado(
     x = stats_df$score_mean,
@@ -2496,11 +3125,17 @@ graficar_foda_dimensiones <- function(
     cortes = chip_cortes,
     colores = sem,
     digits = 0,
-    na_color = sem$na
+    na_color = sem$na,
+    modo = sem_modo,
+    anclas_degradado = sem$anclas_degradado %||% NULL,
+    gradiente_colores = sem$gradiente_colores %||% NULL,
+    gradiente_valores = sem$gradiente_valores %||% NULL,
+    gradiente_limites = sem$gradiente_limites %||% NULL,
+    gradiente_segmentos = sem$gradiente_segmentos %||% 20L
   )
   stats_df$score_sd_plot <- ifelse(is.na(stats_df$score_sd), 0, stats_df$score_sd)
 
-  # --- Utilidades tipográficas ---
+  # --- Utilidades tipograficas ---
   .foda_trunc <- function(x, max_chars = 28L) {
     x <- trimws(as.character(x %||% ""))
     max_chars <- max(6L, as.integer(max_chars)[1])
@@ -2509,6 +3144,13 @@ graficar_foda_dimensiones <- function(
       x,
       paste0(substr(x, 1L, max_chars - 3L), "...")
     )
+  }
+  .foda_compact_label <- function(x, max_chars = 18L) {
+    x <- trimws(as.character(x %||% ""))
+    x <- gsub("^[ÍI]ndice general$", "Ind. G.", x, ignore.case = TRUE)
+    x <- gsub("^Promedio general$", "Prom. G.", x, ignore.case = TRUE)
+    x <- gsub("^Indice general$", "Ind. G.", x, ignore.case = TRUE)
+    .foda_trunc(x, max_chars = max_chars)
   }
   .wrap_item_label <- function(x, width = 24L, max_lines = 2L) {
     width <- max(10L, as.integer(width)[1])
@@ -2532,7 +3174,7 @@ graficar_foda_dimensiones <- function(
   legend_cruce_labels <- character(0)
   legend_cruce_colors <- character(0)
 
-  # --- Construcción del panel según modo ---
+  # --- Construccion del panel segun modo ---
   if (identical(modo_foda, "matriz")) {
     cuadrantes_cfg <- data.frame(
       cuadrante = c("fortaleza", "oportunidad", "debilidad", "amenaza"),
@@ -2630,7 +3272,7 @@ graficar_foda_dimensiones <- function(
         card_h * 0.90,
         card_h * 0.72 * padding_chip_rel_foda * (1 + 0.45 * padding_chip_label_lineas_foda)
       )
-      chip_w_target <- card_w * .dim_clamp(ancho_chip_rel, 0.10, 0.55)
+      chip_w_target <- card_w * .dim_clamp(ancho_chip_rel, 0.06, 0.55)
       chip_w_need <- (0.020 + pmax(1, nchar(score_txt_vec, type = "width")) * 0.0070) *
         padding_chip_rel_foda * (1 + 0.28 * padding_chip_label_lineas_foda)
       chip_w <- pmin(card_w * 0.48, pmax(chip_w_target, chip_w_need))
@@ -2641,7 +3283,7 @@ graficar_foda_dimensiones <- function(
       score_x <- chip_x
       score_y <- y_vals
       title_y <- y_vals
-      # Ajuste de title_x para íconos en "matriz" (siempre "acompanar")
+      # Ajuste de title_x para iconos en "matriz" (siempre "acompanar")
       icon_w_mat  <- card_h * 0.60
       icon_gap_mat <- 0.008
       item_vars_q <- as.character(q_items$var[idx_show])
@@ -2653,6 +3295,10 @@ graficar_foda_dimensiones <- function(
       text_w <- pmax(0.18, (chip_x - (chip_w / 2)) - title_x - gap_title_chip)
       wrap_w <- pmax(11L, as.integer(floor(text_w * 64)))
 
+      label_matrix <- as.character(q_items$label[idx_show] %||% "")
+      label_matrix <- gsub("^[ÍI]ndice general$", "Ind. G.", label_matrix, ignore.case = TRUE)
+      label_matrix <- gsub("^Indice general$", "Ind. G.", label_matrix, ignore.case = TRUE)
+
       q_df <- data.frame(
         x = x_vals,
         y = y_vals,
@@ -2662,7 +3308,7 @@ graficar_foda_dimensiones <- function(
         title_y = title_y,
         title_txt = mapply(
           function(tt, ww) .wrap_item_label(tt, width = ww, max_lines = 2L),
-          q_items$label[idx_show], wrap_w, USE.NAMES = FALSE
+          label_matrix, wrap_w, USE.NAMES = FALSE
         ),
         score_x = score_x,
         score_y = score_y,
@@ -2683,7 +3329,7 @@ graficar_foda_dimensiones <- function(
       )
       if (nrow(q_items) > n_show && nrow(q_df)) {
         j <- nrow(q_df)
-        q_df$title_txt[j] <- paste0("+", nrow(q_items) - n_show, " más")
+        q_df$title_txt[j] <- paste0("+", nrow(q_items) - n_show, " mas")
         q_df$score_txt[j] <- ""
         q_df$chip_fill[j] <- "#E3EAF3"
         q_df$chip_text_col[j] <- "#4D6178"
@@ -2818,7 +3464,7 @@ graficar_foda_dimensiones <- function(
     p_panel <- p_panel +
       ggplot2::coord_cartesian(xlim = c(0, 2), ylim = c(0, 2), expand = FALSE)
 
-    # Íconos en tarjetas "matriz" — siempre modo "acompanar"
+    # Iconos en tarjetas "matriz"  -  siempre modo "acompanar"
     if (has_iconos_foda && nrow(items_df)) {
       for (.ii in seq_len(nrow(items_df))) {
         .ico_path <- items_df$icono[.ii]
@@ -2856,7 +3502,7 @@ graficar_foda_dimensiones <- function(
       if (length(idx_total)) plot_df$card_fill[idx_total] <- color_indice_total
 
       grp_ref$is_total <- (as.character(grp_ref$grupo_key) == "__total__") |
-        (tolower(trimws(as.character(grp_ref$grupo))) %in% c("indice", "índice"))
+        (tolower(trimws(as.character(grp_ref$grupo))) %in% c("indice", "indice"))
       grp_ref$color_leg <- as.character(grp_cols[as.character(grp_ref$grupo)])
       keep_legend <- !grp_ref$is_total
       legend_cruce_labels <- as.character(grp_ref$grupo[keep_legend])
@@ -2876,7 +3522,7 @@ graficar_foda_dimensiones <- function(
     plot_df$chip_text_col <- "#FFFFFF"
     plot_df$score_txt <- paste0(.dim_fmt_int(plot_df$score_round), sufijo_puntaje)
 
-    # --- Normalización centrada en cortes para cuadrantes visualmente equivalentes ---
+    # --- Normalizacion centrada en cortes para cuadrantes visualmente equivalentes ---
     x_raw <- plot_df$score_sd_plot
     y_raw <- plot_df$score_mean
     x_min_obs <- suppressWarnings(min(c(x_raw, corte_sd_val), na.rm = TRUE))
@@ -2889,10 +3535,12 @@ graficar_foda_dimensiones <- function(
     y_span_lo <- max(corte_score_val - y_min_obs, 3.0)
     y_span_hi <- max(y_max_obs - corte_score_val, 3.0)
 
-    x_min_ref <- max(0, corte_sd_val - x_span_lo * 1.18)
-    x_max_ref <- corte_sd_val + x_span_hi * 1.18
-    y_min_ref <- max(0, corte_score_val - y_span_lo * 1.15)
-    y_max_ref <- min(100, corte_score_val + y_span_hi * 1.15)
+    # Priorizamos lectura de puntaje (Y) y damos mas tolerancia visual a la
+    # dispersion (X), que funciona mejor como eje orientador que exacto.
+    x_min_ref <- max(0, corte_sd_val - x_span_lo * 1.32)
+    x_max_ref <- corte_sd_val + x_span_hi * 1.32
+    y_min_ref <- max(0, corte_score_val - y_span_lo * 1.08)
+    y_max_ref <- min(score_max_disp, corte_score_val + y_span_hi * 1.08)
 
     .map_norm <- function(v, cut, lo, hi) {
       v <- as.numeric(v)
@@ -2937,54 +3585,65 @@ graficar_foda_dimensiones <- function(
     cuadrantes_cfg$stx <- cuadrantes_cfg$tx
     cuadrantes_cfg$sty <- cuadrantes_cfg$ymin + (cuadrantes_cfg$ymax - cuadrantes_cfg$ymin) * 0.80
 
-    card_w_base <- .dim_clamp(ancho_tarjeta_disp * factor_reduccion_tarjeta_dispersion * 0.42, 0.11, 0.31)
-    pad_left <- 0.012
-    pad_right <- 0.006
-    gap_title_chip <- 0.010
+    label_display <- as.character(plot_df$label %||% "")
+    icono_row_has <- vapply(as.character(plot_df$var), function(.v) {
+      .ico <- iconos_map[[.v]]
+      !is.null(.ico) && nzchar(as.character(.ico %||% ""))
+    }, logical(1))
+    label_display[!icono_row_has] <- .foda_compact_label(label_display[!icono_row_has], max_chars = 18L)
+
+    card_w_base <- .dim_clamp(ancho_tarjeta_disp * factor_reduccion_tarjeta_dispersion * 0.37, 0.105, 0.24)
+    card_w_cap <- .dim_clamp(card_w_base * 1.45, 0.16, 0.34)
+    is_bubble_disp <- identical(forma_bloque_dispersion, "burbuja")
+    bubble_icon_only <- is_bubble_disp &&
+      identical(icono_modo, "reemplazar") &&
+      isTRUE(has_iconos_foda)
+    pad_left <- if (bubble_icon_only) 0.008 else 0.012
+    pad_right <- if (bubble_icon_only) 0.004 else 0.006
+    gap_title_chip <- if (bubble_icon_only) 0.006 else 0.010
     card_w <- rep(card_w_base, n_pts)
     if (isTRUE(ancho_recuadro_auto) && n_pts > 0L) {
-      label_seed <- as.character(plot_df$label %||% "")
+      label_seed <- label_display
       if (nzchar(cruce)) {
         is_total_lbl <- !is.na(plot_df$is_total) & plot_df$is_total
         if (identical(disposicion_recuadro, "dos_lineas")) {
           label_seed <- ifelse(
             is_total_lbl,
-            as.character(plot_df$label),
+            label_display,
             ifelse(
               nchar(as.character(plot_df$grupo), type = "width") > nchar(as.character(plot_df$label), type = "width"),
-              as.character(plot_df$grupo), as.character(plot_df$label)
+              as.character(plot_df$grupo), label_display
             )
           )
         } else if (identical(disposicion_recuadro, "sin_cruce")) {
-          label_seed <- as.character(plot_df$label)
+          label_seed <- label_display
         } else {
-          label_seed <- ifelse(is_total_lbl, as.character(plot_df$label), paste0(as.character(plot_df$label), " · ", as.character(plot_df$grupo)))
+          label_seed <- ifelse(is_total_lbl, label_display, paste0(label_display, " · ", as.character(plot_df$grupo)))
         }
       }
       chars_lbl <- nchar(label_seed, type = "width")
       chip_need_auto <- 0.028 + pmax(1, nchar(plot_df$score_txt, type = "width")) * 0.0080
       txt_need_auto <- 0.026 + pmin(chars_lbl, 52) * 0.0058
       w_need <- pad_left + txt_need_auto + gap_title_chip + chip_need_auto + pad_right
-      card_w <- pmax(0.12, pmin(card_w_base, w_need))
+      card_w <- pmin(card_w_cap, pmax(card_w_base, w_need))
     }
     card_h <- .dim_clamp((if (n_pts > 26L) 0.082 else 0.095) * factor_reduccion_tarjeta_dispersion, 0.055, 0.12)
-    is_bubble_disp <- identical(forma_bloque_dispersion, "burbuja")
     bubble_r_geom <- rep(NA_real_, n_pts)
     if (is_bubble_disp) {
-      # En burbuja damos más aire para ícono + chip sin solapes visuales.
+      # En burbuja damos mas aire para icono + chip sin solapes visuales.
       card_h <- .dim_clamp(
-        card_h * (1.20 + 0.14 * .dim_clamp(icono_size_foda, 0.40, 2.60)),
-        0.080,
-        0.19
+        card_h * (if (bubble_icon_only) 1.08 else 1.20 + 0.14 * .dim_clamp(icono_size_foda, 0.40, 2.60)),
+        if (bubble_icon_only) 0.072 else 0.080,
+        if (bubble_icon_only) 0.165 else 0.19
       )
       .size_boost <- .dim_clamp(icono_size_foda, 0.40, 2.60)
       bubble_r_base <- pmax(
-        card_h * 0.58,
-        card_h * (0.50 + 0.17 * .size_boost)
+        card_h * if (bubble_icon_only) 0.54 else 0.58,
+        card_h * ((if (bubble_icon_only) 0.46 else 0.50) + 0.17 * .size_boost)
       ) * radio_burbuja_rel
-      bubble_r_base <- pmax(0.045, pmin(0.42, bubble_r_base))
+      bubble_r_base <- pmax(if (bubble_icon_only) 0.040 else 0.045, pmin(if (bubble_icon_only) 0.34 else 0.42, bubble_r_base))
       bubble_r_geom <- rep(bubble_r_base, n_pts)
-      card_w <- pmax(card_w, bubble_r_geom * 2.08)
+      card_w <- pmax(card_w, bubble_r_geom * if (bubble_icon_only) 1.92 else 2.08)
     }
 
     if (n_pts > 0) {
@@ -2999,7 +3658,7 @@ graficar_foda_dimensiones <- function(
     half_h_eff <- if (is_bubble_disp) bubble_r_geom + 0.010 else card_h / 2
     pad_x <- if (is_bubble_disp) bubble_r_geom + 0.016 else card_w / 2 + 0.012
     pad_y <- half_h_eff + 0.012
-    title_band_q <- 0.20
+    title_band_q <- if (bubble_icon_only) 0.16 else 0.20
     axis_gap <- if (is_bubble_disp) pmax(0.014, half_h_eff * 0.10) else pmax(0.008, half_h_eff * 0.08)
     q_ymax <- stats::setNames(cuadrantes_cfg$ymax, cuadrantes_cfg$cuadrante)
     q_ymin <- stats::setNames(cuadrantes_cfg$ymin, cuadrantes_cfg$cuadrante)
@@ -3027,7 +3686,7 @@ graficar_foda_dimensiones <- function(
       plot_df$y_card <- pmin(pmax(plot_df$y_card, y_floor_row), y_cap_row)
     }
 
-    # Micro-offset determinístico para pares casi coincidentes (evita montes exactos).
+    # Micro-offset deterministico para pares casi coincidentes (evita montes exactos).
     if (is_bubble_disp && n_pts > 1L) {
       xs_pre <- as.numeric(plot_df$x_card)
       ys_pre <- as.numeric(plot_df$y_card)
@@ -3054,6 +3713,7 @@ graficar_foda_dimensiones <- function(
     if (n_pts > 1L && iter_separacion > 0L) {
       xs <- as.numeric(plot_df$x_card)
       ys <- as.numeric(plot_df$y_card)
+      if (!is_bubble_disp) iter_separacion <- max(iter_separacion, 28L)
       for (it in seq_len(iter_separacion)) {
         for (i in seq_len(n_pts - 1L)) {
           for (j in seq.int(i + 1L, n_pts)) {
@@ -3062,15 +3722,25 @@ graficar_foda_dimensiones <- function(
             min_dx <- if (is_bubble_disp) {
               (bubble_r_geom[i] + bubble_r_geom[j]) * 1.08
             } else {
-              (card_w[i] + card_w[j]) / 2 + 0.014
+              (card_w[i] + card_w[j]) / 2 + 0.024
             }
-            min_dy <- if (is_bubble_disp) (bubble_r_geom[i] + bubble_r_geom[j]) * 1.05 else card_h + 0.010
+            min_dy <- if (is_bubble_disp) (bubble_r_geom[i] + bubble_r_geom[j]) * 1.05 else card_h + 0.020
             if (!is.finite(dx) || !is.finite(dy) || !is.finite(min_dx) || !is.finite(min_dy)) next
             if (abs(dx) < min_dx && abs(dy) < min_dy) {
               sx <- ifelse(dx >= 0, 1, -1)
               sy <- ifelse(dy >= 0, 1, -1)
-              move_x <- (min_dx - abs(dx)) * if (is_bubble_disp) 0.36 else 0.33
-              move_y <- (min_dy - abs(dy)) * if (is_bubble_disp) 0.44 else 0.46
+              overlap_x <- min_dx - abs(dx)
+              overlap_y <- min_dy - abs(dy)
+              if (is_bubble_disp) {
+                move_x <- overlap_x * 0.42
+                move_y <- overlap_y * 0.30
+              } else if (overlap_y <= overlap_x * 1.10) {
+                move_x <- overlap_x * 0.14
+                move_y <- overlap_y * 0.66
+              } else {
+                move_x <- overlap_x * 0.58
+                move_y <- overlap_y * 0.24
+              }
               xs[i] <- xs[i] - sx * move_x
               xs[j] <- xs[j] + sx * move_x
               ys[i] <- ys[i] - sy * move_y
@@ -3079,15 +3749,50 @@ graficar_foda_dimensiones <- function(
           }
         }
         if (is_bubble_disp) {
-          # Mantener cercanía con coordenadas originales (respeta señal de dispersión/puntaje).
-          xs <- xs * 0.92 + as.numeric(plot_df$x_base) * 0.08
-          ys <- ys * 0.85 + as.numeric(plot_df$y_base) * 0.15
+          # Mantener cercania con coordenadas originales (respeta senal de dispersion/puntaje).
+          xs <- xs * 0.95 + as.numeric(plot_df$x_base) * 0.05
+          ys <- ys * 0.76 + as.numeric(plot_df$y_base) * 0.24
         }
         xs <- pmin(pmax(xs, x_lim[1] + pad_x), x_lim[2] - pad_x)
         ys <- pmin(pmax(ys, y_floor_row), y_cap_row)
       }
 
-      # Post-ajuste radial en burbuja: no permitir superposición entre pares.
+      if (!is_bubble_disp) {
+        max_iter_no_overlap <- max(24L, as.integer(iter_separacion) * 2L)
+        for (it in seq_len(max_iter_no_overlap)) {
+          moved_any <- FALSE
+          for (i in seq_len(n_pts - 1L)) {
+            for (j in seq.int(i + 1L, n_pts)) {
+              dx <- xs[j] - xs[i]
+              dy <- ys[j] - ys[i]
+              min_dx <- (card_w[i] + card_w[j]) / 2 + 0.024
+              min_dy <- card_h + 0.020
+              if (abs(dx) >= min_dx || abs(dy) >= min_dy) next
+              sx <- ifelse(dx >= 0, 1, -1)
+              sy <- ifelse(dy >= 0, 1, -1)
+              overlap_x <- min_dx - abs(dx) + 1e-04
+              overlap_y <- min_dy - abs(dy) + 1e-04
+              if (overlap_y <= overlap_x * 1.15) {
+                ys[i] <- ys[i] - sy * (overlap_y / 2)
+                ys[j] <- ys[j] + sy * (overlap_y / 2)
+                xs[i] <- xs[i] - sx * (overlap_x * 0.10)
+                xs[j] <- xs[j] + sx * (overlap_x * 0.10)
+              } else {
+                xs[i] <- xs[i] - sx * (overlap_x / 2)
+                xs[j] <- xs[j] + sx * (overlap_x / 2)
+                ys[i] <- ys[i] - sy * (overlap_y * 0.12)
+                ys[j] <- ys[j] + sy * (overlap_y * 0.12)
+              }
+              moved_any <- TRUE
+            }
+          }
+          xs <- pmin(pmax(xs, x_lim[1] + pad_x), x_lim[2] - pad_x)
+          ys <- pmin(pmax(ys, y_floor_row), y_cap_row)
+          if (!moved_any) break
+        }
+      }
+
+      # Post-ajuste radial en burbuja: no permitir superposicion entre pares.
       if (is_bubble_disp) {
         max_iter_no_overlap <- max(16L, as.integer(iter_separacion) * 2L)
         for (it in seq_len(max_iter_no_overlap)) {
@@ -3119,8 +3824,8 @@ graficar_foda_dimensiones <- function(
             }
           }
           if (is_bubble_disp) {
-            xs <- xs * 0.94 + as.numeric(plot_df$x_base) * 0.06
-            ys <- ys * 0.88 + as.numeric(plot_df$y_base) * 0.12
+            xs <- xs * 0.96 + as.numeric(plot_df$x_base) * 0.04
+            ys <- ys * 0.80 + as.numeric(plot_df$y_base) * 0.20
           }
           xs <- pmin(pmax(xs, x_lim[1] + pad_x), x_lim[2] - pad_x)
           ys <- pmin(pmax(ys, y_floor_row), y_cap_row)
@@ -3131,15 +3836,26 @@ graficar_foda_dimensiones <- function(
       plot_df$y_card <- ys
     }
 
-    chip_h_base <- if (is_bubble_disp) card_h * 0.58 else card_h * 0.70
+    chip_h_base <- if (is_bubble_disp) {
+      card_h * (if (bubble_icon_only) 0.50 else 0.58)
+    } else {
+      card_h * 0.70
+    }
     chip_h <- pmin(
       if (is_bubble_disp) card_h * 0.86 else card_h * 0.92,
       chip_h_base * padding_chip_rel_foda * (1 + 0.45 * padding_chip_label_lineas_foda)
     )
-    chip_w_target <- card_w * .dim_clamp(ancho_chip_rel, 0.10, 0.58)
+    chip_w_target <- card_w * .dim_clamp(
+      ancho_chip_rel,
+      if (bubble_icon_only) 0.04 else 0.06,
+      if (bubble_icon_only) 0.40 else 0.58
+    )
     chip_w_need <- (0.020 + pmax(1, nchar(plot_df$score_txt, type = "width")) * 0.0072) *
       padding_chip_rel_foda * (1 + 0.28 * padding_chip_label_lineas_foda)
-    chip_w <- pmin(card_w * 0.50, pmax(chip_w_target, chip_w_need))
+    chip_w <- pmin(
+      card_w * if (bubble_icon_only) 0.38 else 0.50,
+      pmax(chip_w_target, chip_w_need)
+    )
     plot_df$card_w <- card_w
     plot_df$chip_w <- chip_w
     plot_df$chip_h <- chip_h
@@ -3147,7 +3863,10 @@ graficar_foda_dimensiones <- function(
     plot_df$title_x <- plot_df$x_card - (card_w / 2) + pad_left
     txt_w <- pmax(0.12, (plot_df$chip_x - chip_w / 2) - plot_df$title_x - gap_title_chip)
     wrap_w <- if (is_bubble_disp) {
-      pmax(8L, as.integer(floor((2 * bubble_r_geom) * 50)))
+      pmax(
+        if (bubble_icon_only) 7L else 8L,
+        as.integer(floor((2 * bubble_r_geom) * (if (bubble_icon_only) 44 else 50)))
+      )
     } else {
       pmax(9L, as.integer(floor(txt_w * 82)))
     }
@@ -3156,14 +3875,14 @@ graficar_foda_dimensiones <- function(
       if (nzchar(cruce)) {
         is_total_lbl <- !is.na(plot_df$is_total) & plot_df$is_total
         if (identical(disposicion_recuadro, "dos_lineas")) {
-          title_base <- ifelse(is_total_lbl, as.character(plot_df$label), paste0(as.character(plot_df$label), "\n", as.character(plot_df$grupo)))
+          title_base <- ifelse(is_total_lbl, label_display, paste0(label_display, "\n", as.character(plot_df$grupo)))
         } else if (identical(disposicion_recuadro, "sin_cruce")) {
-          title_base <- as.character(plot_df$label)
+          title_base <- label_display
         } else {
-          title_base <- ifelse(is_total_lbl, as.character(plot_df$label), paste0(as.character(plot_df$label), " · ", as.character(plot_df$grupo)))
+          title_base <- ifelse(is_total_lbl, label_display, paste0(label_display, " · ", as.character(plot_df$grupo)))
         }
       } else {
-        title_base <- as.character(plot_df$label)
+        title_base <- label_display
       }
       plot_df$title_txt <- mapply(
         function(tt, ww) .wrap_item_label(tt, width = max(8L, ww), max_lines = 3L),
@@ -3172,26 +3891,26 @@ graficar_foda_dimensiones <- function(
     } else if (nzchar(cruce)) {
       is_total_lbl <- !is.na(plot_df$is_total) & plot_df$is_total
       if (identical(disposicion_recuadro, "dos_lineas")) {
-        line_1 <- mapply(function(tt, ww) .foda_trunc(tt, max_chars = max(12L, ww + 1L)), plot_df$label, wrap_w, USE.NAMES = FALSE)
+        line_1 <- mapply(function(tt, ww) .foda_trunc(tt, max_chars = max(12L, ww + 1L)), label_display, wrap_w, USE.NAMES = FALSE)
         line_2 <- mapply(function(tt, ww) .foda_trunc(tt, max_chars = max(9L, ww)), plot_df$grupo, wrap_w, USE.NAMES = FALSE)
         title_txt <- paste0(line_1, "\n", line_2)
       } else if (identical(disposicion_recuadro, "sin_cruce")) {
         title_txt <- mapply(
           function(tt, ww) .foda_trunc(tt, max_chars = max(14L, ww + 3L)),
-          plot_df$label, wrap_w,
+          label_display, wrap_w,
           USE.NAMES = FALSE
         )
       } else {
         title_txt <- mapply(
           function(tt, gg, ww) .foda_trunc(paste0(tt, " · ", gg), max_chars = max(14L, ww + 3L)),
-          plot_df$label, plot_df$grupo, wrap_w,
+          label_display, plot_df$grupo, wrap_w,
           USE.NAMES = FALSE
         )
       }
       if (any(is_total_lbl)) {
         title_txt[is_total_lbl] <- mapply(
           function(tt, ww) .foda_trunc(tt, max_chars = max(14L, ww + 3L)),
-          plot_df$label[is_total_lbl], wrap_w[is_total_lbl],
+          label_display[is_total_lbl], wrap_w[is_total_lbl],
           USE.NAMES = FALSE
         )
       }
@@ -3203,7 +3922,7 @@ graficar_foda_dimensiones <- function(
       )
     }
 
-    # Íconos en dispersión
+    # Iconos en dispersion
     plot_df$icono <- vapply(as.character(plot_df$var), function(.v) {
       .ico <- iconos_map[[.v]]
       if (!is.null(.ico) && nzchar(as.character(.ico %||% ""))) as.character(.ico)[1] else ""
@@ -3221,7 +3940,7 @@ graficar_foda_dimensiones <- function(
         1.7,
         pmin(
           size_title_eff,
-          1.35 + (bubble_r_geom * 14) - (txt_chars / 30)
+          1.25 + (bubble_r_geom * 13) - (txt_chars / 28)
         )
       )
       is_total_bubble <- if ("is_total" %in% names(plot_df)) {
@@ -3238,6 +3957,16 @@ graficar_foda_dimensiones <- function(
     } else {
       plot_df$title_size <- rep(size_title_eff, n_pts)
     }
+    if (!is_bubble_disp && n_pts > 0L) {
+      txt_chars_rect <- pmax(1, nchar(gsub("\n", "", plot_df$title_txt), type = "width"))
+      plot_df$title_size <- pmax(
+        1.8,
+        pmin(
+          size_title_eff,
+          1.65 + (card_w * 9.8) - pmax(0, txt_chars_rect - 10) / 11
+        )
+      )
+    }
 
     if (isTRUE(sd_tecnico)) {
       x_break_vals <- sort(unique(c(pretty(c(x_min_ref, x_max_ref), n = 5), corte_sd_val)))
@@ -3247,12 +3976,13 @@ graficar_foda_dimensiones <- function(
       x_expand_mult <- c(0, 0)
     } else {
       x_breaks <- c(x_lim[1] + 0.03, x_lim[2] - 0.03)
-      x_labels <- c("Menor\ndispersión", "Mayor\ndispersión")
+      x_labels <- c("Menor\ndispersion", "Mayor\ndispersion")
       x_expand_mult <- c(0.10, 0.10)
     }
 
-    y_break_vals <- sort(unique(c(pretty(c(y_min_ref, y_max_ref), n = 5), corte_score_val)))
-    y_break_vals <- y_break_vals[is.finite(y_break_vals) & y_break_vals >= y_min_ref & y_break_vals <= y_max_ref]
+    y_display_max <- min(100, y_max_ref)
+    y_break_vals <- sort(unique(c(pretty(c(y_min_ref, y_display_max), n = 5), corte_score_val)))
+    y_break_vals <- y_break_vals[is.finite(y_break_vals) & y_break_vals >= y_min_ref & y_break_vals <= y_display_max]
     y_breaks <- .y_map(y_break_vals)
     y_labels <- format(round(y_break_vals, 1), trim = TRUE)
 
@@ -3334,14 +4064,14 @@ graficar_foda_dimensiones <- function(
         plot_df$bubble_r <- bubble_r_geom
         plot_df$bubble_size <- pmax(8.5, pmin(26, plot_df$bubble_r * 168))
         plot_df$icon_r_disp <- pmin(
-          plot_df$bubble_r * (0.22 + 0.17 * .size_boost),
-          plot_df$bubble_r * 0.36
+          plot_df$bubble_r * ((if (bubble_icon_only) 0.26 else 0.22) + 0.17 * .size_boost),
+          plot_df$bubble_r * if (bubble_icon_only) 0.40 else 0.36
         )
         .sep_ci <- pmax(
           plot_df$bubble_r * separacion_chip_icono_rel_foda,
           separacion_chip_icono_min_foda
         )
-        .chip_h_est <- pmax(chip_h * 1.10, pmin(plot_df$bubble_r * 0.56, card_h * 1.00))
+        .chip_h_est <- pmax(chip_h * if (bubble_icon_only) 1.00 else 1.10, pmin(plot_df$bubble_r * if (bubble_icon_only) 0.48 else 0.56, card_h * 1.00))
         .block_h <- .chip_h_est + .sep_ci + (2 * plot_df$icon_r_disp)
         plot_df$chip_y <- plot_df$y_card - (.block_h / 2 - .chip_h_est / 2)
         plot_df$icon_y <- plot_df$y_card + (.block_h / 2 - plot_df$icon_r_disp)
@@ -3428,8 +4158,11 @@ graficar_foda_dimensiones <- function(
           ) +
           ggplot2::geom_text(
             data = plot_df,
-            ggplot2::aes(x = .data$title_x, y = .data$y_card, label = .data$title_txt, colour = .data$title_col),
-            size = size_title_eff,
+            ggplot2::aes(
+              x = .data$title_x, y = .data$y_card,
+              label = .data$title_txt, colour = .data$title_col,
+              size = .data$title_size
+            ),
             hjust = 0,
             vjust = 0.5,
             lineheight = 0.86,
@@ -3444,6 +4177,7 @@ graficar_foda_dimensiones <- function(
             lineheight = 1,
             fontface = "bold"
           ) +
+          ggplot2::scale_size_identity() +
           ggplot2::scale_fill_identity() +
           ggplot2::scale_colour_identity()
       }
@@ -3463,9 +4197,9 @@ graficar_foda_dimensiones <- function(
         limits = y_lim,
         expand = ggplot2::expansion(mult = 0)
       ) +
-      ggplot2::labs(x = if (isTRUE(sd_tecnico)) "Desviación estándar" else NULL, y = "Puntaje")
+      ggplot2::labs(x = if (isTRUE(sd_tecnico)) "Desviacion estandar" else NULL, y = "Puntaje")
 
-    # Íconos en tarjetas dispersión
+    # Iconos en tarjetas dispersion
     if (has_iconos_foda && nrow(plot_df)) {
       for (.ii in seq_len(nrow(plot_df))) {
         .ico_path <- plot_df$icono[.ii]
@@ -3566,13 +4300,13 @@ graficar_foda_dimensiones <- function(
       colour = color_subtitulo
     )
 
-  # Leyenda de íconos para dispersión + "reemplazar"
+  # Leyenda de iconos para dispersion + "reemplazar"
   iconos_legend_disp <- if (
     has_iconos_foda &&
     identical(modo_foda, "dispersion") &&
     identical(icono_modo, "reemplazar")
   ) {
-    # Construir named list: etiqueta -> icono path (solo vars con ícono, sin duplicados)
+    # Construir named list: etiqueta -> icono path (solo vars con icono, sin duplicados)
     .seen_vars <- character(0)
     .ico_leg <- list()
     for (.r in seq_len(nrow(stats_df))) {
@@ -3596,7 +4330,7 @@ graficar_foda_dimensiones <- function(
     .dim_heat_legend_block(
       labels = legend_cruce_labels,
       colors = legend_cruce_colors,
-      size = max(7, size_items),
+      size = max(6.6, size_items - 1.1),
       colour = "#4A5F75"
     )
   } else NULL
@@ -3604,16 +4338,21 @@ graficar_foda_dimensiones <- function(
   legend_icon_block <- if (isTRUE(mostrar_leyenda_iconos) && !is.null(iconos_legend_disp)) {
     .dim_icono_leyenda_block(
       axis_iconos = iconos_legend_disp,
-      icon_size = max(0.02, min(0.18, 0.035 * icono_size_foda)),
-      size_text = max(7, size_items),
+      icon_size = icono_size_leyenda_foda,
+      size_text = if (identical(modo_foda, "dispersion")) max(6.4, size_items - 1.4) else max(7, size_items),
       colour_text = "#4A5F75",
-      icon_color = icono_color_leyenda_foda
+      icon_color = icono_color_leyenda_foda,
+      max_rows = if (identical(modo_foda, "dispersion")) 1L else 2L,
+      row_gap = if (identical(modo_foda, "dispersion")) 0.18 else 0.30,
+      compact = identical(modo_foda, "dispersion"),
+      icon_height_rel = if (identical(modo_foda, "dispersion")) 0.52 else NULL,
+      item_padding = if (identical(modo_foda, "dispersion")) 0.020 else 0.025
     )
   } else NULL
 
   legend_block <- if (isTRUE(mostrar_leyenda)) {
     if (!is.null(legend_cruce_block) && !is.null(legend_icon_block)) {
-      cowplot::plot_grid(legend_cruce_block, legend_icon_block, ncol = 1, rel_heights = c(0.50, 0.50))
+      cowplot::plot_grid(legend_cruce_block, legend_icon_block, ncol = 1, rel_heights = c(0.42, 0.58))
     } else if (!is.null(legend_cruce_block)) {
       legend_cruce_block
     } else if (!is.null(legend_icon_block)) {
@@ -3643,7 +4382,11 @@ graficar_foda_dimensiones <- function(
   has_dual_legend <- !is.null(legend_cruce_block) && !is.null(legend_icon_block)
   has_icon_only_legend <- is.null(legend_cruce_block) && !is.null(legend_icon_block)
   h_legend  <- if (isTRUE(mostrar_leyenda)) {
-    if (has_dual_legend) min(0.35, canvas_h_legend * 1.90)
+    if (identical(modo_foda, "dispersion") && has_dual_legend) {
+      min(0.16, max(0.075, canvas_h_legend * 1.20))
+    } else if (identical(modo_foda, "dispersion") && has_icon_only_legend) {
+      min(0.11, max(0.055, canvas_h_legend * 1.05))
+    } else if (has_dual_legend) min(0.35, canvas_h_legend * 1.90)
     else if (has_icon_only_legend) min(0.28, canvas_h_legend * 1.25)
     else canvas_h_legend
   } else 0.01
@@ -3658,6 +4401,9 @@ graficar_foda_dimensiones <- function(
     ncol = 1,
     rel_heights = c(h_title, h_panel, h_legend, h_caption)
   )
+
+  attr(canvas, "alto_word_sugerido") <- if (identical(modo_foda, "dispersion")) 3.9 else 3.0
+  attr(canvas, "ancho_word_sugerido") <- if (identical(modo_foda, "dispersion")) 6.6 else 6.0
 
   .dim_export_canvas(
     canvas,

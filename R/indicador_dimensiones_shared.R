@@ -68,13 +68,148 @@
 }
 
 #' @keywords internal
+.dim_normalize_semaforo_modo <- function(modo, default = "grupos") {
+  out <- as.character(modo %||% default)[1]
+  if (is.na(out) || !nzchar(trimws(out))) out <- default
+  out <- tolower(trimws(out))
+  if (identical(out, "degradado")) out <- "degradado_automatico"
+  if (!out %in% c("grupos", "degradado_automatico", "degradado_manual")) out <- default
+  out
+}
+
+#' @keywords internal
+.dim_normalize_degradado_anclas <- function(anclas, cortes, default = c(rojo = 0, verde = 100)) {
+  cuts <- suppressWarnings(as.numeric(cortes))
+  cuts <- cuts[is.finite(cuts) & !is.na(cuts)]
+  if (length(cuts) < 2L) cuts <- c(60, 80)
+  cuts <- sort(unique(cuts))[1:2]
+  if (length(cuts) < 2L || cuts[1] >= cuts[2]) cuts <- c(60, 80)
+
+  vals <- suppressWarnings(as.numeric(anclas))
+  vals <- vals[is.finite(vals) & !is.na(vals)]
+  if (!length(vals)) {
+    vals <- suppressWarnings(as.numeric(default))
+  }
+  if (length(vals) == 1L) vals <- c(vals[1], 100)
+  if (length(vals) < 2L) vals <- c(0, 100)
+
+  low_anchor <- vals[1]
+  high_anchor <- vals[2]
+
+  low_anchor <- pmax(0, pmin(cuts[1], low_anchor))
+  high_anchor <- pmax(cuts[2], pmin(100, high_anchor))
+  if (!is.finite(low_anchor) || is.na(low_anchor)) low_anchor <- 0
+  if (!is.finite(high_anchor) || is.na(high_anchor)) high_anchor <- 100
+  if (high_anchor <= cuts[2]) high_anchor <- 100
+
+  c(rojo = low_anchor, verde = high_anchor)
+}
+
+#' @keywords internal
+.dim_mix_color <- function(col_a, col_b, t, fallback = "#FFFFFF") {
+  tt <- suppressWarnings(as.numeric(t)[1])
+  if (!is.finite(tt) || is.na(tt)) tt <- 0
+  tt <- pmax(0, pmin(1, tt))
+
+  rgb_a <- tryCatch(grDevices::col2rgb(col_a), error = function(e) NULL)
+  rgb_b <- tryCatch(grDevices::col2rgb(col_b), error = function(e) NULL)
+  if (is.null(rgb_a)) rgb_a <- grDevices::col2rgb(fallback)
+  if (is.null(rgb_b)) rgb_b <- grDevices::col2rgb(fallback)
+
+  rr <- round(rgb_a[, 1] + (rgb_b[, 1] - rgb_a[, 1]) * tt)
+  grDevices::rgb(rr[1], rr[2], rr[3], maxColorValue = 255)
+}
+
+#' @keywords internal
+.dim_quantize_gradient_t <- function(t, n_steps = 20L) {
+  tt <- suppressWarnings(as.numeric(t))
+  tt[!is.finite(tt) | is.na(tt)] <- 0
+  tt <- pmax(0, pmin(1, tt))
+  n_steps <- suppressWarnings(as.integer(n_steps)[1])
+  if (!is.finite(n_steps) || is.na(n_steps) || n_steps < 2L) return(tt)
+  round(tt * (n_steps - 1L)) / (n_steps - 1L)
+}
+
+#' @keywords internal
+.dim_normalize_gradiente_segmentos <- function(segmentos, default = 20L) {
+  out <- suppressWarnings(as.integer(segmentos)[1])
+  if (!is.finite(out) || is.na(out) || out < 2L) out <- as.integer(default)
+  as.integer(out)
+}
+
+#' @keywords internal
+.dim_normalize_gradiente_manual <- function(colores, valores, limites = NULL) {
+  cols <- as.character(colores %||% character(0))
+  cols <- cols[!is.na(cols) & nzchar(trimws(cols))]
+
+  vals <- suppressWarnings(as.numeric(valores))
+  vals <- vals[is.finite(vals) & !is.na(vals)]
+
+  if (length(cols) < 2L || length(vals) < 2L) {
+    stop(
+      "Semaforo manual: debe definir al menos dos `semaforo_gradiente_colores` y dos `semaforo_gradiente_valores`.",
+      call. = FALSE
+    )
+  }
+
+  if (length(cols) != length(vals)) {
+    stop(
+      "Semaforo manual: `semaforo_gradiente_colores` y `semaforo_gradiente_valores` deben tener la misma longitud.",
+      call. = FALSE
+    )
+  }
+
+  if (is.unsorted(vals, strictly = TRUE)) {
+    stop(
+      "Semaforo manual: `semaforo_gradiente_valores` debe venir en orden ascendente y sin repetidos.",
+      call. = FALSE
+    )
+  }
+
+  lims <- suppressWarnings(as.numeric(limites))
+  lims <- lims[is.finite(lims) & !is.na(lims)]
+  if (length(lims) >= 2L) {
+    lims <- lims[1:2]
+    if (lims[1] >= lims[2]) {
+      stop(
+        "Semaforo manual: `semaforo_gradiente_limites` debe tener dos valores ascendentes.",
+        call. = FALSE
+      )
+    }
+  } else {
+    lims <- range(vals)
+  }
+
+  if (vals[1] < lims[1] || vals[length(vals)] > lims[2]) {
+    stop(
+      "Semaforo manual: `semaforo_gradiente_valores` debe quedar dentro de `semaforo_gradiente_limites`.",
+      call. = FALSE
+    )
+  }
+
+  span <- lims[2] - lims[1]
+  vals_rescaled <- if (isTRUE(span > 0)) {
+    (vals - lims[1]) / span
+  } else {
+    rep(0, length(vals))
+  }
+
+  list(
+    colores = cols,
+    valores = vals,
+    limites = lims,
+    valores_rescaled = pmax(0, pmin(1, vals_rescaled))
+  )
+}
+
+#' @keywords internal
 .dim_semaforo_estado <- function(x, cortes, digits = 0L,
                                  labels = c("rojo", "ambar", "verde")) {
   cuts <- suppressWarnings(as.numeric(cortes))
   cuts <- cuts[is.finite(cuts) & !is.na(cuts)]
-  if (length(cuts) < 2L) cuts <- c(50, 75)
+  if (length(cuts) < 2L) cuts <- c(60, 80)
   cuts <- sort(unique(cuts))[1:2]
-  if (length(cuts) < 2L || cuts[1] >= cuts[2]) cuts <- c(50, 75)
+  if (length(cuts) < 2L || cuts[1] >= cuts[2]) cuts <- c(60, 80)
 
   labs <- as.character(labels %||% c("rojo", "ambar", "verde"))
   if (length(labs) < 3L) labs <- c("rojo", "ambar", "verde")
@@ -87,7 +222,7 @@
     ifelse(
       x_round < cuts[1],
       labs[1],
-      ifelse(x_round < cuts[2], labs[2], labs[3])
+      ifelse(x_round <= cuts[2], labs[2], labs[3])
     )
   )
   as.character(out)
@@ -95,22 +230,137 @@
 
 #' @keywords internal
 .dim_semaforo_color <- function(x, cortes, colores, digits = 0L,
-                                na_color = NA_character_) {
-  est <- .dim_semaforo_estado(
-    x = x,
-    cortes = cortes,
-    digits = digits,
-    labels = c("rojo", "ambar", "verde")
-  )
-  cols <- colores %||% list()
-  col_rojo <- as.character(cols$rojo %||% "#D84B55")
-  col_ambar <- as.character(cols$ambar %||% "#E0B44C")
-  col_verde <- as.character(cols$verde %||% "#3A9A5B")
-  out <- ifelse(
-    is.na(est),
-    na_color,
-    ifelse(est == "rojo", col_rojo, ifelse(est == "ambar", col_ambar, col_verde))
-  )
+                                na_color = NA_character_,
+                                modo = "grupos",
+                                anclas_degradado = NULL,
+                                gradiente_colores = NULL,
+                                gradiente_valores = NULL,
+                                gradiente_limites = NULL,
+                                gradiente_segmentos = 20L) {
+  cols <- colores %||% character(0)
+  cols_chr <- as.character(unname(cols))
+  cols_nms <- names(cols)
+  if (is.null(cols_nms)) cols_nms <- character(0)
+  if (length(cols_chr) && length(cols_nms) == length(cols_chr)) {
+    names(cols_chr) <- cols_nms
+  }
+  col_rojo <- if ("rojo" %in% cols_nms) cols_chr[["rojo"]] else "#D84B55"
+  col_ambar <- if ("ambar" %in% cols_nms) cols_chr[["ambar"]] else if ("amarillo" %in% cols_nms) cols_chr[["amarillo"]] else "#E0B44C"
+  col_verde <- if ("verde" %in% cols_nms) cols_chr[["verde"]] else "#3A9A5B"
+  modo <- .dim_normalize_semaforo_modo(modo)
+
+  x_round <- .dim_round_half_up(x, digits)
+  out <- rep(as.character(na_color), length(x_round))
+  ok <- !is.na(x_round) & is.finite(x_round)
+  if (!any(ok)) return(as.character(out))
+
+  if (identical(modo, "grupos")) {
+    est <- .dim_semaforo_estado(
+      x = x_round,
+      cortes = cortes,
+      digits = 0L,
+      labels = c("rojo", "ambar", "verde")
+    )
+    out[ok] <- ifelse(
+      est[ok] == "rojo",
+      col_rojo,
+      ifelse(est[ok] == "ambar", col_ambar, col_verde)
+    )
+    return(as.character(out))
+  }
+
+  if (identical(modo, "degradado_manual")) {
+    grad_manual <- .dim_normalize_gradiente_manual(
+      colores = gradiente_colores,
+      valores = gradiente_valores,
+      limites = gradiente_limites
+    )
+    lims <- grad_manual$limites
+    vals <- pmax(lims[1], pmin(lims[2], x_round[ok]))
+    vals_rescaled <- if (isTRUE(diff(lims) > 0)) {
+      (vals - lims[1]) / diff(lims)
+    } else {
+      rep(0, length(vals))
+    }
+    vals_rescaled <- pmax(0, pmin(1, vals_rescaled))
+    anclas <- grad_manual$valores_rescaled
+    cols_manual <- grad_manual$colores
+    cols_out <- character(length(vals_rescaled))
+
+    for (ii in seq_along(vals_rescaled)) {
+      vv <- vals_rescaled[ii]
+      if (vv <= anclas[1]) {
+        cols_out[ii] <- cols_manual[1]
+      } else if (vv >= anclas[length(anclas)]) {
+        cols_out[ii] <- cols_manual[length(cols_manual)]
+      } else {
+        idx_hi <- which(anclas >= vv)[1]
+        idx_lo <- max(1L, idx_hi - 1L)
+        span <- anclas[idx_hi] - anclas[idx_lo]
+        tt <- if (isTRUE(span > 0)) (vv - anclas[idx_lo]) / span else 0
+        cols_out[ii] <- .dim_mix_color(cols_manual[idx_lo], cols_manual[idx_hi], tt)
+      }
+    }
+
+    out[ok] <- cols_out
+    return(as.character(out))
+  }
+
+  cuts <- suppressWarnings(as.numeric(cortes))
+  cuts <- cuts[is.finite(cuts) & !is.na(cuts)]
+  if (length(cuts) < 2L) cuts <- c(60, 80)
+  cuts <- sort(unique(cuts))[1:2]
+  if (length(cuts) < 2L || cuts[1] >= cuts[2]) cuts <- c(60, 80)
+  anclas_deg <- .dim_normalize_degradado_anclas(anclas_degradado, cuts, default = c(rojo = 0, verde = 100))
+  low_anchor <- unname(anclas_deg[["rojo"]])
+  high_anchor <- unname(anclas_deg[["verde"]])
+
+  vals <- pmax(0, pmin(100, x_round[ok]))
+  cols_out <- rep(col_ambar, length(vals))
+  n_steps <- .dim_normalize_gradiente_segmentos(gradiente_segmentos, default = 20L)
+
+  col_ambar_lo <- .dim_mix_color("#FFF1A6", col_ambar, 0.72)
+  col_ambar_hi <- .dim_mix_color(col_ambar, "#D8A91C", 0.28)
+  col_verde_lo <- .dim_mix_color(col_ambar, col_verde, 0.18)
+  col_verde_hi <- .dim_mix_color(col_verde, "#0B5D43", 0.45)
+
+  idx_low <- vals <= cuts[1]
+  idx_mid <- vals > cuts[1] & vals <= cuts[2]
+  idx_hi  <- vals > cuts[2]
+
+  if (any(idx_low)) {
+    t_low <- (vals[idx_low] - low_anchor) / max(cuts[1] - low_anchor, .Machine$double.eps)
+    t_low <- pmax(0, pmin(1, t_low))
+    t_low <- .dim_quantize_gradient_t(t_low, n_steps = n_steps)
+    cols_out[idx_low] <- vapply(
+      t_low^0.9,
+      function(tt) .dim_mix_color(col_rojo, col_ambar, tt),
+      character(1)
+    )
+  }
+
+  if (any(idx_mid)) {
+    t_mid <- (vals[idx_mid] - cuts[1]) / max(cuts[2] - cuts[1], .Machine$double.eps)
+    t_mid <- .dim_quantize_gradient_t(t_mid, n_steps = n_steps)
+    cols_out[idx_mid] <- vapply(
+      t_mid^1.02,
+      function(tt) .dim_mix_color(col_ambar_lo, col_ambar_hi, tt),
+      character(1)
+    )
+  }
+
+  if (any(idx_hi)) {
+    t_hi <- (vals[idx_hi] - cuts[2]) / max(high_anchor - cuts[2], .Machine$double.eps)
+    t_hi <- pmax(0, pmin(1, t_hi))
+    t_hi <- .dim_quantize_gradient_t(t_hi, n_steps = n_steps)
+    cols_out[idx_hi] <- vapply(
+      t_hi^1.08,
+      function(tt) .dim_mix_color(col_verde_lo, col_verde_hi, tt),
+      character(1)
+    )
+  }
+
+  out[ok] <- cols_out
   as.character(out)
 }
 
@@ -197,6 +447,42 @@
 }
 
 #' @keywords internal
+.dim_level_label_order <- function(var, data, instrumento = NULL) {
+  if (!(var %in% names(data))) return(character(0))
+
+  x <- data[[var]]
+  out <- character(0)
+
+  if (is.factor(x)) {
+    out <- levels(x)
+  }
+
+  if (!length(out)) {
+    labs <- attr(x, "labels", exact = TRUE)
+    if (!is.null(labs) && length(labs)) {
+      out <- as.character(unname(labs))
+    }
+  }
+
+  if (!length(out) && !is.null(instrumento)) {
+    surv <- instrumento$survey %||% NULL
+    ch <- instrumento$choices %||% NULL
+    ln <- tryCatch(get_list_name(var, surv), error = function(e) NA_character_)
+    col_lab <- .dim_choices_label_col(ch)
+    if (!is.null(ch) && !is.null(surv) &&
+        !is.na(ln) && nzchar(ln) &&
+        !is.null(col_lab) && col_lab %in% names(ch)) {
+      chv <- ch[ch$list_name == ln, , drop = FALSE]
+      if (nrow(chv)) out <- as.character(chv[[col_lab]])
+    }
+  }
+
+  out <- trimws(as.character(out))
+  out <- out[!is.na(out) & nzchar(out) & out != "NA"]
+  unique(out)
+}
+
+#' @keywords internal
 .dim_categorias_var <- function(df, var, w, data_ref = df, instrumento = NULL, max_levels = 12L) {
   out_empty <- list(
     rows = data.frame(value = character(0), label = character(0), base = numeric(0), stringsAsFactors = FALSE),
@@ -248,8 +534,8 @@
 .dim_range_labels <- function(c1, c2) {
   c(
     paste0("Menor a ", .dim_fmt_int(c1)),
-    paste0(.dim_fmt_int(c1), " - ", .dim_fmt_int(c2 - 1)),
-    paste0("Mayor a ", .dim_fmt_int(c2 - 1))
+    paste0(.dim_fmt_int(c1), " - ", .dim_fmt_int(c2)),
+    paste0("Mayor a ", .dim_fmt_int(c2))
   )
 }
 
@@ -386,16 +672,37 @@
   if (!paleta_radar %in% c("okabe_ito", "ipe")) paleta_radar <- "okabe_ito"
 
   sem_cfg <- config$semaforo %||% list()
-  sem_cortes <- suppressWarnings(as.numeric(sem_cfg$cortes %||% c(50, 75)))
+  sem_cortes <- suppressWarnings(as.numeric(sem_cfg$cortes %||% c(60, 80)))
   sem_cortes <- sem_cortes[is.finite(sem_cortes)]
-  if (length(sem_cortes) < 2L) sem_cortes <- c(50, 75)
+  if (length(sem_cortes) < 2L) sem_cortes <- c(60, 80)
   sem_cortes <- sort(unique(sem_cortes))[1:2]
   sem_cortes <- pmax(0, pmin(100, sem_cortes))
-  if (length(sem_cortes) < 2L || sem_cortes[1] >= sem_cortes[2]) sem_cortes <- c(50, 75)
+  if (length(sem_cortes) < 2L || sem_cortes[1] >= sem_cortes[2]) sem_cortes <- c(60, 80)
+  sem_anclas <- .dim_normalize_degradado_anclas(
+    sem_cfg$anclas_degradado %||% NULL,
+    sem_cortes,
+    default = c(rojo = 0, verde = 100)
+  )
+  sem_segmentos <- .dim_normalize_gradiente_segmentos(
+    sem_cfg$gradiente_segmentos %||% 20L,
+    default = 20L
+  )
+  sem_grad_manual <- NULL
+  if (identical(.dim_normalize_semaforo_modo(sem_cfg$modo %||% "grupos"), "degradado_manual")) {
+    sem_grad_manual <- .dim_normalize_gradiente_manual(
+      colores = sem_cfg$gradiente_colores %||% NULL,
+      valores = sem_cfg$gradiente_valores %||% NULL,
+      limites = sem_cfg$gradiente_limites %||% NULL
+    )
+  }
 
   sem_cols <- as.character(sem_cfg$colores %||% character(0))
   nms_sem <- names(sem_cols %||% character(0))
   if (is.null(nms_sem)) nms_sem <- character(0)
+
+  sem_rojo <- if ("rojo" %in% nms_sem) sem_cols[["rojo"]] else "#D84B55"
+  sem_ambar <- if ("ambar" %in% nms_sem) sem_cols[["ambar"]] else "#E0B44C"
+  sem_verde <- if ("verde" %in% nms_sem) sem_cols[["verde"]] else "#3A9A5B"
 
   list(
     radar_min_ejes = as.integer(radar_min_ejes),
@@ -405,9 +712,16 @@
     incluir_total_default = isTRUE(vis_cfg$incluir_total_default),
     semaforo = list(
       cortes = sem_cortes,
-      rojo = if ("rojo" %in% nms_sem) sem_cols[["rojo"]] else "#D84B55",
-      ambar = if ("ambar" %in% nms_sem) sem_cols[["ambar"]] else "#E0B44C",
-      verde = if ("verde" %in% nms_sem) sem_cols[["verde"]] else "#3A9A5B",
+      modo = .dim_normalize_semaforo_modo(sem_cfg$modo %||% "grupos"),
+      anclas_degradado = sem_anclas,
+      gradiente_segmentos = as.integer(sem_segmentos),
+      gradiente_colores = sem_grad_manual$colores %||% NULL,
+      gradiente_valores = sem_grad_manual$valores %||% NULL,
+      gradiente_limites = sem_grad_manual$limites %||% NULL,
+      colores = c(rojo = sem_rojo, ambar = sem_ambar, verde = sem_verde),
+      rojo = sem_rojo,
+      ambar = sem_ambar,
+      verde = sem_verde,
       na = "#DFE5EE"
     )
   )
@@ -813,6 +1127,7 @@
     iter_hidden_levels = 0L,
     visual_mode = "barras",
     group_order = character(0),
+    group_order_natural = character(0),
     group_colors = stats::setNames(character(0), character(0)),
     semaforo = ctx$semaforo,
     radar_min_ejes = ctx$radar_min_ejes
@@ -1069,6 +1384,21 @@
   sc_heat <- dplyr::bind_rows(sc_total, sc_plot)
 
   group_order <- .dim_group_order(sc_plot)
+  group_order_natural <- character(0)
+  if (nzchar(cruce)) {
+    natural_labels <- .dim_level_label_order(cruce, ctx$data, ctx$instrumento)
+    observed_labels <- unique(as.character(vapply(groups, function(x) x$label %||% "", character(1))))
+    observed_others <- setdiff(observed_labels, "Total")
+    natural_others <- natural_labels[natural_labels %in% observed_others]
+    natural_others <- c(natural_others, setdiff(observed_others, natural_others))
+    if ("Total" %in% observed_labels) {
+      group_order_natural <- c("Total", natural_others)
+    } else {
+      group_order_natural <- natural_others
+    }
+    group_order_natural <- unique(group_order_natural)
+  }
+  if (!length(group_order_natural)) group_order_natural <- group_order
   group_labels_all <- vapply(groups, function(x) as.character(x$label %||% ""), character(1))
   group_keys_all <- vapply(groups, function(x) as.character(x$key %||% x$label %||% ""), character(1))
   group_keys_order <- group_keys_all[match(group_order, group_labels_all)]
@@ -1102,6 +1432,7 @@
     iter_hidden_levels = as.integer(iter_pick$hidden_levels %||% 0L),
     visual_mode = visual_mode,
     group_order = group_order,
+    group_order_natural = group_order_natural,
     group_colors = group_colors,
     semaforo = ctx$semaforo,
     radar_min_ejes = ctx$radar_min_ejes,

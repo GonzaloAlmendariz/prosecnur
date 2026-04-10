@@ -522,6 +522,206 @@ reporte_dimensiones_indices <- function(
   out
 }
 
+#' Construir tablas jerarquicas para cruces de dimensiones
+#'
+#' Genera una configuracion reutilizable de `tablas` para [reporte_cruces()]
+#' en `modo = "dimensiones"`, organizando una hoja de indicadores agregados y,
+#' opcionalmente, una hoja de detalle por driver.
+#'
+#' @param data `data.frame` que proviene de [reporte_dimensiones_indices()] y
+#'   contiene el atributo `indices_meta`.
+#' @param indices Vector opcional de indices a incluir. Acepta nombres logicos
+#'   (por ejemplo, `"indice_general"`) o nombres de columnas de salida
+#'   (por ejemplo, `"idx_indice_general"`). Si es `NULL`, usa todos los indices
+#'   disponibles en `indices_meta`.
+#' @param hoja_indicadores Nombre de la hoja resumen donde se apilan indices y
+#'   drivers.
+#' @param hoja_detalle Nombre de la hoja de detalle por driver.
+#' @param incluir_detalle Si `TRUE`, agrega una hoja con el desglose de cada
+#'   driver por criterio.
+#' @param cruzar_dim Variables adicionales de cruce para las columnas.
+#' @param fila Variable base para el primer bloque de columnas.
+#' @param incluir_total Si `TRUE`, agrega la columna `Total`.
+#' @param brecha_cols Si `TRUE`, agrega columnas de brecha por bloque.
+#' @param orientacion Orientacion de las tablas. Por defecto
+#'   `"filas_indicadores"`.
+#'
+#' @return Lista de tablas lista para usarse en [reporte_cruces()].
+#' @family indicador
+#' @seealso [reporte_cruces()], [reporte_dimensiones_indices()]
+#' @export
+tablas_dimensiones_jerarquicas <- function(
+    data,
+    indices = NULL,
+    hoja_indicadores = "Indicadores",
+    hoja_detalle = "Conductores",
+    incluir_detalle = TRUE,
+    cruzar_dim = NULL,
+    fila,
+    incluir_total = TRUE,
+    brecha_cols = TRUE,
+    orientacion = c("filas_indicadores", "filas_dimension")
+) {
+  `%||%` <- function(x, y) if (!is.null(x)) x else y
+
+  .ind_validate_data_frame(data, caller = "tablas_dimensiones_jerarquicas()")
+  orientacion <- match.arg(orientacion)
+
+  fila <- as.character(fila)[1]
+  if (is.na(fila) || !nzchar(trimws(fila))) {
+    stop("`fila` debe ser character(1) no vacio.", call. = FALSE)
+  }
+
+  cruzar_dim <- as.character(cruzar_dim %||% character(0))
+  cruzar_dim <- unique(cruzar_dim[!is.na(cruzar_dim) & nzchar(trimws(cruzar_dim))])
+  cruzar_dim <- cruzar_dim[cruzar_dim %in% names(data)]
+  cruzar_dim <- setdiff(cruzar_dim, fila)
+
+  idx_meta <- attr(data, "indices_meta", exact = TRUE)
+  meta_indices <- if (is.list(idx_meta) && is.list(idx_meta$indices)) idx_meta$indices else list()
+  meta_subindices <- if (is.list(idx_meta) && is.list(idx_meta$subindices)) idx_meta$subindices else list()
+
+  if (!length(meta_indices) || !length(meta_subindices)) {
+    stop(
+      "`data` debe contener `indices_meta` con indices y subindices para construir las tablas jerarquicas.",
+      call. = FALSE
+    )
+  }
+
+  idx_keys <- names(meta_indices)
+  idx_out_map <- stats::setNames(
+    vapply(meta_indices, function(x) as.character(x$salida %||% NA_character_)[1], character(1)),
+    idx_keys
+  )
+  idx_out_map <- idx_out_map[!is.na(idx_out_map) & nzchar(idx_out_map)]
+  idx_key_by_out <- stats::setNames(names(idx_out_map), idx_out_map)
+
+  if (is.null(indices)) {
+    idx_sel_keys <- idx_keys
+  } else {
+    idx_req <- as.character(indices)
+    idx_req <- unique(idx_req[!is.na(idx_req) & nzchar(trimws(idx_req))])
+    if (!length(idx_req)) {
+      stop("`indices` debe contener al menos un indice valido.", call. = FALSE)
+    }
+
+    idx_sel_keys <- character(0)
+    for (id in idx_req) {
+      if (id %in% idx_keys) {
+        idx_sel_keys <- c(idx_sel_keys, id)
+      } else if (id %in% names(idx_key_by_out)) {
+        idx_sel_keys <- c(idx_sel_keys, idx_key_by_out[[id]])
+      } else {
+        stop("No se encontro el indice `", id, "` en `indices_meta`.", call. = FALSE)
+      }
+    }
+    idx_sel_keys <- unique(idx_sel_keys)
+  }
+
+  if (!length(idx_sel_keys)) {
+    stop("No se resolvieron indices para construir las tablas jerarquicas.", call. = FALSE)
+  }
+
+  sub_sel_keys <- character(0)
+  for (id in idx_sel_keys) {
+    refs <- unique(as.character(meta_indices[[id]]$refs %||% character(0)))
+    refs <- refs[!is.na(refs) & nzchar(trimws(refs))]
+    refs <- refs[refs %in% names(meta_subindices)]
+    sub_sel_keys <- c(sub_sel_keys, refs)
+  }
+  sub_sel_keys <- unique(sub_sel_keys)
+
+  if (!length(sub_sel_keys)) {
+    sub_sel_keys <- names(meta_subindices)
+  }
+
+  mk_table <- function(titulo,
+                       indicadores,
+                       hoja,
+                       espacio_antes = 0L,
+                       espacio_despues = 1L) {
+    list(
+      titulo = as.character(titulo)[1],
+      indicadores = indicadores,
+      fila = fila,
+      cruzar_dim = cruzar_dim,
+      hoja = as.character(hoja)[1],
+      orientacion = orientacion,
+      incluir_total = isTRUE(incluir_total),
+      brecha_filas = FALSE,
+      etiq_brecha_filas = "Brecha",
+      brecha_cols = isTRUE(brecha_cols),
+      etiq_brecha_cols = "Brecha",
+      espacio_antes = as.integer(espacio_antes),
+      espacio_despues = as.integer(espacio_despues)
+    )
+  }
+
+  out <- list()
+
+  idx_vars <- character(0)
+  for (id in idx_sel_keys) {
+    meta_i <- meta_indices[[id]]
+    idx_var <- as.character(meta_i$salida %||% paste0("idx_", id))[1]
+    if (!(idx_var %in% names(data))) next
+    idx_vars <- c(idx_vars, idx_var)
+  }
+  idx_vars <- unique(idx_vars)
+
+  sub_vars <- character(0)
+  for (id in sub_sel_keys) {
+    meta_s <- meta_subindices[[id]]
+    sub_var <- as.character(meta_s$salida %||% paste0("sub_", id))[1]
+    if (!(sub_var %in% names(data))) next
+    sub_vars <- c(sub_vars, sub_var)
+  }
+  sub_vars <- unique(sub_vars)
+
+  if (length(idx_vars)) {
+    out[[length(out) + 1L]] <- mk_table(
+      titulo = "Indicadores",
+      indicadores = idx_vars,
+      hoja = hoja_indicadores,
+      espacio_antes = 0L,
+      espacio_despues = if (length(sub_vars)) 2L else 1L
+    )
+  }
+
+  if (length(sub_vars)) {
+    out[[length(out) + 1L]] <- mk_table(
+      titulo = "Conductores",
+      indicadores = sub_vars,
+      hoja = hoja_indicadores,
+      espacio_antes = 0L
+    )
+  }
+
+  if (isTRUE(incluir_detalle)) {
+    for (i in seq_along(sub_sel_keys)) {
+      id <- sub_sel_keys[[i]]
+      meta_s <- meta_subindices[[id]]
+      vars_i <- unique(as.character(meta_s$vars %||% character(0)))
+      vars_i <- vars_i[!is.na(vars_i) & nzchar(trimws(vars_i))]
+      vars_i <- vars_i[vars_i %in% names(data)]
+      if (!length(vars_i)) next
+
+      sub_lbl <- as.character(meta_s$etiqueta %||% id)[1]
+      out[[length(out) + 1L]] <- mk_table(
+        titulo = sub_lbl,
+        indicadores = vars_i,
+        hoja = hoja_detalle,
+        espacio_antes = if (i == 1L) 0L else 3L
+      )
+    }
+  }
+
+  if (!length(out)) {
+    stop("No se pudo construir ninguna tabla jerarquica con la metadata disponible.", call. = FALSE)
+  }
+
+  out
+}
+
 #' Construir configuracion de dimensiones para `reporte_interactivo()`
 #'
 #' Genera una configuracion lista para el Tab 4 (Dimensiones) a partir de los
@@ -540,7 +740,21 @@ reporte_dimensiones_indices <- function(
 #' @param labels_indicadores Vector/lista nombrada opcional para rotular
 #'   indicadores (`r100_*`).
 #' @param semaforo_cortes Numeric(2) con cortes del semaforo en escala 0-100.
-#'   Por defecto `c(50, 75)`.
+#'   Por defecto `c(60, 80)`.
+#' @param semaforo_modo Modo de color del semaforo: `"grupos"` (clasificacion
+#'   discreta), `"degradado_automatico"` (transiciones suaves usando los cortes
+#'   como referencias) o `"degradado_manual"` (gradiente definido por puntos
+#'   ancla). `"degradado"` se mantiene como alias de compatibilidad hacia
+#'   `"degradado_automatico"`.
+#' @param semaforo_anclas_degradado Anclas del degradado automatico. Solo se
+#'   usan en `semaforo_modo = "degradado_automatico"`.
+#' @param semaforo_gradiente_segmentos Numero de segmentos internos del
+#'   gradiente automatico.
+#' @param semaforo_gradiente_colores Colores ancla del gradiente manual.
+#' @param semaforo_gradiente_valores Valores ancla (en escala 0-100) del
+#'   gradiente manual.
+#' @param semaforo_gradiente_limites Limites minimo y maximo del gradiente
+#'   manual.
 #' @param semaforo_colores Vector nombrado de 3 colores (`rojo`, `ambar`,
 #'   `verde`) para el heatmap semaforico.
 #' @param radar_min_ejes Numero minimo de ejes para usar radar (si no se
@@ -571,7 +785,13 @@ reporte_dimensiones_config <- function(
     labels_indices = NULL,
     labels_subindices = NULL,
     labels_indicadores = NULL,
-    semaforo_cortes = c(50, 75),
+    semaforo_cortes = c(60, 80),
+    semaforo_modo = c("grupos", "degradado_automatico", "degradado_manual", "degradado"),
+    semaforo_anclas_degradado = NULL,
+    semaforo_gradiente_segmentos = 20L,
+    semaforo_gradiente_colores = NULL,
+    semaforo_gradiente_valores = NULL,
+    semaforo_gradiente_limites = NULL,
     semaforo_colores = c(rojo = "#D84B55", ambar = "#E0B44C", verde = "#3A9A5B"),
     radar_min_ejes = 3L,
     incluir_total_default = TRUE,
@@ -586,6 +806,7 @@ reporte_dimensiones_config <- function(
   .ind_validate_data_frame(data, caller = "reporte_dimensiones_config()")
 
   paleta_radar <- match.arg(paleta_radar)
+  semaforo_modo <- .dim_normalize_semaforo_modo(semaforo_modo)
 
   .as_palette_list <- function(x) {
     if (is.null(x)) return(list())
@@ -619,11 +840,28 @@ reporte_dimensiones_config <- function(
 
   semaforo_cortes <- suppressWarnings(as.numeric(semaforo_cortes))
   semaforo_cortes <- semaforo_cortes[is.finite(semaforo_cortes) & !is.na(semaforo_cortes)]
-  if (length(semaforo_cortes) < 2L) semaforo_cortes <- c(50, 75)
+  if (length(semaforo_cortes) < 2L) semaforo_cortes <- c(60, 80)
   semaforo_cortes <- sort(unique(semaforo_cortes))[1:2]
   semaforo_cortes <- pmax(0, pmin(100, semaforo_cortes))
   if (length(semaforo_cortes) < 2L || semaforo_cortes[1] >= semaforo_cortes[2]) {
-    semaforo_cortes <- c(50, 75)
+    semaforo_cortes <- c(60, 80)
+  }
+  semaforo_anclas_degradado <- .dim_normalize_degradado_anclas(
+    semaforo_anclas_degradado,
+    semaforo_cortes,
+    default = c(rojo = 0, verde = 100)
+  )
+  semaforo_gradiente_segmentos <- .dim_normalize_gradiente_segmentos(
+    semaforo_gradiente_segmentos,
+    default = 20L
+  )
+  semaforo_gradiente_manual <- NULL
+  if (identical(semaforo_modo, "degradado_manual")) {
+    semaforo_gradiente_manual <- .dim_normalize_gradiente_manual(
+      colores = semaforo_gradiente_colores,
+      valores = semaforo_gradiente_valores,
+      limites = semaforo_gradiente_limites
+    )
   }
 
   semaforo_colores <- as.character(semaforo_colores %||% character(0))
@@ -770,7 +1008,13 @@ reporte_dimensiones_config <- function(
     paletas_cruce = paletas_cruce,
     semaforo = list(
       cortes = as.numeric(semaforo_cortes),
-      colores = c(rojo = col_rojo, ambar = col_amb, verde = col_ver)
+      modo = semaforo_modo,
+      colores = c(rojo = col_rojo, ambar = col_amb, verde = col_ver),
+      anclas_degradado = semaforo_anclas_degradado,
+      gradiente_segmentos = as.integer(semaforo_gradiente_segmentos),
+      gradiente_colores = semaforo_gradiente_manual$colores %||% NULL,
+      gradiente_valores = semaforo_gradiente_manual$valores %||% NULL,
+      gradiente_limites = semaforo_gradiente_manual$limites %||% NULL
     ),
     visual = list(
       radar_min_ejes = as.integer(radar_min_ejes),
@@ -782,4 +1026,3 @@ reporte_dimensiones_config <- function(
     )
   )
 }
-

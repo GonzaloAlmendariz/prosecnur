@@ -25,6 +25,9 @@
 #'   Si es `NULL`, se estima automaticamente desde los datos.
 #'   Cuando se define explicitamente, se agregan lineas punteadas en esos cortes
 #'   y se fuerzan como marcas del eje numerico.
+#' @param modo_semaforo Modo del semaforo para el chip: `"grupos"` mantiene la
+#'   clasificacion discreta actual y `"degradado"` interpola colores alrededor
+#'   de los cortes de referencia.
 #' @param chip_colores Colores del semaforo para el chip de media. Puede ser un
 #'   vector nombrado con `rojo`, `ambar`, `verde`, o un vector de largo 3 en ese orden.
 #' @param chip_texto_color Color del texto dentro del chip.
@@ -79,6 +82,7 @@ graficar_boxplot <- function(
     color_media       = "#173B63",
     size_media        = 2.3,
     cortes_chip       = NULL,
+    modo_semaforo     = c("grupos", "degradado"),
     chip_colores      = c(rojo = "#C62828", ambar = "#EF6C00", verde = "#2E7D32"),
     chip_texto_color  = "#FFFFFF",
     chip_decimales    = 1,
@@ -203,6 +207,7 @@ graficar_boxplot <- function(
   }
 
   orientacion <- match.arg(orientacion)
+  modo_semaforo <- .dim_normalize_semaforo_modo(modo_semaforo)
   pos_titulo  <- match.arg(pos_titulo)
   pos_nota_pie <- match.arg(pos_nota_pie)
   exportar <- match.arg(exportar)
@@ -361,7 +366,8 @@ graficar_boxplot <- function(
         verde = chip_cols[["verde"]]
       ),
       digits = 0,
-      na_color = NA_character_
+      na_color = NA_character_,
+      modo = modo_semaforo
     )
     mean_df$chip_label <- paste0(
       format(round(mean_df$media, chip_decimales), nsmall = chip_decimales, trim = TRUE),

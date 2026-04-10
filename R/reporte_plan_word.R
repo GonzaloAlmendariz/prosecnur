@@ -6,14 +6,17 @@
 #' @family reporte
 #' @export
 w_presets <- function(
-    image = list(width_in = 6.6, height_in = 3.9, dpi = 300, bg = "white"),
+    image = list(width_in = 6.1, height_in = 2.95, dpi = 300, bg = "white"),
     title_style  = list(font = "Arial", size = 12, bold = TRUE,  italic = FALSE, color = "#39588B"),
     base_style   = list(font = "Arial", size = 9,  bold = FALSE, italic = TRUE,  color = "#39588B",
                         formato = "Base: %s", sufijo_auto = NULL),
+    intro_style  = list(font = "Arial", size = 10, bold = FALSE, italic = FALSE, color = "#3F556E"),
+    subsection_style = list(font = "Arial", size = 12, bold = TRUE, italic = FALSE, color = "#39588B"),
     section_style = list(font = "Arial", size = 14, bold = TRUE, italic = FALSE, color = "#39588B"),
     figure_numbering     = list(enabled = TRUE, prefix = "Gr\u00e1fico", sep = ". "),
     pagebreak_between    = FALSE,
-    pagebreak_after_title = TRUE
+    pagebreak_after_title = TRUE,
+    toc                  = list(enabled = FALSE, title = NULL)
 ) {
   image$width_in  <- as.numeric(image$width_in  %||% 6.6)
   image$height_in <- as.numeric(image$height_in %||% 3.9)
@@ -25,10 +28,13 @@ w_presets <- function(
     image                 = image,
     title_style           = title_style,
     base_style            = base_style,
+    intro_style           = intro_style,
+    subsection_style      = subsection_style,
     section_style         = section_style,
     figure_numbering      = figure_numbering,
     pagebreak_between     = isTRUE(pagebreak_between),
-    pagebreak_after_title = isTRUE(pagebreak_after_title)
+    pagebreak_after_title = isTRUE(pagebreak_after_title),
+    toc                   = toc
   )
   class(out) <- c("word_presets", "list")
   out
@@ -128,14 +134,36 @@ reporte_word_plan <- function(
   }
 
   # Párrafo con fpar — sin style forzado para que fp_p tenga pleno efecto
-  .add_par_w <- function(doc, text, st, align = "left") {
+  .add_par_w <- function(doc, text, st, align = "left", style = NULL) {
     if (is.null(text) || !nzchar(trimws(as.character(text)[1]))) return(doc)
     text <- trimws(as.character(text)[1])
     fpar <- officer::fpar(
       officer::ftext(text, prop = .fp_w(st)),
       fp_p = officer::fp_par(text.align = align)
     )
-    officer::body_add_fpar(doc, value = fpar)
+    officer::body_add_fpar(doc, value = fpar, style = style)
+  }
+
+  .strip_heading_number <- function(text) {
+    txt <- trimws(as.character(text %||% "")[1])
+    if (!nzchar(txt)) return(txt)
+    sub("^\\s*\\d+(?:\\.\\d+)*\\.?\\s+", "", txt, perl = TRUE)
+  }
+
+  .add_toc_w <- function(doc, presets_word) {
+    toc_cfg <- presets_word$toc %||% list()
+    if (!isTRUE(toc_cfg$enabled)) return(doc)
+    toc_title <- as.character(toc_cfg$title %||% "")[1]
+    if (nzchar(trimws(toc_title))) {
+      doc <- .add_par_w(
+        doc,
+        toc_title,
+        presets_word$section_style,
+        align = "left",
+        style = "Normal"
+      )
+    }
+    officer::body_add_toc(doc, level = 2)
   }
 
   # -------------------------------------------------------------------------
@@ -166,6 +194,7 @@ reporte_word_plan <- function(
   # 5) Abrir docx
   # -------------------------------------------------------------------------
   doc <- if (!isTRUE(solo_lista)) officer::read_docx() else NULL
+  toc_inserted <- FALSE
 
   # -------------------------------------------------------------------------
   # 6) Loop render_meta
@@ -189,6 +218,11 @@ reporte_word_plan <- function(
         doc <- .add_par_w(doc, entry$date,     ts, align = "center")
         if (isTRUE(presets_word$pagebreak_after_title))
           doc <- officer::body_add_break(doc)
+        if (isTRUE((presets_word$toc %||% list())$enabled) && !isTRUE(toc_inserted)) {
+          doc <- .add_toc_w(doc, presets_word)
+          toc_inserted <- TRUE
+          doc <- officer::body_add_break(doc)
+        }
       }
       log_rows[[idx]] <- list(block_i = idx, block_type = "title_doc",
                               element = NA_character_, var = NA_character_)
@@ -198,9 +232,22 @@ reporte_word_plan <- function(
     # -- Sección --------------------------------------------------------------
     if (identical(kind, "section")) {
       if (!isTRUE(solo_lista)) {
-        ss <- presets_word$section_style
-        doc <- .add_par_w(doc, entry$title,    ss)
-        doc <- .add_par_w(doc, entry$subtitle, ss)
+        if (isTRUE((presets_word$toc %||% list())$enabled) && !isTRUE(toc_inserted)) {
+          doc <- .add_toc_w(doc, presets_word)
+          toc_inserted <- TRUE
+          doc <- officer::body_add_break(doc)
+        }
+        level_i <- suppressWarnings(as.integer(entry$meta$word_heading_level %||% 1L)[1])
+        if (!is.finite(level_i) || is.na(level_i) || level_i < 1L) level_i <- 1L
+        heading_style <- if (level_i <= 1L) "heading 1" else "heading 2"
+        heading_fp <- if (level_i <= 1L) presets_word$section_style else (presets_word$subsection_style %||% presets_word$title_style)
+        heading_txt <- .strip_heading_number(entry$title)
+        doc <- .add_par_w(doc, heading_txt, heading_fp, style = heading_style)
+        doc <- .add_par_w(doc, entry$subtitle, heading_fp)
+        if (level_i <= 1L) {
+          doc <- .add_par_w(doc, entry$word_intro %||% NULL, presets_word$intro_style, align = "left", style = "Normal")
+        }
+        doc <- officer::body_add_par(doc, "", style = "Normal")
       }
       log_rows[[idx]] <- list(block_i = idx, block_type = "section",
                               element = NA_character_, var = NA_character_)
@@ -221,13 +268,22 @@ reporte_word_plan <- function(
     )
 
     # altura dinámica si el graficador la sugiere:
+    w <- attr(p, "ancho_word_sugerido", exact = TRUE)
+    if (is.null(w) || !is.finite(w)) w <- img_w
+    w <- max(w, 1.5)
+
     h <- attr(p, "alto_word_sugerido", exact = TRUE)
     if (is.null(h) || !is.finite(h)) h <- img_h
     h <- max(h, 0.9)
 
     if (!isTRUE(solo_lista)) {
-      doc <- .add_par_w(doc, title_txt, presets_word$title_style, align = "center")
-      doc <- officer::body_add_gg(doc, value = p, width = img_w, height = h, res = img_dpi)
+      if (isTRUE((presets_word$toc %||% list())$enabled) && !isTRUE(toc_inserted)) {
+        doc <- .add_toc_w(doc, presets_word)
+        toc_inserted <- TRUE
+        doc <- officer::body_add_break(doc)
+      }
+      doc <- .add_par_w(doc, title_txt, presets_word$title_style, align = "center", style = "Normal")
+      doc <- officer::body_add_gg(doc, value = p, width = w, height = h, res = img_dpi)
       if (!is.null(pie_txt))
         doc <- .add_par_w(doc, pie_txt, presets_word$base_style, align = "center")
       doc <- officer::body_add_par(doc, "", style = "Normal")

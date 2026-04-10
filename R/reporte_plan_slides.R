@@ -1,5 +1,5 @@
 # =============================================================================
-# PLAN / SLIDES (contenedores con layout FIJO) — v2 (CONSISTENTE)
+# PLAN / SLIDES (contenedores con layout FIJO)  -  v2 (CONSISTENTE)
 # - Elimina duplicados (p_slide_2pop/5pop/6pop) y unifica contratos.
 # - Normaliza validaciones y textos opcionales.
 # - Implementa p_slide_1_left / p_slide_1_right.
@@ -12,8 +12,12 @@
 
 .ppt_norm_text1 <- function(x, blank = NULL) {
   if (is.null(x)) return(NULL)
+  if (length(x) == 0L) return(blank)
+  if (all(is.na(x))) return(blank)
   x <- as.character(x)[1]
+  if (is.na(x)) return(blank)
   if (!nzchar(trimws(x))) return(blank)
+  if (identical(trimws(x), "NA")) return(blank)
   x
 }
 
@@ -84,29 +88,32 @@ p_plan <- function(..., slides = NULL) {
 }
 
 # =============================================================================
-# SLIDES — TÍTULO / SECCIÓN
+# SLIDES  -  TITULO / SECCION
 # =============================================================================
 
-#' @title Slide de cambio de sección
+#' @title Slide de cambio de seccion
 #'
-#' @param title Título de la sección.
-#' @param subtitle Subtítulo opcional.
+#' @param title Titulo de la seccion.
+#' @param subtitle Subtitulo opcional.
+#' @param intro_word Parrafo editorial opcional para Word. No se imprime en PPT.
 #' @param meta Lista libre para notas internas (no se imprime).
 #'
 #' @return Objeto con clase `"ppt_slide"`.
 #'
 #' @family reporte
 #' @export
-p_slide_section <- function(title, subtitle = NULL, meta = list()) {
+p_slide_section <- function(title, subtitle = NULL, intro_word = NULL, meta = list()) {
   title <- .ppt_norm_text1(title)
-  if (is.null(title)) stop("`title` debe ser un texto no vacío.", call. = FALSE)
+  if (is.null(title)) stop("`title` debe ser un texto no vacio.", call. = FALSE)
 
   subtitle <- .ppt_norm_text1(subtitle, blank = NULL)
+  intro_word <- .ppt_norm_text1(intro_word, blank = NULL)
   .ppt_chk_meta(meta)
 
   .ppt_as_slide(list(
     .slide_type = "section",
     title       = title,
+    word_intro  = intro_word,
     slots       = list(
       title    = title,
       subtitle = subtitle
@@ -117,8 +124,8 @@ p_slide_section <- function(title, subtitle = NULL, meta = list()) {
 
 #' @title Slide de portada (Title Slide)
 #'
-#' @param title Título (requerido).
-#' @param subtitle Subtítulo opcional.
+#' @param title Titulo (requerido).
+#' @param subtitle Subtitulo opcional.
 #' @param date Fecha opcional (si NULL: no tocar el placeholder de la plantilla).
 #' @param meta_left,meta_right,meta_line Textos opcionales para placeholders secundarios.
 #' @param meta Lista libre para notas internas (no se imprime).
@@ -136,7 +143,7 @@ p_slide_title <- function(
     meta       = list()
 ) {
   title <- .ppt_norm_text1(title)
-  if (is.null(title)) stop("`title` debe ser texto no vacío.", call. = FALSE)
+  if (is.null(title)) stop("`title` debe ser texto no vacio.", call. = FALSE)
 
   .ppt_chk_meta(meta)
 
@@ -156,13 +163,13 @@ p_slide_title <- function(
 }
 
 # =============================================================================
-# SLIDES — BÁSICAS (1 gráfico / 2 gráficos)
+# SLIDES  -  BASICAS (1 grafico / 2 graficos)
 # =============================================================================
 
-#' @title Slide con 1 gráfico a pantalla completa
+#' @title Slide con 1 grafico a pantalla completa
 #'
-#' @param title Título del slide (opcional).
-#' @param subtitle Subtítulo opcional alineado bajo el título.
+#' @param title Titulo del slide (opcional).
+#' @param subtitle Subtitulo opcional alineado bajo el titulo.
 #' @param plot Elemento `p_*()` principal (requerido).
 #' @param base Elemento opcional (p.ej. `p_text()` o `character(1)`).
 #' @param footer Elemento opcional (p.ej. `p_text()` o `character(1)`).
@@ -202,9 +209,9 @@ p_slide_1 <- function(title = NULL, subtitle = NULL, plot, base = NULL, footer =
   ))
 }
 
-#' @title Slide con 2 gráficos lado a lado
+#' @title Slide con 2 graficos lado a lado
 #'
-#' @param title Título del slide (opcional).
+#' @param title Titulo del slide (opcional).
 #' @param left Elemento `p_*()` izquierda (requerido).
 #' @param right Elemento `p_*()` derecha (requerido).
 #' @param base Elemento opcional (p.ej. `p_text()` / `character(1)`).
@@ -253,7 +260,7 @@ p_slide_2 <- function(title = NULL, left, right, base = NULL, footer = NULL, met
 }
 
 # =============================================================================
-# SLIDES — TEXTO + GRÁFICO(S) (contrato consistente)
+# SLIDES  -  TEXTO + GRAFICO(S) (contrato consistente)
 # =============================================================================
 
 #' @family reporte
@@ -423,8 +430,8 @@ p_slide_text_l2 <- function(
 }
 
 # =============================================================================
-# SLIDES — POBLACIÓN (CONTRATO CANÓNICO)
-# - p_slide_poblacion_2 / _4 / _5 / _6 son el estándar público.
+# SLIDES  -  POBLACION (CONTRATO CANONICO)
+# - p_slide_poblacion_2 / _4 / _5 / _6 son el estandar publico.
 # =============================================================================
 
 #' @family reporte
@@ -632,7 +639,7 @@ p_slide_poblacion_6 <- function(
 }
 
 #' @title Barras agrupadas (1 variable)
-#' @param filtros Lista nombrada de filtros por igualdad/inclusión,
+#' @param filtros Lista nombrada de filtros por igualdad/inclusion,
 #'   por ejemplo `list(region = "Lima", sexo = c("Mujer", "Otro"))`.
 #' @examples
 #' p_barras_agrupadas("p102", filtros = list(region = "Lima"))
@@ -640,7 +647,7 @@ p_slide_poblacion_6 <- function(
 #' @export
 p_barras_agrupadas <- function(var, titulo = NULL, cruces = NULL, overrides = list(), base = list(), filtros = list()) {
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
-    stop("`var` debe ser character(1) no vacío.", call. = FALSE)
+    stop("`var` debe ser character(1) no vacio.", call. = FALSE)
   }
   var <- trimws(var)
 
@@ -648,7 +655,7 @@ p_barras_agrupadas <- function(var, titulo = NULL, cruces = NULL, overrides = li
 
   if (!is.null(cruces)) {
     if (!is.character(cruces) || length(cruces) != 1L || !nzchar(trimws(cruces))) {
-      stop("`cruces` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`cruces` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     cruces <- trimws(cruces)
   }
@@ -671,7 +678,7 @@ p_barras_agrupadas <- function(var, titulo = NULL, cruces = NULL, overrides = li
 }
 
 #' @title Barras apiladas (1 variable)
-#' @param filtros Lista nombrada de filtros por igualdad/inclusión,
+#' @param filtros Lista nombrada de filtros por igualdad/inclusion,
 #'   por ejemplo `list(region = "Lima", sexo = c("Mujer", "Otro"))`.
 #' @examples
 #' p_barras_apiladas("p102", filtros = list(region = "Lima"))
@@ -679,7 +686,7 @@ p_barras_agrupadas <- function(var, titulo = NULL, cruces = NULL, overrides = li
 #' @export
 p_barras_apiladas <- function(var, titulo = NULL, cruces = NULL, overrides = list(), base = list(), filtros = list()) {
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
-    stop("`var` debe ser character(1) no vacío.", call. = FALSE)
+    stop("`var` debe ser character(1) no vacio.", call. = FALSE)
   }
   var <- trimws(var)
 
@@ -687,7 +694,7 @@ p_barras_apiladas <- function(var, titulo = NULL, cruces = NULL, overrides = lis
 
   if (!is.null(cruces)) {
     if (!is.character(cruces) || length(cruces) != 1L || !nzchar(trimws(cruces))) {
-      stop("`cruces` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`cruces` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     cruces <- trimws(cruces)
   }
@@ -710,7 +717,7 @@ p_barras_apiladas <- function(var, titulo = NULL, cruces = NULL, overrides = lis
 }
 
 #' @title Barras multi-apiladas (varias variables o 1 variable cruzada)
-#' @param filtros Lista nombrada de filtros por igualdad/inclusión.
+#' @param filtros Lista nombrada de filtros por igualdad/inclusion.
 #' @param bloques En `modo = "multilista"`, lista de bloques. Cada bloque debe
 #'   ser una lista con al menos `modo` (`"var"`, `"cruce"` o `"var_cruce"`),
 #'   y los argumentos necesarios para ese submodo (`vars`, `var`, `cruces`,
@@ -724,12 +731,12 @@ p_barras_apiladas <- function(var, titulo = NULL, cruces = NULL, overrides = lis
 #'   filtros = list(sexo = "Mujer")
 #' )
 #'
-#' En `modo = "var_cruce"`, `vars` también puede ser una lista nombrada de
+#' En `modo = "var_cruce"`, `vars` tambien puede ser una lista nombrada de
 #' bloques. Cada bloque debe contener referencias `fuente$variable` cuando se
-#' comparan varias bases en un mismo gráfico.
+#' comparan varias bases en un mismo grafico.
 #'
 #' En `modo = "multilista"`, se pueden apilar varios bloques con distintas
-#' escalas dentro de una sola composición vertical.
+#' escalas dentro de una sola composicion vertical.
 #' @family reporte
 #' @export
 p_barras_multiapiladas <- function(
@@ -753,13 +760,13 @@ p_barras_multiapiladas <- function(
 
   if (!is.null(cruces)) {
     if (!is.character(cruces) || length(cruces) != 1L || !nzchar(trimws(cruces))) {
-      stop("`cruces` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`cruces` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     cruces <- trimws(cruces)
   }
 
   if (!is.numeric(wrap_y) || length(wrap_y) != 1L || !is.finite(wrap_y) || wrap_y < 10) {
-    stop("`wrap_y` debe ser numérico (>=10).", call. = FALSE)
+    stop("`wrap_y` debe ser numerico (>=10).", call. = FALSE)
   }
 
   # NOTE: top2box_codes se deja por compatibilidad futura; por ahora se usa top2box_labels
@@ -768,7 +775,7 @@ p_barras_multiapiladas <- function(
   }
   if (!is.null(top2box_labels)) {
     if (!is.character(top2box_labels) || !length(top2box_labels)) {
-      stop("`top2box_labels` debe ser NULL o character() no vacío.", call. = FALSE)
+      stop("`top2box_labels` debe ser NULL o character() no vacio.", call. = FALSE)
     }
     top2box_labels <- trimws(top2box_labels)
     top2box_labels <- top2box_labels[nzchar(top2box_labels)]
@@ -776,7 +783,7 @@ p_barras_multiapiladas <- function(
   }
   if (!is.null(titulos_grupo)) {
     if (!is.character(titulos_grupo) || !length(titulos_grupo)) {
-      stop("`titulos_grupo` debe ser NULL o character() no vacío.", call. = FALSE)
+      stop("`titulos_grupo` debe ser NULL o character() no vacio.", call. = FALSE)
     }
     titulos_grupo <- trimws(titulos_grupo)
     titulos_grupo <- titulos_grupo[nzchar(titulos_grupo)]
@@ -797,7 +804,7 @@ p_barras_multiapiladas <- function(
 
   if (identical(modo, "multilista")) {
     if (!is.list(bloques) || !length(bloques)) {
-      stop("modo='multilista': `bloques` debe ser una lista no vacía.", call. = FALSE)
+      stop("modo='multilista': `bloques` debe ser una lista no vacia.", call. = FALSE)
     }
 
     bloques_norm <- lapply(seq_along(bloques), function(i) {
@@ -822,9 +829,9 @@ p_barras_multiapiladas <- function(
       titulo_block <- .ppt_norm_text1(block[["titulo", exact = TRUE]] %||% NULL, blank = NULL)
       subtitulo_block <- .ppt_norm_text1(block[["subtitulo", exact = TRUE]] %||% NULL, blank = NULL)
 
-      # En multilista, por defecto los subbloques NO deben heredar títulos
-      # automáticos ni desde presets ni desde otros overrides. Solo se muestran
-      # si el usuario los define explícitamente en el bloque.
+      # En multilista, por defecto los subbloques NO deben heredar titulos
+      # automaticos ni desde presets ni desde otros overrides. Solo se muestran
+      # si el usuario los define explicitamente en el bloque.
       overrides_block$titulo <- titulo_block %||% ""
       overrides_block$subtitulo <- subtitulo_block %||% ""
 
@@ -877,7 +884,7 @@ p_barras_multiapiladas <- function(
     if (!is.character(vars) || length(vars) < 1L) stop("modo='var': `vars` debe ser character() con >= 1 variable.", call. = FALSE)
     vars <- trimws(vars)
     vars <- vars[nzchar(vars)]
-    if (!length(vars)) stop("modo='var': `vars` quedó vacío luego de limpiar.", call. = FALSE)
+    if (!length(vars)) stop("modo='var': `vars` quedo vacio luego de limpiar.", call. = FALSE)
 
     el <- list(
       .element_type  = "barras_multiapiladas",
@@ -905,26 +912,26 @@ p_barras_multiapiladas <- function(
       if (length(vars) < 1L) stop("modo='var_cruce': `vars` debe ser character() con >= 1 variable.", call. = FALSE)
       vars <- trimws(vars)
       vars <- vars[nzchar(vars)]
-      if (!length(vars)) stop("modo='var_cruce': `vars` quedó vacío luego de limpiar.", call. = FALSE)
+      if (!length(vars)) stop("modo='var_cruce': `vars` quedo vacio luego de limpiar.", call. = FALSE)
 
       if (is.null(cruces)) stop("modo='var_cruce': `cruces` es obligatorio (character(1)).", call. = FALSE)
     } else if (is.list(vars)) {
-      if (!length(vars)) stop("modo='var_cruce': `vars` no puede ser una lista vacía.", call. = FALSE)
+      if (!length(vars)) stop("modo='var_cruce': `vars` no puede ser una lista vacia.", call. = FALSE)
       if (is.null(names(vars)) || any(!nzchar(trimws(names(vars))))) {
         stop("modo='var_cruce': cuando `vars` es lista, debe ser una lista nombrada.", call. = FALSE)
       }
       names(vars) <- trimws(names(vars))
       vars <- vars[nzchar(names(vars))]
-      if (!length(vars)) stop("modo='var_cruce': `vars` quedó vacío luego de limpiar.", call. = FALSE)
+      if (!length(vars)) stop("modo='var_cruce': `vars` quedo vacio luego de limpiar.", call. = FALSE)
 
       vars <- lapply(vars, function(x) {
         if (!is.character(x) || !length(x)) {
-          stop("modo='var_cruce': cada bloque de `vars` debe ser character() no vacío.", call. = FALSE)
+          stop("modo='var_cruce': cada bloque de `vars` debe ser character() no vacio.", call. = FALSE)
         }
         x <- trimws(x)
         x <- x[nzchar(x)]
         if (!length(x)) {
-          stop("modo='var_cruce': un bloque de `vars` quedó vacío luego de limpiar.", call. = FALSE)
+          stop("modo='var_cruce': un bloque de `vars` quedo vacio luego de limpiar.", call. = FALSE)
         }
         x
       })
@@ -954,7 +961,7 @@ p_barras_multiapiladas <- function(
 
   # modo == "cruce"
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
-    stop("modo='cruce': `var` debe ser character(1) no vacío.", call. = FALSE)
+    stop("modo='cruce': `var` debe ser character(1) no vacio.", call. = FALSE)
   }
   var <- trimws(var)
 
@@ -983,14 +990,14 @@ p_barras_multiapiladas <- function(
 
 
 #' @title Pie (torta)
-#' @param filtros Lista nombrada de filtros por igualdad/inclusión.
+#' @param filtros Lista nombrada de filtros por igualdad/inclusion.
 #' @examples
 #' p_pie("p108", filtros = list(sexo = "Mujer", edad_grupo = c("60-69", "70+")))
 #' @family reporte
 #' @export
 p_pie <- function(var, titulo = NULL, overrides = list(), base = list(), filtros = list()) {
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
-    stop("`var` debe ser character(1) no vacío.", call. = FALSE)
+    stop("`var` debe ser character(1) no vacio.", call. = FALSE)
   }
   var <- trimws(var)
 
@@ -1013,12 +1020,12 @@ p_pie <- function(var, titulo = NULL, overrides = list(), base = list(), filtros
 }
 
 #' @title Donut
-#' @param filtros Lista nombrada de filtros por igualdad/inclusión.
+#' @param filtros Lista nombrada de filtros por igualdad/inclusion.
 #' @family reporte
 #' @export
 p_donut <- function(var, titulo = NULL, overrides = list(), base = list(), filtros = list()) {
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
-    stop("`var` debe ser character(1) no vacío.", call. = FALSE)
+    stop("`var` debe ser character(1) no vacio.", call. = FALSE)
   }
   var <- trimws(var)
 
@@ -1040,15 +1047,15 @@ p_donut <- function(var, titulo = NULL, overrides = list(), base = list(), filtr
   el
 }
 
-#' @title KPI numérico
+#' @title KPI numerico
 #'
-#' @param var Variable base (opcional según métrica).
+#' @param var Variable base (opcional segun metrica).
 #' @param metrica "N", "pct", "mean", "median".
 #' @param cruce Variable opcional de cruce (si el renderer lo soporta).
-#' @param titulo Título opcional.
+#' @param titulo Titulo opcional.
 #' @param formato Formato de salida (p.ej. `"%.0f%%"`).
 #' @param overrides Lista de overrides (p.ej. `fn`, `denom`, `na_rm`).
-#' @param filtros Lista nombrada de filtros por igualdad/inclusión.
+#' @param filtros Lista nombrada de filtros por igualdad/inclusion.
 #' @examples
 #' p_numerico("p118_tbc_a", cruce = "region", filtros = list(sexo = "Mujer"))
 #'
@@ -1068,14 +1075,14 @@ p_numerico <- function(
 
   if (!is.null(var)) {
     if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
-      stop("`var` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`var` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     var <- trimws(var)
   }
 
   if (!is.null(cruce)) {
     if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
-      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`cruce` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     cruce <- trimws(cruce)
   }
@@ -1106,8 +1113,8 @@ p_numerico <- function(
 #' @param cruce Variable categorica opcional para segmentar cajas.
 #' @param decimales_promedio Entero opcional para el chip de promedio:
 #'   solo permite `0`, `1` o `2` decimales.
-#' @param tamano_promedio Tamaño de texto opcional para el chip del promedio.
-#'   Se mapea a `size_media` del graficador y debe ser numérico positivo.
+#' @param tamano_promedio Tamano de texto opcional para el chip del promedio.
+#'   Se mapea a `size_media` del graficador y debe ser numerico positivo.
 #' @param cortes_chip Cortes semaforicos para clasificar el promedio en chip
 #'   (`rojo`/`ambar`/`verde`). Debe tener al menos 2 valores numericos.
 #' @param chip_colores Colores del chip semaforico. Puede ser un vector
@@ -1129,6 +1136,7 @@ p_boxplot <- function(
     decimales_promedio = NULL,
     tamano_promedio = NULL,
     cortes_chip = NULL,
+    modo_semaforo = c("grupos", "degradado_automatico", "degradado_manual", "degradado"),
     chip_colores = NULL,
     titulo = NULL,
     overrides = list(),
@@ -1136,6 +1144,7 @@ p_boxplot <- function(
     filtros = list(),
     ...
 ) {
+  modo_semaforo <- .dim_normalize_semaforo_modo(modo_semaforo)
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
     stop("`var` debe ser character(1) no vacio.", call. = FALSE)
   }
@@ -1162,20 +1171,20 @@ p_boxplot <- function(
   if (!is.null(tamano_promedio)) {
     tamano_promedio <- suppressWarnings(as.numeric(tamano_promedio)[1])
     if (!is.finite(tamano_promedio) || is.na(tamano_promedio) || tamano_promedio <= 0) {
-      stop("`tamano_promedio` debe ser NULL o numérico positivo.", call. = FALSE)
+      stop("`tamano_promedio` debe ser NULL o numerico positivo.", call. = FALSE)
     }
   }
   if (!is.null(cortes_chip)) {
     cortes_chip <- suppressWarnings(as.numeric(cortes_chip))
     cortes_chip <- cortes_chip[is.finite(cortes_chip)]
     if (length(cortes_chip) < 2L) {
-      stop("`cortes_chip` debe ser NULL o numérico con al menos 2 valores.", call. = FALSE)
+      stop("`cortes_chip` debe ser NULL o numerico con al menos 2 valores.", call. = FALSE)
     }
     cortes_chip <- sort(unique(cortes_chip))[1:2]
   }
   if (!is.null(chip_colores)) {
     if (!is.atomic(chip_colores) || !length(chip_colores)) {
-      stop("`chip_colores` debe ser NULL o vector atómico no vacío.", call. = FALSE)
+      stop("`chip_colores` debe ser NULL o vector atomico no vacio.", call. = FALSE)
     }
     chip_colores <- as.character(chip_colores)
     if (length(chip_colores) < 3L) {
@@ -1199,6 +1208,9 @@ p_boxplot <- function(
   }
   if (!is.null(cortes_chip) && is.null(overrides$cortes_chip)) {
     overrides$cortes_chip <- cortes_chip
+  }
+  if (is.null(overrides$modo_semaforo)) {
+    overrides$modo_semaforo <- modo_semaforo
   }
   if (!is.null(chip_colores) && is.null(overrides$chip_colores)) {
     overrides$chip_colores <- chip_colores
@@ -1231,6 +1243,7 @@ p_media_rango <- function(
     decimales_promedio = NULL,
     tamano_promedio = NULL,
     cortes_chip = NULL,
+    modo_semaforo = c("grupos", "degradado_automatico", "degradado_manual", "degradado"),
     chip_colores = NULL,
     titulo = NULL,
     overrides = list(),
@@ -1238,6 +1251,7 @@ p_media_rango <- function(
     filtros = list(),
     ...
 ) {
+  modo_semaforo <- .dim_normalize_semaforo_modo(modo_semaforo)
   if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
     stop("`var` debe ser character(1) no vacio.", call. = FALSE)
   }
@@ -1264,20 +1278,20 @@ p_media_rango <- function(
   if (!is.null(tamano_promedio)) {
     tamano_promedio <- suppressWarnings(as.numeric(tamano_promedio)[1])
     if (!is.finite(tamano_promedio) || is.na(tamano_promedio) || tamano_promedio <= 0) {
-      stop("`tamano_promedio` debe ser NULL o numérico positivo.", call. = FALSE)
+      stop("`tamano_promedio` debe ser NULL o numerico positivo.", call. = FALSE)
     }
   }
   if (!is.null(cortes_chip)) {
     cortes_chip <- suppressWarnings(as.numeric(cortes_chip))
     cortes_chip <- cortes_chip[is.finite(cortes_chip)]
     if (length(cortes_chip) < 2L) {
-      stop("`cortes_chip` debe ser NULL o numérico con al menos 2 valores.", call. = FALSE)
+      stop("`cortes_chip` debe ser NULL o numerico con al menos 2 valores.", call. = FALSE)
     }
     cortes_chip <- sort(unique(cortes_chip))[1:2]
   }
   if (!is.null(chip_colores)) {
     if (!is.atomic(chip_colores) || !length(chip_colores)) {
-      stop("`chip_colores` debe ser NULL o vector atómico no vacío.", call. = FALSE)
+      stop("`chip_colores` debe ser NULL o vector atomico no vacio.", call. = FALSE)
     }
     chip_colores <- as.character(chip_colores)
     if (length(chip_colores) < 3L) {
@@ -1302,6 +1316,9 @@ p_media_rango <- function(
   if (!is.null(cortes_chip) && is.null(overrides$cortes_chip)) {
     overrides$cortes_chip <- cortes_chip
   }
+  if (is.null(overrides$modo_semaforo)) {
+    overrides$modo_semaforo <- modo_semaforo
+  }
   if (!is.null(chip_colores) && is.null(overrides$chip_colores)) {
     overrides$chip_colores <- chip_colores
   }
@@ -1320,7 +1337,7 @@ p_media_rango <- function(
 }
 
 #' @title Radar + tabla derecha (SM o Top/Bottom 2 Box)
-#' @param filtros Lista nombrada de filtros por igualdad/inclusión.
+#' @param filtros Lista nombrada de filtros por igualdad/inclusion.
 #' @family reporte
 #' @export
 p_radar_tabla <- function(
@@ -1344,7 +1361,7 @@ p_radar_tabla <- function(
 
   if (identical(modo, "sm")) {
     if (!is.character(var) || length(var) != 1L || !nzchar(trimws(var))) {
-      stop("p_radar_tabla(modo='sm'): `var` debe ser character(1) no vacío.", call. = FALSE)
+      stop("p_radar_tabla(modo='sm'): `var` debe ser character(1) no vacio.", call. = FALSE)
     }
     var <- trimws(var)
     if (!is.null(vars)) stop("p_radar_tabla(modo='sm'): no usar `vars`.", call. = FALSE)
@@ -1356,26 +1373,26 @@ p_radar_tabla <- function(
         stop("p_radar_tabla(modo='box'): `vars` debe ser character() con >=1 variable.", call. = FALSE)
       }
       vars <- trimws(vars); vars <- vars[nzchar(vars)]
-      if (!length(vars)) stop("p_radar_tabla(modo='box'): `vars` quedó vacío.", call. = FALSE)
+      if (!length(vars)) stop("p_radar_tabla(modo='box'): `vars` quedo vacio.", call. = FALSE)
     } else if (is.list(vars)) {
       if (!length(vars)) {
-        stop("p_radar_tabla(modo='box'): `vars` no puede ser una lista vacía.", call. = FALSE)
+        stop("p_radar_tabla(modo='box'): `vars` no puede ser una lista vacia.", call. = FALSE)
       }
       if (is.null(names(vars)) || any(!nzchar(trimws(names(vars))))) {
         stop("p_radar_tabla(modo='box'): cuando `vars` es lista, debe ser una lista nombrada.", call. = FALSE)
       }
       names(vars) <- trimws(names(vars))
       vars <- vars[nzchar(names(vars))]
-      if (!length(vars)) stop("p_radar_tabla(modo='box'): `vars` quedó vacío luego de limpiar.", call. = FALSE)
+      if (!length(vars)) stop("p_radar_tabla(modo='box'): `vars` quedo vacio luego de limpiar.", call. = FALSE)
 
       vars <- lapply(vars, function(x) {
         if (!is.character(x) || !length(x)) {
-          stop("p_radar_tabla(modo='box'): cada bloque de `vars` debe ser character() no vacío.", call. = FALSE)
+          stop("p_radar_tabla(modo='box'): cada bloque de `vars` debe ser character() no vacio.", call. = FALSE)
         }
         x <- trimws(x)
         x <- x[nzchar(x)]
         if (!length(x)) {
-          stop("p_radar_tabla(modo='box'): un bloque de `vars` quedó vacío luego de limpiar.", call. = FALSE)
+          stop("p_radar_tabla(modo='box'): un bloque de `vars` quedo vacio luego de limpiar.", call. = FALSE)
         }
         x
       })
@@ -1393,7 +1410,7 @@ p_radar_tabla <- function(
 
   if (!is.null(cruce)) {
     if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
-      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`cruce` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     cruce <- trimws(cruce)
   }
@@ -1402,7 +1419,7 @@ p_radar_tabla <- function(
 
   if (!is.null(top_n)) {
     if (!is.numeric(top_n) || length(top_n) != 1L || !is.finite(top_n) || top_n < 3) {
-      stop("`top_n` debe ser numérico >= 3 (o NULL).", call. = FALSE)
+      stop("`top_n` debe ser numerico >= 3 (o NULL).", call. = FALSE)
     }
     top_n <- as.integer(top_n)
   }
@@ -1450,6 +1467,7 @@ p_dim_heatmap <- function(
     objetivo,
     cruce = NULL,
     incluir_total = NULL,
+    modo_semaforo = c("grupos", "degradado_automatico", "degradado_manual", "degradado"),
     brecha_filas = FALSE,
     etiq_brecha_filas = "Brecha",
     brecha_cols = FALSE,
@@ -1469,29 +1487,30 @@ p_dim_heatmap <- function(
     base = list()
 ) {
   modo <- match.arg(modo)
+  modo_semaforo <- .dim_normalize_semaforo_modo(modo_semaforo)
 
   if (!is.character(objetivo) || length(objetivo) != 1L || !nzchar(trimws(objetivo))) {
-    stop("`objetivo` debe ser character(1) no vacío.", call. = FALSE)
+    stop("`objetivo` debe ser character(1) no vacio.", call. = FALSE)
   }
   objetivo <- trimws(objetivo)
 
   if (!is.null(cruce)) {
     if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
-      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`cruce` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     cruce <- trimws(cruce)
   }
 
   if (!is.null(iter_var)) {
     if (!is.character(iter_var) || length(iter_var) != 1L || !nzchar(trimws(iter_var))) {
-      stop("`iter_var` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`iter_var` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     iter_var <- trimws(iter_var)
   }
 
   if (!is.null(iter_level)) {
     if (!is.character(iter_level) || length(iter_level) != 1L || !nzchar(trimws(iter_level))) {
-      stop("`iter_level` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`iter_level` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     iter_level <- trimws(iter_level)
   }
@@ -1525,7 +1544,7 @@ p_dim_heatmap <- function(
   if (!is.null(size_ejes_x)) {
     size_ejes_x <- suppressWarnings(as.numeric(size_ejes_x))
     if (!is.finite(size_ejes_x) || is.na(size_ejes_x) || size_ejes_x <= 0) {
-      stop("`size_ejes_x` debe ser NULL o numérico positivo.", call. = FALSE)
+      stop("`size_ejes_x` debe ser NULL o numerico positivo.", call. = FALSE)
     }
   }
   titulo_total_x <- .ppt_norm_text1(titulo_total_x, blank = "Total")
@@ -1538,12 +1557,15 @@ p_dim_heatmap <- function(
   if (!is.list(overrides)) stop("`overrides` debe ser lista.", call. = FALSE)
   if (!is.list(base)) stop("`base` debe ser lista.", call. = FALSE)
 
+  if (is.null(overrides$modo_semaforo)) overrides$modo_semaforo <- modo_semaforo
+
   el <- list(
     .element_type = "dim_heatmap",
     modo = modo,
     objetivo = objetivo,
     cruce = cruce,
     incluir_total = incluir_total,
+    modo_semaforo = modo_semaforo,
     brecha_filas = isTRUE(brecha_filas),
     etiq_brecha_filas = as.character(etiq_brecha_filas)[1],
     brecha_cols = isTRUE(brecha_cols),
@@ -1566,7 +1588,7 @@ p_dim_heatmap <- function(
   el
 }
 
-#' @title Radar de dimensiones con fallback automático a barras
+#' @title Radar de dimensiones con fallback automatico a barras
 #' @family reporte
 #' @export
 p_dim_radar <- function(
@@ -1586,27 +1608,27 @@ p_dim_radar <- function(
   modo <- match.arg(modo)
 
   if (!is.character(objetivo) || length(objetivo) != 1L || !nzchar(trimws(objetivo))) {
-    stop("`objetivo` debe ser character(1) no vacío.", call. = FALSE)
+    stop("`objetivo` debe ser character(1) no vacio.", call. = FALSE)
   }
   objetivo <- trimws(objetivo)
 
   if (!is.null(cruce)) {
     if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
-      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`cruce` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     cruce <- trimws(cruce)
   }
 
   if (!is.null(iter_var)) {
     if (!is.character(iter_var) || length(iter_var) != 1L || !nzchar(trimws(iter_var))) {
-      stop("`iter_var` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`iter_var` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     iter_var <- trimws(iter_var)
   }
 
   if (!is.null(iter_level)) {
     if (!is.character(iter_level) || length(iter_level) != 1L || !nzchar(trimws(iter_level))) {
-      stop("`iter_level` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`iter_level` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     iter_level <- trimws(iter_level)
   }
@@ -1620,7 +1642,7 @@ p_dim_radar <- function(
   if (!is.null(inicio_eje_pct)) {
     inicio_eje_pct <- suppressWarnings(as.numeric(inicio_eje_pct)[1])
     if (!is.finite(inicio_eje_pct) || inicio_eje_pct < 0 || inicio_eje_pct >= 100) {
-      stop("`inicio_eje_pct` debe ser NULL o un número en [0, 100).", call. = FALSE)
+      stop("`inicio_eje_pct` debe ser NULL o un numero en [0, 100).", call. = FALSE)
     }
   }
 
@@ -1674,27 +1696,27 @@ p_dim_comparativo_radarbar <- function(
   modo <- match.arg(modo)
 
   if (!is.character(objetivo) || length(objetivo) != 1L || !nzchar(trimws(objetivo))) {
-    stop("`objetivo` debe ser character(1) no vacío.", call. = FALSE)
+    stop("`objetivo` debe ser character(1) no vacio.", call. = FALSE)
   }
   objetivo <- trimws(objetivo)
 
   if (!is.null(cruce)) {
     if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
-      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`cruce` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     cruce <- trimws(cruce)
   }
 
   if (!is.null(iter_var)) {
     if (!is.character(iter_var) || length(iter_var) != 1L || !nzchar(trimws(iter_var))) {
-      stop("`iter_var` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`iter_var` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     iter_var <- trimws(iter_var)
   }
 
   if (!is.null(iter_level)) {
     if (!is.character(iter_level) || length(iter_level) != 1L || !nzchar(trimws(iter_level))) {
-      stop("`iter_level` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`iter_level` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     iter_level <- trimws(iter_level)
   }
@@ -1713,7 +1735,7 @@ p_dim_comparativo_radarbar <- function(
   if (!is.null(inicio_eje_pct)) {
     inicio_eje_pct <- suppressWarnings(as.numeric(inicio_eje_pct)[1])
     if (!is.finite(inicio_eje_pct) || inicio_eje_pct < 0 || inicio_eje_pct >= 100) {
-      stop("`inicio_eje_pct` debe ser NULL o un número en [0, 100).", call. = FALSE)
+      stop("`inicio_eje_pct` debe ser NULL o un numero en [0, 100).", call. = FALSE)
     }
   }
 
@@ -1747,6 +1769,7 @@ p_dim_foda <- function(
     nivel = c("subindices", "indicadores"),
     objetivo = NULL,
     modo_foda = c("matriz", "dispersion"),
+    source = NULL,
     cruce = NULL,
     incluir_total = TRUE,
     solo_indice_general_cruce = FALSE,
@@ -1760,6 +1783,7 @@ p_dim_foda <- function(
     ancho_chip_rel = 0.18,
     sufijo_puntaje = " pts",
     cortes_chip = NULL,
+    modo_semaforo = c("grupos", "degradado_automatico", "degradado_manual", "degradado"),
     tamano_texto_tarjeta = NULL,
     tamano_letra_recuadro = NULL,
     tamano_texto_chip = NULL,
@@ -1782,6 +1806,7 @@ p_dim_foda <- function(
 ) {
   nivel <- match.arg(nivel)
   modo_foda <- match.arg(modo_foda)
+  modo_semaforo <- .dim_normalize_semaforo_modo(modo_semaforo)
   disposicion_recuadro <- as.character(disposicion_recuadro %||% "dos_lineas")[1]
 
   if (!is.null(objetivo)) {
@@ -1794,9 +1819,15 @@ p_dim_foda <- function(
   if (identical(nivel, "indicadores") && (is.null(objetivo) || !nzchar(objetivo))) {
     stop("`objetivo` es requerido cuando `nivel = 'indicadores'`.", call. = FALSE)
   }
+  if (!is.null(source)) {
+    if (!is.character(source) || length(source) != 1L || !nzchar(trimws(source))) {
+      stop("`source` debe ser NULL o character(1) no vacio.", call. = FALSE)
+    }
+    source <- trimws(source)
+  }
   if (!is.null(cruce)) {
     if (!is.character(cruce) || length(cruce) != 1L || !nzchar(trimws(cruce))) {
-      stop("`cruce` debe ser NULL o character(1) no vacío.", call. = FALSE)
+      stop("`cruce` debe ser NULL o character(1) no vacio.", call. = FALSE)
     }
     cruce <- trimws(cruce)
   }
@@ -1818,20 +1849,20 @@ p_dim_foda <- function(
 
   ancho_tarjeta_base_rel <- suppressWarnings(as.numeric(ancho_tarjeta_base_rel)[1])
   if (!is.finite(ancho_tarjeta_base_rel) || is.na(ancho_tarjeta_base_rel) || ancho_tarjeta_base_rel <= 0) {
-    stop("`ancho_tarjeta_base_rel` debe ser numérico positivo.", call. = FALSE)
+    stop("`ancho_tarjeta_base_rel` debe ser numerico positivo.", call. = FALSE)
   }
   factor_ancho_matriz <- suppressWarnings(as.numeric(factor_ancho_matriz)[1])
   if (!is.finite(factor_ancho_matriz) || is.na(factor_ancho_matriz) || factor_ancho_matriz <= 0) {
-    stop("`factor_ancho_matriz` debe ser numérico positivo.", call. = FALSE)
+    stop("`factor_ancho_matriz` debe ser numerico positivo.", call. = FALSE)
   }
   factor_ancho_dispersion <- suppressWarnings(as.numeric(factor_ancho_dispersion)[1])
   if (!is.finite(factor_ancho_dispersion) || is.na(factor_ancho_dispersion) || factor_ancho_dispersion <= 0) {
-    stop("`factor_ancho_dispersion` debe ser numérico positivo.", call. = FALSE)
+    stop("`factor_ancho_dispersion` debe ser numerico positivo.", call. = FALSE)
   }
   if (!is.null(ancho_recuadro_rel)) {
     ancho_recuadro_rel <- suppressWarnings(as.numeric(ancho_recuadro_rel)[1])
     if (!is.finite(ancho_recuadro_rel) || is.na(ancho_recuadro_rel) || ancho_recuadro_rel <= 0) {
-      stop("`ancho_recuadro_rel` debe ser NULL o numérico positivo.", call. = FALSE)
+      stop("`ancho_recuadro_rel` debe ser NULL o numerico positivo.", call. = FALSE)
     }
   }
   if (!is.logical(ancho_recuadro_auto) || length(ancho_recuadro_auto) != 1L || is.na(ancho_recuadro_auto)) {
@@ -1839,7 +1870,7 @@ p_dim_foda <- function(
   }
   ancho_chip_rel <- suppressWarnings(as.numeric(ancho_chip_rel)[1])
   if (!is.finite(ancho_chip_rel) || is.na(ancho_chip_rel) || ancho_chip_rel <= 0) {
-    stop("`ancho_chip_rel` debe ser numérico positivo.", call. = FALSE)
+    stop("`ancho_chip_rel` debe ser numerico positivo.", call. = FALSE)
   }
   sufijo_puntaje <- as.character(sufijo_puntaje %||% " pts")[1]
   if (is.na(sufijo_puntaje)) sufijo_puntaje <- " pts"
@@ -1848,20 +1879,20 @@ p_dim_foda <- function(
     cortes_chip <- suppressWarnings(as.numeric(cortes_chip))
     cortes_chip <- cortes_chip[is.finite(cortes_chip)]
     if (length(cortes_chip) < 2L) {
-      stop("`cortes_chip` debe ser NULL o numérico con al menos 2 valores.", call. = FALSE)
+      stop("`cortes_chip` debe ser NULL o numerico con al menos 2 valores.", call. = FALSE)
     }
     cortes_chip <- sort(unique(cortes_chip))[1:2]
   }
   if (!is.null(tamano_texto_tarjeta)) {
     tamano_texto_tarjeta <- suppressWarnings(as.numeric(tamano_texto_tarjeta)[1])
     if (!is.finite(tamano_texto_tarjeta) || is.na(tamano_texto_tarjeta) || tamano_texto_tarjeta <= 0) {
-      stop("`tamano_texto_tarjeta` debe ser NULL o numérico positivo.", call. = FALSE)
+      stop("`tamano_texto_tarjeta` debe ser NULL o numerico positivo.", call. = FALSE)
     }
   }
   if (!is.null(tamano_texto_chip)) {
     tamano_texto_chip <- suppressWarnings(as.numeric(tamano_texto_chip)[1])
     if (!is.finite(tamano_texto_chip) || is.na(tamano_texto_chip) || tamano_texto_chip <= 0) {
-      stop("`tamano_texto_chip` debe ser NULL o numérico positivo.", call. = FALSE)
+      stop("`tamano_texto_chip` debe ser NULL o numerico positivo.", call. = FALSE)
     }
   }
   if (!is.logical(tarjetas_color_solido) || length(tarjetas_color_solido) != 1L || is.na(tarjetas_color_solido)) {
@@ -1883,7 +1914,7 @@ p_dim_foda <- function(
   disposicion_recuadro <- match.arg(disposicion_recuadro, c("dos_lineas", "una_linea", "sin_cruce"))
   color_indice_total <- as.character(color_indice_total %||% "#FF6A00")[1]
   if (!nzchar(trimws(color_indice_total)) || is.na(color_indice_total)) {
-    stop("`color_indice_total` debe ser character(1) no vacío.", call. = FALSE)
+    stop("`color_indice_total` debe ser character(1) no vacio.", call. = FALSE)
   }
   if (!is.null(titulos_areas_foda)) {
     if (!is.character(titulos_areas_foda) || !length(titulos_areas_foda)) {
@@ -1913,11 +1944,11 @@ p_dim_foda <- function(
   }
   jitter_x_rel <- suppressWarnings(as.numeric(jitter_x_rel)[1])
   if (!is.finite(jitter_x_rel) || is.na(jitter_x_rel) || jitter_x_rel < 0) {
-    stop("`jitter_x_rel` debe ser numérico en [0, +Inf).", call. = FALSE)
+    stop("`jitter_x_rel` debe ser numerico en [0, +Inf).", call. = FALSE)
   }
   jitter_y_rel <- suppressWarnings(as.numeric(jitter_y_rel)[1])
   if (!is.finite(jitter_y_rel) || is.na(jitter_y_rel) || jitter_y_rel < 0) {
-    stop("`jitter_y_rel` debe ser numérico en [0, +Inf).", call. = FALSE)
+    stop("`jitter_y_rel` debe ser numerico en [0, +Inf).", call. = FALSE)
   }
   iter_separacion <- suppressWarnings(as.integer(iter_separacion)[1])
   if (!is.finite(iter_separacion) || is.na(iter_separacion) || iter_separacion < 0L) {
@@ -1927,7 +1958,7 @@ p_dim_foda <- function(
   if (!is.finite(factor_reduccion_tarjeta_dispersion) ||
       is.na(factor_reduccion_tarjeta_dispersion) ||
       factor_reduccion_tarjeta_dispersion <= 0) {
-    stop("`factor_reduccion_tarjeta_dispersion` debe ser numérico positivo.", call. = FALSE)
+    stop("`factor_reduccion_tarjeta_dispersion` debe ser numerico positivo.", call. = FALSE)
   }
 
   filtros <- .ppt_norm_filters(filtros)
@@ -1945,6 +1976,7 @@ p_dim_foda <- function(
   if (is.null(overrides$ancho_chip_rel)) overrides$ancho_chip_rel <- ancho_chip_rel
   if (is.null(overrides$sufijo_puntaje)) overrides$sufijo_puntaje <- sufijo_puntaje
   if (!is.null(cortes_chip) && is.null(overrides$cortes_chip)) overrides$cortes_chip <- cortes_chip
+  if (is.null(overrides$modo_semaforo)) overrides$modo_semaforo <- modo_semaforo
   if (!is.null(tamano_texto_tarjeta) && is.null(overrides$tamano_texto_tarjeta)) overrides$tamano_texto_tarjeta <- tamano_texto_tarjeta
   if (!is.null(tamano_texto_chip) && is.null(overrides$tamano_texto_chip)) overrides$tamano_texto_chip <- tamano_texto_chip
   if (is.null(overrides$tarjetas_color_solido)) overrides$tarjetas_color_solido <- isTRUE(tarjetas_color_solido)
@@ -1969,6 +2001,8 @@ p_dim_foda <- function(
     nivel = nivel,
     objetivo = objetivo,
     modo_foda = modo_foda,
+    source = source,
+    modo_semaforo = modo_semaforo,
     cruce = cruce,
     incluir_total = isTRUE(incluir_total),
     filtros = filtros,
@@ -2019,5 +2053,26 @@ p_text <- function(text, overrides = list()) {
     overrides     = overrides
   )
   class(el) <- c("ppt_element_text", "ppt_element", "list")
+  el
+}
+
+#' @title Envolver un ggplot crudo como ppt_element
+#' @description Permite usar un ggplot arbitrario dentro de `p_slide_1()`,
+#'   `p_slide_2()`, etc., sin que pase por un graficador de prosecnur.
+#' @param gg Objeto \code{ggplot2::ggplot}.
+#' @param titulo Titulo opcional para el slide.
+#' @return Un \code{ppt_element}.
+#' @family reporte
+#' @export
+p_ggplot_raw <- function(gg, titulo = NULL) {
+  if (!inherits(gg, "gg") && !inherits(gg, "ggplot"))
+    stop("`gg` debe ser un objeto ggplot.", call. = FALSE)
+  el <- list(
+    .element_type = "ggplot_raw",
+    gg            = gg,
+    title_slide   = titulo,
+    overrides     = list()
+  )
+  class(el) <- c("ppt_element", "list")
   el
 }

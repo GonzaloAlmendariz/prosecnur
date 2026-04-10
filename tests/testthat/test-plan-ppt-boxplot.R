@@ -268,6 +268,41 @@ test_that("graficar_boxplot usa chip semaforico con colores/cortes personalizado
   expect_true(all(c("#AA0000", "#BBBB00", "#00AA00") %in% fills))
 })
 
+test_that("graficar_boxplot admite modo_semaforo degradado", {
+  df <- data.frame(
+    categoria = rep(c("A", "B", "C", "D", "E"), each = 4),
+    valor = c(
+      rep(1.0, 4),
+      rep(1.8, 4),
+      rep(3.0, 4),
+      rep(4.2, 4),
+      rep(5.0, 4)
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  p <- graficar_boxplot(
+    data = df,
+    var_categoria = "categoria",
+    var_valor = "valor",
+    mostrar_puntos = FALSE,
+    mostrar_leyenda = FALSE,
+    cortes_chip = c(2, 4),
+    modo_semaforo = "degradado",
+    chip_colores = c(rojo = "#AA0000", ambar = "#BBBB00", verde = "#00AA00"),
+    usar_canvas = FALSE,
+    exportar = "rplot"
+  )
+
+  gb <- ggplot2::ggplot_build(p)
+  idx_chip <- which(vapply(gb$data, function(x) "label" %in% names(x) && "fill" %in% names(x), logical(1)))[1]
+  fills <- unique(toupper(stats::na.omit(gb$data[[idx_chip]]$fill)))
+  pal <- c("#AA0000", "#BBBB00", "#00AA00")
+
+  expect_gt(length(fills), 3L)
+  expect_true(any(!fills %in% pal))
+})
+
 test_that("p_boxplot expone decimales/cortes/colores del chip", {
   skip_if_not_installed("officer")
   skip_if_not_installed("rvg")
@@ -308,4 +343,9 @@ test_that("p_boxplot expone decimales/cortes/colores del chip", {
   expected_palette <- c("#AA0000", "#BBBB00", "#00AA00")
   expect_true(length(fills) >= 1L)
   expect_true(all(fills %in% expected_palette))
+})
+
+test_that("p_boxplot expone modo_semaforo", {
+  el <- p_boxplot(var = "score", modo_semaforo = "degradado")
+  expect_identical(el$overrides$modo_semaforo, "degradado")
 })

@@ -1,0 +1,319 @@
+---
+title: "Ejercicio de capacitación: entregables completos"
+subtitle: "Caso aplicado OPS EESS, sin atajos y sin objetos ya resueltos"
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+editor_options:
+  chunk_output_type: console
+---
+
+# Propósito del ejercicio
+
+Este ejercicio está pensado para practicar la etapa de entregables con un caso
+más grande y más parecido a un flujo real de proyecto. El punto no es correr
+una plantilla ya resuelta, sino reconstruir la lógica completa desde:
+
+- un instrumento adaptado amplio;
+- una base adaptada amplia;
+- decisiones metodológicas que todavía deben tomarse.
+
+La referencia de trabajo es el caso `OPS EESS`, porque ofrece un instrumento y
+una base bastante más completos que los ejemplos pequeños del manual.
+
+# Regla central
+
+En este ejercicio no se usan objetos ya preparados como `rp_inst.rds` o
+`rp_data.rds`. Todo debe construirse desde el XLSForm final y la base final.
+
+# Paso 0. Instalar el paquete desde GitHub
+
+Este bloque se deja al inicio porque forma parte del flujo de instalación que se
+necesita en una capacitación cuando el paquete todavía no está disponible en la
+máquina.
+
+```{r}
+#| eval: false
+if (!requireNamespace("remotes", quietly = TRUE)) {
+  install.packages("remotes")
+}
+
+remotes::install_github("GonzaloAlmendariz/prosecnur")
+```
+
+# Setup
+
+```{r}
+library(prosecnur)
+library(readxl)
+library(dplyr)
+
+dir.create(
+  "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+```
+
+# Paso 1. Revisar los insumos del caso
+
+El ejercicio parte de estos dos archivos:
+
+- `/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_INST_FINAL.xlsx`
+- `/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_DATA_FINAL.xlsx`
+
+Antes de hacer cualquier salida, conviene mirar qué tan grande es el caso y qué
+tipo de variables contiene.
+
+```{r}
+survey <- read_excel(
+  "/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_INST_FINAL.xlsx",
+  sheet = "survey"
+)
+
+choices <- read_excel(
+  "/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_INST_FINAL.xlsx",
+  sheet = "choices"
+)
+
+data_cruda <- read_excel(
+  "/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_DATA_FINAL.xlsx"
+)
+```
+
+```{r}
+nrow(survey)
+nrow(choices)
+nrow(data_cruda)
+ncol(data_cruda)
+```
+
+```{r}
+survey %>%
+  select(name, type, label) %>%
+  slice(1:50)
+```
+
+```{r}
+choices %>%
+  distinct(list_name) %>%
+  arrange(list_name)
+```
+
+```{r}
+names(data_cruda)
+```
+
+```{r}
+data_cruda %>%
+  select(region, fecha_visita, hora_inicio, hora_fin, nombre_encuestador) %>%
+  slice(1:12)
+```
+
+# Paso 2. Tomar decisiones antes de construir `rp_inst`
+
+Este es el primer punto que no se deja resuelto. Se pide revisar el
+instrumento, identificar escalas reales, ubicar variables temporales y decidir
+si conviene tratar algunos códigos especiales solo cuando estén presentes.
+
+```{r}
+#| eval: false
+listas_ordinales <- c(
+  # Completar con los `list_name` que efectivamente representen una escala.
+)
+
+vars_fecha <- c(
+  # Completar con variables de fecha.
+)
+
+vars_hora <- c(
+  # Completar con variables de hora.
+)
+
+codigos_solo_si_presentes <- c(
+  # Completar con códigos especiales que convenga ocultar si no aparecen.
+)
+```
+
+# Paso 3. Construir el instrumento de reporte
+
+Aquí se llena la ruta directamente dentro de la función, como en un flujo de
+trabajo aplicado.
+
+```{r}
+#| eval: false
+rp_inst <- reporte_instrumento(
+  path = "/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_INST_FINAL.xlsx",
+  listas_ordinales = listas_ordinales,
+  vars_fecha = vars_fecha,
+  vars_hora = vars_hora
+)
+```
+
+```{r}
+#| eval: false
+names(rp_inst)
+```
+
+```{r}
+#| eval: false
+rp_inst$survey %>%
+  select(name, type, list_name, measure_sugerida, label) %>%
+  filter(name %in% c("region", "p102", "p112", "fecha_visita", "hora_inicio", "hora_fin"))
+```
+
+# Paso 4. Construir la base para reporte
+
+La base también se prepara desde el XLSX y no desde un objeto previamente
+guardado.
+
+```{r}
+#| eval: false
+data_cruda <- read_excel(
+  "/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_DATA_FINAL.xlsx"
+)
+
+rp_data <- reporte_data(
+  data = data_cruda,
+  instrumento = rp_inst
+)
+```
+
+```{r}
+#| eval: false
+class(rp_data)
+```
+
+```{r}
+#| eval: false
+attributes(rp_data$region)
+```
+
+# Paso 5. Generar el codebook
+
+El objetivo es producir un libro de códigos útil para una entrega técnica real.
+
+```{r}
+#| eval: false
+reporte_codebook(
+  data = rp_data,
+  path_xlsx = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_codebook_OPS.xlsx",
+  codigos_solo_si_presentes = codigos_solo_si_presentes
+)
+```
+
+# Paso 6. Generar la entrega para SPSS
+
+Aquí se pide producir tanto el `.sav` como la sintaxis `.sps`.
+
+```{r}
+#| eval: false
+reporte_spss(
+  data = rp_data,
+  path_sav = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_OPS_final.sav",
+  path_sps = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_OPS_final_niveles.sps"
+)
+```
+
+# Paso 7. Definir secciones para frecuencias
+
+No se deja una lista resuelta. Cada persona debe proponer una estructura
+temática razonable para que el Excel final no sea solo una concatenación de
+tablas.
+
+```{r}
+#| eval: false
+SECCIONES <- list(
+  # Completar con bloques temáticos.
+  # "Perfil general" = c("region", "p102", ...),
+  # "Acceso y atención" = c("p112", ...)
+)
+
+numericas <- c(
+  # Completar si se desea resumir variables numéricas continuas.
+)
+```
+
+```{r}
+#| eval: false
+reporte_frecuencias(
+  data = rp_data,
+  instrumento = rp_inst,
+  secciones = SECCIONES,
+  path_xlsx = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_frecuencias_OPS.xlsx",
+  codigos_solo_si_presentes = codigos_solo_si_presentes,
+  numericas = numericas
+)
+```
+
+# Paso 8. Definir el cruce principal
+
+La variable de cruce no se entrega resuelta. Debe elegirse según la utilidad
+analítica del resultado, no solo por conveniencia técnica.
+
+```{r}
+#| eval: false
+cruces <- c(
+  # Completar con una o más variables de cruce.
+)
+```
+
+```{r}
+#| eval: false
+reporte_cruces(
+  data = rp_data,
+  instrumento = rp_inst,
+  SECCIONES = SECCIONES,
+  cruces = cruces,
+  modo = "estandar",
+  path_xlsx = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_cruces_OPS.xlsx",
+  codigos_solo_si_presentes = codigos_solo_si_presentes,
+  numericas = numericas
+)
+```
+
+# Paso 9. Preparar el reporte de enumeradores
+
+Esta salida obliga a pensar el caso operativo como producción de campo. No se
+usa `rp_data`, sino la base como tabla de observaciones para resumir trabajo por
+enumerador.
+
+```{r}
+#| eval: false
+cols_corte <- c(
+  # Completar con cortes útiles para el seguimiento operativo.
+)
+
+subtitulo_enumeradores <- "Completar con una descripción breve del corte aplicado"
+```
+
+```{r}
+#| eval: false
+reporte_enumeradores(
+  data = data_cruda,
+  col_enumerador = "nombre_encuestador",
+  cols_corte = cols_corte,
+  output_file = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_enumeradores_OPS.pdf",
+  titulo = "Producción de enumeradores",
+  subtitulo = subtitulo_enumeradores
+)
+```
+
+# Paso 10. Verificación de salidas
+
+```{r}
+#| eval: false
+list.files("/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables")
+```
+
+# Preguntas de cierre
+
+Al terminar el ejercicio, conviene discutir estas preguntas:
+
+1. ¿Qué listas ordinales generaron más duda y por qué?
+2. ¿La estructura de secciones elegida para frecuencias realmente ayuda a leer el estudio?
+3. ¿La variable de cruce escogida abre una lectura útil o solo multiplica tablas?
+4. ¿Los cortes del reporte de enumeradores sirven para gestión operativa real?
+5. ¿Qué otra salida faltaría si este caso pasara de anexos a productos editoriales mayores?

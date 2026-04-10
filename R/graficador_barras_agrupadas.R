@@ -1,91 +1,91 @@
-#' Graficar barras agrupadas para porcentajes por categoría
+#' Graficar barras agrupadas para porcentajes por categoria
 #'
-#' Construye un gráfico de **barras agrupadas** para comparar una o más series de
-#' porcentajes dentro de cada categoría (por ejemplo, indicadores por distrito,
+#' Construye un grafico de **barras agrupadas** para comparar una o mas series de
+#' porcentajes dentro de cada categoria (por ejemplo, indicadores por distrito,
 #' resultados por servicio o distribuciones por grupo).
 #'
-#' La función espera un `data.frame` en formato ancho: una columna con la categoría,
-#' una columna con el tamaño de base (`N`) y varias columnas con porcentajes (una por
-#' serie). Internamente, los porcentajes se transforman a una escala común (0–1) y se
+#' La funcion espera un `data.frame` en formato ancho: una columna con la categoria,
+#' una columna con el tamano de base (`N`) y varias columnas con porcentajes (una por
+#' serie). Internamente, los porcentajes se transforman a una escala comun (0-1) y se
 #' dibujan las barras con `ggplot2`.
 #'
-#' Además del modo estándar, se puede activar un modo de armado por “bloques” (`usar_canvas`)
-#' para controlar con mayor precisión la ubicación relativa del encabezado (título y
-#' subtítulo), el panel del gráfico, la leyenda y el pie de página. Este modo también
+#' Ademas del modo estandar, se puede activar un modo de armado por "bloques" (`usar_canvas`)
+#' para controlar con mayor precision la ubicacion relativa del encabezado (titulo y
+#' subtitulo), el panel del grafico, la leyenda y el pie de pagina. Este modo tambien
 #' permite dibujar bordes de referencia (`debug_ph_bordes`) para revisar la estructura
 #' del layout.
 #'
 #' @param data `data.frame` o `tibble` con las columnas indicadas en `var_categoria`,
 #'   `var_n` y `cols_porcentaje`.
-#' @param var_categoria Nombre (string) de la columna que define las categorías.
-#' @param var_n Nombre (string) de la columna con la base por categoría (típicamente `N`).
+#' @param var_categoria Nombre (string) de la columna que define las categorias.
+#' @param var_n Nombre (string) de la columna con la base por categoria (tipicamente `N`).
 #' @param cols_porcentaje Vector de strings con los nombres de las columnas que contienen
 #'   los porcentajes a graficar (una columna por serie).
 #' @param etiquetas_series Vector **nombrado** que asigna etiquetas legibles a las series.
 #'   Los `names(etiquetas_series)` deben coincidir con `cols_porcentaje` y los valores
-#'   son los textos que se mostrarán en la leyenda.
+#'   son los textos que se mostraran en la leyenda.
 #'
 #' @param escala_valor Indica la escala en que vienen los porcentajes:
-#'   `"proporcion_1"` si vienen como proporción (0–1) o `"proporcion_100"` si vienen
-#'   en porcentaje (0–100).
-#' @param orientacion Orientación del gráfico: `"horizontal"` (por defecto) o `"vertical"`.
+#'   `"proporcion_1"` si vienen como proporcion (0-1) o `"proporcion_100"` si vienen
+#'   en porcentaje (0-100).
+#' @param orientacion Orientacion del grafico: `"horizontal"` (por defecto) o `"vertical"`.
 #'   Si `usar_canvas = TRUE`, solo se admite `"horizontal"`.
 #' @param colores_series Vector nombrado de colores por serie (opcional). Los nombres
 #'   deben coincidir con las etiquetas finales de la serie (las de `etiquetas_series`).
 #'
 #' @param mostrar_valores Si `TRUE`, agrega etiquetas de porcentaje sobre las barras.
-#' @param decimales Número de decimales para etiquetas no enteras.
-#' @param umbral_etiqueta Umbral mínimo (en escala 0–1) para mostrar una etiqueta.
+#' @param decimales Numero de decimales para etiquetas no enteras.
+#' @param umbral_etiqueta Umbral minimo (en escala 0-1) para mostrar una etiqueta.
 #'   Valores menores se ocultan.
-#' @param umbral_posicion Umbral (en escala 0–1) para decidir si la etiqueta se coloca
+#' @param umbral_posicion Umbral (en escala 0-1) para decidir si la etiqueta se coloca
 #'   dentro de la barra (mitad de la altura) o fuera (por encima).
 #' @param sufijo_etiqueta Texto adicional al final de cada etiqueta (por ejemplo, `" pp"`).
 #'
-#' @param mostrar_barra_extra Si `TRUE`, muestra un texto adicional por categoría basado
-#'   en `var_n` (por ejemplo `N = ...`). En modo estándar se dibuja dentro del mismo ggplot;
+#' @param mostrar_barra_extra Si `TRUE`, muestra un texto adicional por categoria basado
+#'   en `var_n` (por ejemplo `N = ...`). En modo estandar se dibuja dentro del mismo ggplot;
 #'   en modo canvas se ubica en el bloque derecho.
 #' @param prefijo_barra_extra Prefijo del texto adicional (por ejemplo `"N = "`).
 #' @param titulo_barra_extra Texto opcional para rotular el bloque de la barra extra
 #'   (principalmente cuando `usar_canvas = TRUE`).
 #'
-#' @param titulo Título del gráfico (opcional).
-#' @param subtitulo Subtítulo del gráfico (opcional).
+#' @param titulo Titulo del grafico (opcional).
+#' @param subtitulo Subtitulo del grafico (opcional).
 #' @param nota_pie Texto del pie (opcional).
 #' @param nota_pie_derecha Texto adicional para combinar en el pie (opcional). Si se
-#'   proporciona junto con `nota_pie`, se concatenan en una sola línea.
-#' @param pos_titulo Alineación del título y subtítulo: `"centro"`, `"izquierda"` o `"derecha"`.
-#' @param pos_nota_pie Alineación del pie: `"derecha"`, `"izquierda"` o `"centro"`.
+#'   proporciona junto con `nota_pie`, se concatenan en una sola linea.
+#' @param pos_titulo Alineacion del titulo y subtitulo: `"centro"`, `"izquierda"` o `"derecha"`.
+#' @param pos_nota_pie Alineacion del pie: `"derecha"`, `"izquierda"` o `"centro"`.
 #'
 #' @param color_titulo,color_subtitulo,color_nota_pie,color_leyenda Colores para textos
 #'   de encabezado, pie y leyenda.
-#' @param size_titulo,size_subtitulo,size_nota_pie,size_leyenda Tamaños de texto para
+#' @param size_titulo,size_subtitulo,size_nota_pie,size_leyenda Tamanos de texto para
 #'   encabezado, pie y leyenda.
 #' @param color_texto_barras,color_texto_barras_fuera Colores de etiquetas de porcentaje
 #'   dentro y fuera de la barra.
-#' @param size_texto_barras Tamaño base de las etiquetas de porcentaje (se ajusta según
-#'   el número de series).
-#' @param color_barra_extra,size_barra_extra Color y tamaño del texto adicional por categoría.
-#' @param color_ejes,size_ejes Color y tamaño de las etiquetas de categorías.
-#' @param usar_eje_libre Si `FALSE`, fija el máximo en 100% (1.0) para facilitar comparación
-#'   entre gráficos. Si `TRUE`, ajusta el máximo al valor observado.
-#' @param color_fondo Color de fondo del gráfico. Por defecto es transparente (`NA`).
+#' @param size_texto_barras Tamano base de las etiquetas de porcentaje (se ajusta segun
+#'   el numero de series).
+#' @param color_barra_extra,size_barra_extra Color y tamano del texto adicional por categoria.
+#' @param color_ejes,size_ejes Color y tamano de las etiquetas de categorias.
+#' @param usar_eje_libre Si `FALSE`, fija el maximo en 100% (1.0) para facilitar comparacion
+#'   entre graficos. Si `TRUE`, ajusta el maximo al valor observado.
+#' @param color_fondo Color de fondo del grafico. Por defecto es transparente (`NA`).
 #'
 #' @param grosor_barras Grosor de las barras (ancho en `geom_col()`).
-#' @param extra_derecha_rel Espacio adicional relativo al máximo para acomodar textos fuera
-#'   de las barras (modo estándar).
-#' @param espacio_izquierda_rel Expansión inferior/izquierda de la escala (modo estándar).
-#' @param ancho_max_eje_y Si se define, aplica “wrap” a las etiquetas de categorías usando
+#' @param extra_derecha_rel Espacio adicional relativo al maximo para acomodar textos fuera
+#'   de las barras (modo estandar).
+#' @param espacio_izquierda_rel Expansion inferior/izquierda de la escala (modo estandar).
+#' @param ancho_max_eje_y Si se define, aplica "wrap" a las etiquetas de categorias usando
 #'   ese ancho (requiere `stringr`).
 #'
 #' @param mostrar_leyenda Si `FALSE`, oculta la leyenda.
 #' @param invertir_leyenda Si `TRUE`, invierte el orden de la leyenda.
-#' @param invertir_barras Si `TRUE`, invierte el orden de las categorías.
+#' @param invertir_barras Si `TRUE`, invierte el orden de las categorias.
 #' @param invertir_series Si `TRUE`, invierte el orden de las series.
 #' @param textos_negrita Vector de palabras clave para forzar negrita en elementos del
-#'   gráfico. Se reconocen, por ejemplo: `"titulo"`, `"porcentajes"`, `"leyenda"`,
+#'   grafico. Se reconocen, por ejemplo: `"titulo"`, `"porcentajes"`, `"leyenda"`,
 #'   `"barra_extra"`, `"eje_y"`.
 #'
-#' @param usar_canvas Si `TRUE`, arma el gráfico mediante `cowplot` separando encabezado,
+#' @param usar_canvas Si `TRUE`, arma el grafico mediante `cowplot` separando encabezado,
 #'   panel, leyenda y pie en bloques.
 #' @param canvas_w_etiquetas,canvas_w_buf_etq_bars,canvas_w_bars,canvas_w_buf_bars_extra,canvas_w_extra
 #'   Anchos relativos de los bloques horizontales del panel (etiquetas, buffers, barras y
@@ -93,36 +93,36 @@
 #' @param canvas_h_header_in,canvas_h_legend_in,canvas_h_caption_in Alturas (en pulgadas)
 #'   sugeridas para encabezado, leyenda y pie cuando existen.
 #' @param canvas_h_panel_in Altura (en pulgadas) del panel. Si es `NULL`, se calcula a partir
-#'   del número de categorías y `alto_por_categoria`.
+#'   del numero de categorias y `alto_por_categoria`.
 #' @param canvas_h_toprow_in Altura (en pulgadas) de una fila superior opcional dentro del panel
 #'   para ubicar `titulo_barra_extra`.
-#' @param legend_key_cm Tamaño (cm) de la llave de la leyenda.
+#' @param legend_key_cm Tamano (cm) de la llave de la leyenda.
 #' @param legend_espaciado Espaciado horizontal adicional en el texto de leyenda (en puntos).
-#' @param legend_n_por_fila Número de ítems por fila en la leyenda (canvas).
+#' @param legend_n_por_fila Numero de items por fila en la leyenda (canvas).
 #' @param encabezado_desplazamiento_in Desplazamiento vertical (en pulgadas) del encabezado.
-#' @param encabezado_separacion_in Separación vertical (en pulgadas) entre título y subtítulo.
+#' @param encabezado_separacion_in Separacion vertical (en pulgadas) entre titulo y subtitulo.
 #' @param leyenda_desplazamiento_in Desplazamiento vertical (en pulgadas) de la leyenda.
-#' @param centro_cowplot Centro horizontal (0–1) para ubicar la leyenda dentro del canvas.
+#' @param centro_cowplot Centro horizontal (0-1) para ubicar la leyenda dentro del canvas.
 #'
 #' @param debug_ph_bordes Si `TRUE`, dibuja bordes de referencia alrededor de los bloques del canvas.
 #' @param debug_ph_col Color de los bordes de debug.
 #' @param debug_ph_lwd Grosor de los bordes de debug.
 #'
-#' @param exportar Tipo de salida: `"rplot"` devuelve el objeto gráfico; `"png"` guarda un PNG;
-#'   `"ppt"` agrega una diapositiva a un PPTX; `"word"` agrega el gráfico a un DOCX.
+#' @param exportar Tipo de salida: `"rplot"` devuelve el objeto grafico; `"png"` guarda un PNG;
+#'   `"ppt"` agrega una diapositiva a un PPTX; `"word"` agrega el grafico a un DOCX.
 #' @param path_salida Ruta del archivo de salida cuando `exportar` no es `"rplot"`.
-#' @param ancho,alto Tamaño del gráfico (en pulgadas) para exportación.
-#' @param alto_por_categoria Altura sugerida por categoría (en pulgadas) para estimar alturas
-#'   en exportación y en el cálculo automático de `canvas_h_panel_in`.
-#' @param dpi Resolución (DPI) al exportar PNG.
-#' @param ppt_append Si `TRUE` y `path_salida` existe, se abre y se añade una nueva diapositiva.
+#' @param ancho,alto Tamano del grafico (en pulgadas) para exportacion.
+#' @param alto_por_categoria Altura sugerida por categoria (en pulgadas) para estimar alturas
+#'   en exportacion y en el calculo automatico de `canvas_h_panel_in`.
+#' @param dpi Resolucion (DPI) al exportar PNG.
+#' @param ppt_append Si `TRUE` y `path_salida` existe, se abre y se anade una nueva diapositiva.
 #'   Si `FALSE`, se crea un archivo nuevo.
 #' @param ppt_layout Layout de la diapositiva a usar al exportar a PPT.
 #' @param ppt_master Master a usar al exportar a PPT.
 #'
-#' @return Si `exportar = "rplot"`, devuelve un objeto gráfico (`ggplot` en modo estándar o
+#' @return Si `exportar = "rplot"`, devuelve un objeto grafico (`ggplot` en modo estandar o
 #'   `cowplot::ggdraw()` en modo canvas). En caso contrario, exporta a archivo y devuelve
-#'   el gráfico de forma invisible.
+#'   el grafico de forma invisible.
 #'
 #' @examples
 #' library(tibble)
@@ -156,6 +156,7 @@ graficar_barras_agrupadas <- function(
     mostrar_valores           = TRUE,
     decimales                 = 1,
     umbral_etiqueta           = 0.03,
+    umbral_barra              = 0.01,   # proporcion minima para dibujar una barra
     umbral_posicion           = 0.15,
     sufijo_etiqueta           = "",
     mostrar_barra_extra       = TRUE,
@@ -173,6 +174,7 @@ graficar_barras_agrupadas <- function(
     size_titulo               = 11,
     color_subtitulo           = "#004B8D",
     size_subtitulo            = 9,
+    face_subtitulo            = "italic",
     color_nota_pie            = "#004B8D",
     size_nota_pie             = 8,
     color_leyenda             = "#004B8D",
@@ -247,7 +249,7 @@ graficar_barras_agrupadas <- function(
   `%||%` <- function(x, y) if (!is.null(x)) x else y
   hjust_from_pos <- function(x) switch(x, "izquierda" = 0, "centro" = 0.5, "derecha" = 1, 0.5)
 
-  # deps mínimas
+  # deps minimas
   if (!requireNamespace("ggplot2", quietly = TRUE)) stop("Requiere ggplot2.", call. = FALSE)
   if (!requireNamespace("dplyr", quietly = TRUE))  stop("Requiere dplyr.",  call. = FALSE)
   if (!requireNamespace("tidyr", quietly = TRUE))  stop("Requiere tidyr.",  call. = FALSE)
@@ -264,9 +266,9 @@ graficar_barras_agrupadas <- function(
   hjust_titulo    <- hjust_from_pos(pos_titulo)
   hjust_caption   <- hjust_from_pos(pos_nota_pie)
 
-  # canvas: solo horizontal (por diseño de placeholders por filas)
+  # canvas: solo horizontal (por diseno de placeholders por filas)
   if (isTRUE(usar_canvas) && orientacion != "horizontal") {
-    stop("`usar_canvas = TRUE` solo está soportado para `orientacion = \"horizontal\"`.", call. = FALSE)
+    stop("`usar_canvas = TRUE` solo esta soportado para `orientacion = \"horizontal\"`.", call. = FALSE)
   }
 
   # validaciones
@@ -294,25 +296,41 @@ graficar_barras_agrupadas <- function(
     ) |>
     dplyr::mutate(.serie = dplyr::recode(.data$.col_pct, !!!etiquetas_series))
 
-  if (!is.numeric(df_long$.valor)) stop("Las columnas de porcentaje deben ser numéricas.", call. = FALSE)
+  if (!is.numeric(df_long$.valor)) stop("Las columnas de porcentaje deben ser numericas.", call. = FALSE)
 
   df_long$.valor_plot <- if (escala_valor == "proporcion_100") df_long$.valor / 100 else df_long$.valor
   df_long$.valor_plot[is.na(df_long$.valor_plot) | !is.finite(df_long$.valor_plot)] <- 0
   df_long$.valor_plot <- pmax(0, df_long$.valor_plot)
+
+  # Suprimir barras por debajo de umbral_barra (se ponen a NA → geom_col no las dibuja)
+  if (!is.null(umbral_barra) && is.numeric(umbral_barra) && is.finite(umbral_barra) && umbral_barra > 0) {
+    mask_baja <- !is.na(df_long$.valor_plot) & df_long$.valor_plot < umbral_barra
+    df_long$.valor_plot[mask_baja] <- NA_real_
+
+    cats_keep <- df_long |>
+      dplyr::group_by(.data[[var_categoria]]) |>
+      dplyr::summarise(.keep = any(!is.na(.data$.valor_plot)), .groups = "drop") |>
+      dplyr::filter(.data$.keep)
+
+    if (nrow(cats_keep)) {
+      df_long <- dplyr::semi_join(df_long, cats_keep, by = var_categoria)
+      df <- dplyr::semi_join(df, cats_keep, by = var_categoria)
+    }
+  }
 
   # orden series
   niveles_series <- unname(etiquetas_series)
   if (invertir_series) niveles_series <- rev(niveles_series)
   df_long$.serie <- factor(df_long$.serie, levels = niveles_series)
 
-  # orden categorías (FIJO)
+  # orden categorias (FIJO)
   cat_chr  <- as.character(df_long[[var_categoria]])
   cat_lvls <- unique(cat_chr)
   if (invertir_barras) cat_lvls <- rev(cat_lvls)
   df_long[[var_categoria]] <- factor(cat_chr, levels = cat_lvls)
   n_categorias <- length(cat_lvls)
 
-  # tamaños texto %
+  # tamanos texto %
   n_series <- length(levels(df_long$.serie))
   size_texto_barras_eff <- dplyr::case_when(
     n_series <= 2 ~ size_texto_barras * 1.00,
@@ -368,8 +386,9 @@ graficar_barras_agrupadas <- function(
     lab_base[es_entero]  <- sprintf("%d%%", round(pct_num[es_entero]))
     lab_base[!es_entero] <- sprintf(fmt_no_entero, pct_num[!es_entero])
 
-    lab_base[df_lab$.valor_plot <= 0] <- NA_character_
-    lab_base[df_lab$.valor_plot < umbral_etiqueta] <- NA_character_
+    lab_base[!is.na(df_lab$.valor_plot) & df_lab$.valor_plot <= 0]             <- NA_character_
+    lab_base[!is.na(df_lab$.valor_plot) & df_lab$.valor_plot < umbral_etiqueta] <- NA_character_
+    lab_base[is.na(df_lab$.valor_plot)]                                         <- NA_character_
 
     df_lab$lab <- ifelse(!is.na(lab_base), paste0(lab_base, sufijo_etiqueta), "")
 
@@ -378,12 +397,13 @@ graficar_barras_agrupadas <- function(
 
     offset_lab <- if (orientacion == "vertical") base_max * 0.03 else base_max * 0.015
 
-    df_lab$inside <- df_lab$.valor_plot >= umbral_posicion_eff & df_lab$lab != ""
+    df_lab$inside <- !is.na(df_lab$.valor_plot) & df_lab$.valor_plot >= umbral_posicion_eff & df_lab$lab != ""
 
     df_lab$valor_label <- df_lab$.valor_plot
-    df_lab$valor_label[df_lab$inside] <- df_lab$.valor_plot[df_lab$inside] / 2
-    df_lab$valor_label[!df_lab$inside & df_lab$.valor_plot > 0] <-
-      df_lab$.valor_plot[!df_lab$inside & df_lab$.valor_plot > 0] + offset_lab
+    df_lab$valor_label[df_lab$inside & !is.na(df_lab$inside)] <-
+      df_lab$.valor_plot[df_lab$inside & !is.na(df_lab$inside)] / 2
+    mask_outside <- !is.na(df_lab$.valor_plot) & !is.na(df_lab$inside) & !df_lab$inside & df_lab$.valor_plot > 0
+    df_lab$valor_label[mask_outside] <- df_lab$.valor_plot[mask_outside] + offset_lab
 
     df_lab$hjust_label <- ifelse(df_lab$inside, 0.5, 0)
     if (orientacion == "vertical") df_lab$hjust_label <- 0.5
@@ -534,7 +554,7 @@ graficar_barras_agrupadas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 7) Tema + orientación + leyenda
+  # 7) Tema + orientacion + leyenda
   # ---------------------------------------------------------------------------
   n_items_ley <- length(levels(df_long$.serie))
   n_filas_ley <- max(1L, ceiling(n_items_ley / 5))
@@ -573,7 +593,8 @@ graficar_barras_agrupadas <- function(
       plot.subtitle      = ggplot2::element_text(
         hjust = hjust_titulo,
         color = color_subtitulo,
-        size  = size_subtitulo
+        size  = size_subtitulo,
+        face  = face_subtitulo %||% "italic"
       ),
       plot.caption       = ggplot2::element_text(
         hjust = hjust_caption,
@@ -631,7 +652,7 @@ graficar_barras_agrupadas <- function(
       }
     }
 
-    stop("Tipo de exportación no soportado.", call. = FALSE)
+    stop("Tipo de exportacion no soportado.", call. = FALSE)
   }
 
   # ---------------------------------------------------------------------------
@@ -650,7 +671,7 @@ graficar_barras_agrupadas <- function(
       panel.background = ggplot2::element_rect(fill = color_fondo, color = NA)
     )
 
-  # leyenda grob (con separación real)
+  # leyenda grob (con separacion real)
   n_por_fila <- as.integer(legend_n_por_fila)
   if (!is.finite(n_por_fila) || n_por_fila < 1L) n_por_fila <- 6L
 
@@ -765,7 +786,7 @@ graficar_barras_agrupadas <- function(
   x_buf20  <- x_bars0 + w_bars
   x_extra0 <- x_buf20 + w_buf2
 
-  # top row (título extra)
+  # top row (titulo extra)
   top_in <- canvas_h_toprow_in %||% 0
   if (!is.finite(top_in) || is.na(top_in) || top_in < 0) top_in <- 0
   top_in <- min(top_in, h_panel_in * 0.45)
@@ -823,20 +844,21 @@ graficar_barras_agrupadas <- function(
     }
     if (has_s) {
       canvas <- canvas + cowplot::draw_text(
-        text  = subtitulo,
-        x     = hjust_titulo,
-        y     = y_sub,
-        hjust = hjust_titulo,
-        vjust = 0.5,
-        size  = size_subtitulo,
-        colour= color_subtitulo
+        text     = subtitulo,
+        x        = hjust_titulo,
+        y        = y_sub,
+        hjust    = hjust_titulo,
+        vjust    = 0.5,
+        size     = size_subtitulo,
+        colour   = color_subtitulo,
+        fontface = face_subtitulo %||% "italic"
       )
     }
 
     if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_header0, 1, header_h)
   }
 
-  # TOP ROW: título extra
+  # TOP ROW: titulo extra
   if (top_h > 0) {
 
     if (debug_ph_bordes) {
@@ -988,5 +1010,5 @@ graficar_barras_agrupadas <- function(
     }
   }
 
-  stop("Tipo de exportación no soportado.", call. = FALSE)
+  stop("Tipo de exportacion no soportado.", call. = FALSE)
 }

@@ -1,18 +1,18 @@
 # =============================================================================
-# NUEVO API — PPT "PLAN" (declarativo)
+# NUEVO API  -  PPT "PLAN" (declarativo)
 # - presets se definen en un chunk previo como `list(...)` o con `p_presets()`
-# - p_* crea ELEMENTOS (gráficos / texto / base) con overrides por diapositiva
+# - p_* crea ELEMENTOS (graficos / texto / base) con overrides por diapositiva
 # - p_slide_* crea SLIDES (layout fijo, sin strings sueltos)
-# - reporte_ppt_plan() recolecta diapo_### o recibe plan explícito y exporta
+# - reporte_ppt_plan() recolecta diapo_### o recibe plan explicito y exporta
 # =============================================================================
 
 #' @title Reporte PowerPoint basado en "plan" (p_* + diapo_###)
 #'
 #' @description
 #' Genera un archivo **.pptx** a partir de un **plan de diapositivas** compuesto por:
-#' - **elementos** `p_*()` (gráficos / texto / base),
+#' - **elementos** `p_*()` (graficos / texto / base),
 #' - **slides** `p_slide_*()` (contenedores con layout fijo),
-#' - y objetos `diapo_###` (convención para recolección automática).
+#' - y objetos `diapo_###` (convencion para recoleccion automatica).
 #'
 #' El flujo recomendado es:
 #' 1) Definir un objeto `presets <- list(...)` (o usar `p_presets()`) en un chunk previo.
@@ -31,19 +31,19 @@
 #'   hay una sola fuente.
 #' @param path_ppt Ruta del `.pptx` de salida.
 #'
-#' @param presets Lista de presets por tipo de gráfico. El contrato esperado es
+#' @param presets Lista de presets por tipo de grafico. El contrato esperado es
 #'   `base$args`, `barras_apiladas$args`, `multi_apiladas$args`,
 #'   `barras_agrupadas$args`, `barras_numericas$args`, `boxplot$args`, `pie$args`,
 #'   `donut$args`, `radar_tabla$args`, `dim_heatmap$args`,
 #'   `dim_radar$args` y `dim_foda$args`.
-#'   También puede construirse con `p_presets()`.
+#'   Tambien puede construirse con `p_presets()`.
 #'
 #' @param plan Lista de slides ya construidos con `p_plan()` o `list(diapo_001=..., ...)`.
 #'   Si es `NULL`, se recolectan objetos `diapo_###` desde `env_diapos`.
-#' @param env_diapos Entorno donde se buscarán objetos `diapo_###` cuando `plan` sea `NULL`.
+#' @param env_diapos Entorno donde se buscaran objetos `diapo_###` cuando `plan` sea `NULL`.
 #'   Por defecto se usa `parent.frame()`.
 #' @param strict_diapos Si `TRUE`, errores en vez de warnings cuando los `diapo_###` no son
-#'   consecutivos o cuando hay inconsistencias estructurales (por ejemplo, slot requerido vacío).
+#'   consecutivos o cuando hay inconsistencias estructurales (por ejemplo, slot requerido vacio).
 #'
 #' @param template_pptx Ruta a plantilla `.pptx`. Si es `NULL`, se intenta usar una plantilla
 #'   interna del paquete y, si no existe, la plantilla por defecto de PowerPoint.
@@ -79,7 +79,7 @@ reporte_ppt_plan <- function(
   `%||%` <- function(x, y) if (!is.null(x)) x else y
 
   # -----------------------
-  # 0) Validaciones mínimas
+  # 0) Validaciones minimas
   # -----------------------
   if (!requireNamespace("officer", quietly = TRUE) ||
       !requireNamespace("rvg", quietly = TRUE)) {
@@ -121,11 +121,11 @@ reporte_ppt_plan <- function(
 
   if (is.null(instrumento)) {
     if (length(data_sources) != 1L) {
-      stop("Cuando `data` contiene varias fuentes, `instrumento` debe proveerse explícitamente como lista nombrada.", call. = FALSE)
+      stop("Cuando `data` contiene varias fuentes, `instrumento` debe proveerse explicitamente como lista nombrada.", call. = FALSE)
     }
     instrumento <- attr(data_sources[[1]], "instrumento_reporte", exact = TRUE)
     if (is.null(instrumento)) {
-      stop("No se proporcionó `instrumento` y `data` no tiene atributo `instrumento_reporte`.", call. = FALSE)
+      stop("No se proporciono `instrumento` y `data` no tiene atributo `instrumento_reporte`.", call. = FALSE)
     }
   }
 
@@ -140,13 +140,19 @@ reporte_ppt_plan <- function(
   missing_inst <- setdiff(names(data_sources), names(instrument_sources))
   if (length(missing_inst)) {
     stop(
-      "`instrumento` no contiene definición para estas fuentes de `data`: ",
+      "`instrumento` no contiene definicion para estas fuentes de `data`: ",
       paste(missing_inst, collapse = ", "),
       call. = FALSE
     )
   }
 
-  default_source <- if (length(data_sources) == 1L) names(data_sources)[1] else NA_character_
+  default_source <- if (length(data_sources) == 1L) {
+    names(data_sources)[1]
+  } else if ("default" %in% names(data_sources)) {
+    "default"
+  } else {
+    NA_character_
+  }
   if (!is.na(default_source)) {
     survey      <- instrument_sources[[default_source]]$survey %||% NULL
     choices     <- instrument_sources[[default_source]]$choices %||% NULL
@@ -163,11 +169,11 @@ reporte_ppt_plan <- function(
   presets <- presets %||% list()
   if (!is.null(presets$dim_radar_tabla)) {
     warning(
-      "`presets$dim_radar_tabla` fue retirado del flujo PPT y será ignorado. Use `dim_radar` o `dim_heatmap`.",
+      "`presets$dim_radar_tabla` fue retirado del flujo PPT y sera ignorado. Use `dim_radar` o `dim_heatmap`.",
       call. = FALSE
     )
   }
-  # defaults mínimos si el usuario no pasó nada
+  # defaults minimos si el usuario no paso nada
   presets$barras_apiladas <- presets$barras_apiladas %||% list(args = list())
   if (is.null(presets$barras_apiladas$args) || !is.list(presets$barras_apiladas$args)) {
     presets$barras_apiladas$args <- list()
@@ -191,6 +197,8 @@ reporte_ppt_plan <- function(
 
   presets$boxplot <- presets$boxplot %||% list(args = list())
   presets$boxplot$args <- presets$boxplot$args %||% list()
+  presets$media_rango <- presets$media_rango %||% list(args = list())
+  presets$media_rango$args <- presets$media_rango$args %||% list()
 
   presets$radar_tabla <- presets$radar_tabla %||% list(args = list())
   presets$radar_tabla$args <- presets$radar_tabla$args %||% list()
@@ -215,7 +223,7 @@ reporte_ppt_plan <- function(
   base_style$formato     <- NULL
   base_style$sufijo_auto <- NULL
 
-  # a qué presets se les hereda
+  # a que presets se les hereda
   targets <- intersect(
     names(presets),
     c("barras_apiladas", "multi_apiladas", "barras_agrupadas",
@@ -256,8 +264,10 @@ reporte_ppt_plan <- function(
   presets$donut$args$exportar    <- presets$donut$args$exportar    %||% presets$pie$args$exportar
   presets$boxplot$args$usar_canvas <- presets$boxplot$args$usar_canvas %||% TRUE
   presets$boxplot$args$exportar    <- presets$boxplot$args$exportar %||% "rplot"
+  presets$media_rango$args$usar_canvas <- presets$media_rango$args$usar_canvas %||% presets$boxplot$args$usar_canvas
+  presets$media_rango$args$exportar    <- presets$media_rango$args$exportar %||% presets$boxplot$args$exportar
 
-  # defaults estéticos únicos para dimensiones (PPT)
+  # defaults esteticos unicos para dimensiones (PPT)
   presets$dim_heatmap$args$angle_x <- presets$dim_heatmap$args$angle_x %||% 0
   presets$dim_heatmap$args$size_ejes <- presets$dim_heatmap$args$size_ejes %||% 10
   presets$dim_heatmap$args$size_texto_celdas <- presets$dim_heatmap$args$size_texto_celdas %||% 10
@@ -281,7 +291,7 @@ reporte_ppt_plan <- function(
   presets$dim_foda$args$canvas_h_caption <- presets$dim_foda$args$canvas_h_caption %||% 0.06
 
   # ---------------------------------------------------------------------------
-  # 1) Helpers — PPT strict con contrato interno (.PPT_CONTRACT)
+  # 1) Helpers  -  PPT strict con contrato interno (.PPT_CONTRACT)
   # ---------------------------------------------------------------------------
   .layout_exists <- function(layout_name) {
     layout_name %in% layout_info$layout
@@ -307,7 +317,7 @@ reporte_ppt_plan <- function(
 
   .ph_with_strict <- function(doc, value, spec) {
     if (is.null(spec) || is.null(spec$type)) {
-      stop("Placeholder spec inválido (NULL o sin $type).", call. = FALSE)
+      stop("Placeholder spec invalido (NULL o sin $type).", call. = FALSE)
     }
     type_idx <- spec$type_idx %||% NULL
     if (!is.null(type_idx)) {
@@ -346,7 +356,7 @@ reporte_ppt_plan <- function(
     props <- props[props$type %in% spec$type, , drop = FALSE]
     if (!nrow(props)) {
       stop(
-        "No se encontró placeholder type='", spec$type,
+        "No se encontro placeholder type='", spec$type,
         "' en layout='", layout_name %||% "<NA>",
         "', master='", master_name %||% "<NA>", "'.",
         call. = FALSE
@@ -359,7 +369,7 @@ reporte_ppt_plan <- function(
 
     if (!nrow(props)) {
       stop(
-        "No se encontró placeholder type='", spec$type,
+        "No se encontro placeholder type='", spec$type,
         "' type_idx=", spec$type_idx %||% "NULL",
         " en layout='", layout_name %||% "<NA>",
         "', master='", master_name %||% "<NA>", "'.",
@@ -461,7 +471,7 @@ reporte_ppt_plan <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 2) Helpers — Plan (recolección diapo_###)
+  # 2) Helpers  -  Plan (recoleccion diapo_###)
   # ---------------------------------------------------------------------------
   .collect_diapos <- function(env, strict = FALSE) {
     nms <- ls(envir = env, all.names = TRUE)
@@ -483,7 +493,7 @@ reporte_ppt_plan <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 3) Helpers — Instrumento / tablas / títulos
+  # 3) Helpers  -  Instrumento / tablas / titulos
   # ---------------------------------------------------------------------------
   .pct_enteros_100 <- function(n) {
     n <- as.numeric(n)
@@ -577,7 +587,7 @@ reporte_ppt_plan <- function(
   .resolve_ref <- function(ref, source = NULL, arg_name = "var") {
     ref_info <- .parse_ref_parts(ref)
     if (is.na(ref_info$var) || !nzchar(ref_info$var)) {
-      stop("`", arg_name, "` debe ser character(1) no vacío.", call. = FALSE)
+      stop("`", arg_name, "` debe ser character(1) no vacio.", call. = FALSE)
     }
     ctx <- .source_ctx(.resolve_source_name(source = source, ref = ref, arg_name = arg_name))
     ctx$var <- ref_info$var
@@ -624,12 +634,14 @@ reporte_ppt_plan <- function(
       .resolve_ref(ref, source = source, arg_name = arg_name)$source
     }, character(1)))
     if (length(srcs) != 1L) {
-      stop("Las referencias de `", arg_name, "` deben pertenecer a una sola fuente en este gráfico.", call. = FALSE)
+      stop("Las referencias de `", arg_name, "` deben pertenecer a una sola fuente en este grafico.", call. = FALSE)
     }
     srcs[1]
   }
 
   .element_source <- function(el, allow_multi = FALSE) {
+    explicit_source <- as.character(el$source %||% NA_character_)[1]
+    if (is.na(explicit_source) || !nzchar(trimws(explicit_source))) explicit_source <- NULL
     refs <- c(
       .extract_ref_values(el$var %||% NULL),
       .extract_ref_values(el$vars %||% NULL),
@@ -638,9 +650,11 @@ reporte_ppt_plan <- function(
     )
     refs <- refs[!is.na(refs) & nzchar(trimws(refs))]
     if (!length(refs)) {
-      return(if (isTRUE(allow_multi)) character(0) else .resolve_source_name(source = NULL, ref = NULL, arg_name = "var"))
+      return(if (isTRUE(allow_multi)) character(0) else .resolve_source_name(source = explicit_source, ref = NULL, arg_name = "var"))
     }
-    srcs <- unique(vapply(refs, function(ref) .resolve_ref(ref, arg_name = "var")$source, character(1)))
+    srcs <- unique(vapply(refs, function(ref) {
+      .resolve_ref(ref, source = explicit_source, arg_name = "var")$source
+    }, character(1)))
     if (!allow_multi && length(srcs) != 1L) {
       stop("El elemento usa variables de varias fuentes; este renderer requiere una sola.", call. = FALSE)
     }
@@ -790,7 +804,7 @@ reporte_ppt_plan <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 4) Helpers — paleta_<listname> auto desde env_diapos
+  # 4) Helpers  -  paleta_<listname> auto desde env_diapos
   # ---------------------------------------------------------------------------
   .paleta_auto <- function(list_name, env = env_diapos) {
     ln <- as.character(list_name %||% NA_character_)[1]
@@ -881,6 +895,12 @@ reporte_ppt_plan <- function(
     refs <- refs[!is.na(refs) & nzchar(trimws(refs))]
     if (!length(refs)) return(NULL)
 
+    .fmt_base_part <- function(n_txt, src) {
+      src <- trimws(as.character(src %||% "")[1])
+      if (!nzchar(src) || identical(src, "default")) return(n_txt)
+      paste(n_txt, src)
+    }
+
     ctxs <- lapply(refs, .resolve_ref, arg_name = "var")
     src_order <- names(data_sources)
     srcs_used <- unique(vapply(ctxs, `[[`, character(1), "source"))
@@ -891,8 +911,8 @@ reporte_ppt_plan <- function(
       src <- srcs_used[1]
       first_ref <- refs[match(src, vapply(ctxs, `[[`, character(1), "source"))]
 
-      # Si el reporte completo usa múltiples BBDD, la base automática debe
-      # rotularse por fuente (igual que en PPT), incluso cuando el gráfico
+      # Si el reporte completo usa multiples BBDD, la base automatica debe
+      # rotularse por fuente (igual que en PPT), incluso cuando el grafico
       # particular use solo una.
       if (length(data_sources) > 1L) {
         tab <- .tab_freq(first_ref, filtros = filtros, source = src)
@@ -913,7 +933,7 @@ reporte_ppt_plan <- function(
         if (!is.finite(N_total)) return(NULL)
 
         N_pretty <- format(N_total, big.mark = ",", scientific = FALSE)
-        return(sprintf(formato, paste(N_pretty, src)))
+        return(sprintf(formato, .fmt_base_part(N_pretty, src)))
       }
 
       return(.base_auto_from_var(
@@ -946,7 +966,7 @@ reporte_ppt_plan <- function(
       if (!is.finite(N_total)) next
 
       N_pretty <- format(N_total, big.mark = ",", scientific = FALSE)
-      parts <- c(parts, paste(N_pretty, src))
+      parts <- c(parts, .fmt_base_part(N_pretty, src))
     }
 
     if (!length(parts)) return(NULL)
@@ -1054,8 +1074,8 @@ reporte_ppt_plan <- function(
           iter_level = el$iter_level %||% NULL
         )
 
-        # En dimensiones, la base automática debe reflejar el universo analizado
-        # (post filtros/iteración), incluso cuando `incluir_total = FALSE`.
+        # En dimensiones, la base automatica debe reflejar el universo analizado
+        # (post filtros/iteracion), incluso cuando `incluir_total = FALSE`.
         N_total <- suppressWarnings(as.numeric(payload$base_universe)[1])
         if (!is.finite(N_total)) {
           sc <- payload$score_plot %||% data.frame()
@@ -1125,7 +1145,7 @@ reporte_ppt_plan <- function(
 
   .placeholder_props_current <- function(doc, spec) {
     if (is.null(spec) || is.null(spec$type)) {
-      stop("Placeholder spec inválido (NULL o sin $type).", call. = FALSE)
+      stop("Placeholder spec invalido (NULL o sin $type).", call. = FALSE)
     }
     type_idx <- spec$type_idx %||% NULL
     if (!is.null(type_idx)) {
@@ -1163,7 +1183,7 @@ reporte_ppt_plan <- function(
     props <- props[props$type %in% spec$type, , drop = FALSE]
     if (!nrow(props)) {
       stop(
-        "No se encontró placeholder type='", spec$type,
+        "No se encontro placeholder type='", spec$type,
         "' en layout='", layout_name %||% "<NA>",
         "', master='", master_name %||% "<NA>", "'.",
         call. = FALSE
@@ -1176,7 +1196,7 @@ reporte_ppt_plan <- function(
 
     if (!nrow(props)) {
       stop(
-        "No se encontró placeholder type='", spec$type,
+        "No se encontro placeholder type='", spec$type,
         "' type_idx=", spec$type_idx %||% "NULL",
         " en layout='", layout_name %||% "<NA>",
         "', master='", master_name %||% "<NA>", "'.",
@@ -1223,9 +1243,9 @@ reporte_ppt_plan <- function(
 
   # ---------------------------------------------------------------------------
   # Helper: acumula render_meta para uso externo (Word, etc.)
-  # - Para multilista: renderiza cada bloque por separado (sin título en el chart).
-  # - Para el resto: re-renderiza sin overrides de título para que el título
-  #   vaya fuera del gráfico en Word.
+  # - Para multilista: renderiza cada bloque por separado (sin titulo en el chart).
+  # - Para el resto: re-renderiza sin overrides de titulo para que el titulo
+  #   vaya fuera del grafico en Word.
   # Solo se llama cuando build_render_meta = TRUE.
   # ---------------------------------------------------------------------------
   .push_render_meta_for_element <- function(el, plot) {
@@ -1296,19 +1316,19 @@ reporte_ppt_plan <- function(
       modo_b <- block_data$modo %||% "var"
 
       if (identical(modo_b, "var_cruce")) {
-        # Un chart por grupo (dim): título va fuera como párrafo Word
+        # Un chart por grupo (dim): titulo va fuera como parrafo Word
         vars_list     <- block_data$vars          %||% list()
         titulos_grupo <- block_data$titulos_grupo %||% list()
         for (nm in names(vars_list)) {
           sub               <- block_data
           sub$vars          <- vars_list[nm]
-          sub$titulos_grupo <- NULL   # no mostrar en el chart; sale como título Word
+          sub$titulos_grupo <- NULL   # no mostrar en el chart; sale como titulo Word
           title_g <- as.character(titulos_grupo[[nm]] %||% nm)[1]
           .push_multi_block(sub, title_g)
         }
 
       } else if (identical(modo_b, "var")) {
-        # Un chart por variable individual; título va fuera como párrafo Word
+        # Un chart por variable individual; titulo va fuera como parrafo Word
         vars_vec <- block_data$vars %||% character(0)
         if (is.list(vars_vec)) vars_vec <- unlist(vars_vec, use.names = FALSE)
         for (v in vars_vec) {
@@ -1321,7 +1341,7 @@ reporte_ppt_plan <- function(
         }
 
       } else {
-        # Modo desconocido: renderizar como bloque único
+        # Modo desconocido: renderizar como bloque unico
         title_b <- block_data$title_slide %||% block_data$overrides$titulo %||% NULL
         .push_multi_block(block_data, title_b)
       }
@@ -1342,10 +1362,32 @@ reporte_ppt_plan <- function(
     # --- ELEMENTO NORMAL ---
     title <- el$title_slide %||% el$overrides$titulo %||% NULL
 
+    word_note <- .plot_note_from(plot, el$overrides$nota_pie %||% el$nota_pie %||% NULL)
+
     el_for_word <- el
     el_for_word$overrides <- el_for_word$overrides %||% list()
     el_for_word$overrides$titulo    <- NULL
     el_for_word$overrides$subtitulo <- NULL
+    el_for_word$overrides$nota_pie  <- NULL
+    if (identical(etype, "media_rango")) {
+      # Reducir tamano de ejes para Word (device mas angosto)
+      size_ejes_orig <- el_for_word$overrides$size_ejes %||% 9
+      el_for_word$overrides$size_ejes <- min(size_ejes_orig, 8)
+      modo_word <- el_for_word$overrides$modo %||% NULL
+      if (identical(modo_word, "score_ref") && is.null(el_for_word$overrides$size_delta)) {
+        size_media_word <- suppressWarnings(as.numeric(el_for_word$overrides$size_media)[1])
+        if (!is.finite(size_media_word) || is.na(size_media_word) || size_media_word <= 0) {
+          size_media_word <- 3
+        }
+        el_for_word$overrides$size_delta <- max(2.4, size_media_word * 0.72)
+      }
+      if (identical(modo_word, "score_ref") && is.null(el_for_word$overrides$delta_umbral_cerca_ref)) {
+        el_for_word$overrides$delta_umbral_cerca_ref <- 5
+      }
+      if (identical(modo_word, "score_ref") && is.null(el_for_word$overrides$delta_rel_cerca_ref)) {
+        el_for_word$overrides$delta_rel_cerca_ref <- 0.34
+      }
+    }
     p_word <- tryCatch(.render_element(el_for_word), error = function(e) plot)
 
     base <- tryCatch(
@@ -1358,14 +1400,30 @@ reporte_ppt_plan <- function(
       plot_word = p_word,
       title     = title,
       base      = base,
+      note      = word_note,
       base_multi_source = .is_multi_source_element(el),
       etype     = etype
     )
     invisible(NULL)
   }
 
-  # Inyecta title_slide como overrides$titulo en slides multi-gráfico
-  # (donde no hay placeholder PPT individual por gráfico)
+  # Para barras_agrupadas: inyecta el label de la variable como titulo en overrides
+  # para que aparezca dentro del grafico en PPT.
+  # El mecanismo Word lo suprime luego via el_for_word$overrides$titulo <- NULL.
+  .inject_var_titulo <- function(el) {
+    if (!identical(el$.element_type %||% "", "barras_agrupadas")) return(el)
+    if (!is.null(el$overrides$titulo)) return(el)
+    if (is.null(el$var) || !nzchar(trimws(el$var %||% ""))) return(el)
+    ttl <- tryCatch(.title_of_var(el$var), error = function(e) NULL)
+    if (!is.null(ttl) && nzchar(trimws(as.character(ttl)[1]))) {
+      el$overrides <- el$overrides %||% list()
+      el$overrides$titulo <- as.character(ttl)[1]
+    }
+    el
+  }
+
+  # Inyecta title_slide como overrides$titulo en slides multi-grafico
+  # (donde no hay placeholder PPT individual por grafico)
   .inject_title_override <- function(el) {
     ts <- el$title_slide %||% NULL
     if (is.null(ts) || !nzchar(trimws(as.character(ts)[1]))) return(el)
@@ -1376,13 +1434,31 @@ reporte_ppt_plan <- function(
     el
   }
 
+  .clean_note_text <- function(x) {
+    if (is.null(x)) return(NULL)
+    x <- as.character(x)[1]
+    if (is.na(x) || !nzchar(trimws(x))) return(NULL)
+    trimws(x)
+  }
+
+  .plot_note_from <- function(plot_obj, fallback = NULL) {
+    note_attr <- attr(plot_obj, "note_outside", exact = TRUE)
+    note_attr <- .clean_note_text(note_attr)
+    if (!is.null(note_attr)) return(note_attr)
+    .clean_note_text(fallback)
+  }
+
+  .ppt_note_from <- function(plot_obj, fallback = NULL) {
+    .plot_note_from(plot_obj, fallback = fallback)
+  }
+
   .force_canvas_args <- function(fun, args) {
     fml <- tryCatch(names(formals(fun)), error = function(e) character(0))
     if ("usar_canvas" %in% fml) args$usar_canvas <- TRUE
     args
   }
 
-  # Dispatcher genérico: renderiza cualquier ppt_element
+  # Dispatcher generico: renderiza cualquier ppt_element
   .render_element <- function(el) {
 
     if (is.null(el) || !inherits(el, "ppt_element")) {
@@ -1406,13 +1482,13 @@ reporte_ppt_plan <- function(
     }
     fn <- get(fn_name, mode = "function", inherits = TRUE)
 
-    # presets por tipo (si no existen, lista vacía)
+    # presets por tipo (si no existen, lista vacia)
     pa_apiladas <- presets$barras_apiladas$args %||% list()
     pa_multi    <- presets$multi_apiladas$args  %||% list()
     pa_agrup    <- presets$barras_agrupadas$args %||% list()
     pa_num      <- presets$barras_numericas$args %||% list()
     pa_box      <- presets$boxplot$args %||% list()
-    pa_media_rng <- presets$boxplot$args %||% list()
+    pa_media_rng <- presets$media_rango$args %||% presets$boxplot$args %||% list()
     pa_pie      <- presets$pie$args %||% list()
     pa_donut    <- presets$donut$args %||% list()
     pa_radar    <- presets$radar_tabla$args %||% list()
@@ -1421,7 +1497,7 @@ reporte_ppt_plan <- function(
     pa_dim_comp <- presets$dim_comparativo_radarbar$args %||% list()
     pa_dim_foda <- presets$dim_foda$args %||% list()
 
-    # helper: llamar pasando SOLO args que la función soporte
+    # helper: llamar pasando SOLO args que la funcion soporte
     .call_keep_formals <- function(fun, args) {
       fml <- names(formals(fun))
       if ("..." %in% fml) return(do.call(fun, args))
@@ -1439,7 +1515,7 @@ reporte_ppt_plan <- function(
       out <- tryCatch(.call_keep_formals(fn, args), error = identity)
       if (inherits(out, "error")) {
         stop(
-          "Renderer encontrado (", fn_name, ") pero falló al ejecutarse: ",
+          "Renderer encontrado (", fn_name, ") pero fallo al ejecutarse: ",
           conditionMessage(out),
           call. = FALSE
         )
@@ -1447,7 +1523,7 @@ reporte_ppt_plan <- function(
       return(out)
     }
 
-    # Mapeo estándar: (el, preset_args)
+    # Mapeo estandar: (el, preset_args)
     preset_args <- switch(
       etype,
       barras_apiladas  = pa_apiladas,
@@ -1462,7 +1538,7 @@ reporte_ppt_plan <- function(
       dim_radar        = pa_dim_rad,
       dim_comparativo_radarbar = pa_dim_comp,
       dim_foda         = pa_dim_foda,
-      # default: si hay nuevos etypes, se intenta pasar lista vacía
+      # default: si hay nuevos etypes, se intenta pasar lista vacia
       list()
     )
 
@@ -1475,13 +1551,18 @@ reporte_ppt_plan <- function(
       if (!inherits(out2, "error")) return(out2)
 
       stop(
-        "Renderer encontrado (", fn_name, ") pero falló al ejecutarse: ",
+        "Renderer encontrado (", fn_name, ") pero fallo al ejecutarse: ",
         conditionMessage(out),
         call. = FALSE
       )
     }
 
     out
+  }
+
+  # --- Renderer para ggplot crudo (p_ggplot_raw) ---
+  .render_ggplot_raw <- function(el, preset_args = list()) {
+    el$gg
   }
 
   .render_barras_apiladas <- function(el, preset_args) {
@@ -1524,7 +1605,7 @@ reporte_ppt_plan <- function(
       stop("No existe `graficar_barras_apiladas()` en el entorno/paquete.", call. = FALSE)
     }
 
-    # base args mínimos + preset_args + overrides
+    # base args minimos + preset_args + overrides
     base_args <- list(
       data             = df_wide,
       var_categoria    = "categoria",
@@ -1853,7 +1934,7 @@ reporte_ppt_plan <- function(
 
       duplicated_labels <- duplicated(labels_by_v) | duplicated(labels_by_v, fromLast = TRUE)
 
-      # En Word con una sola variable, el label es el título de arriba → suprimir
+      # En Word con una sola variable, el label es el titulo de arriba → suprimir
       # y colapsar el placeholder de etiquetas para que las barras ocupen todo el ancho
       single_word_var <- isTRUE(el$.word_sin_grupo) && length(vars) == 1L
 
@@ -1907,7 +1988,7 @@ reporte_ppt_plan <- function(
       base_args <- .apply_top2box_alias(base_args)
 
       # Word, una sola variable: activar canvas para que el layout de columnas
-      # sea idéntico al resto (misma posición inicial de barras, sin expand ggplot).
+      # sea identico al resto (misma posicion inicial de barras, sin expand ggplot).
       # NO se colapsa canvas_w_etiquetas para que las barras arranquen al mismo nivel.
       if (single_word_var) {
         overrides$usar_canvas <- TRUE
@@ -1961,7 +2042,7 @@ reporte_ppt_plan <- function(
       # --- segmentos: opciones de var (y paleta de var)
       ln_var <- .list_name_from_ctx(ctx_var)
       if (is.na(ln_var) || !nzchar(ln_var)) {
-        stop("multiapiladas (modo='cruce'): no se encontró list_name para `var`=", var, call. = FALSE)
+        stop("multiapiladas (modo='cruce'): no se encontro list_name para `var`=", var, call. = FALSE)
       }
       colores_grupos <- .paleta_auto(ln_var, env_diapos)
 
@@ -2406,8 +2487,8 @@ reporte_ppt_plan <- function(
     if (!is.finite(N_total) || N_total <= 0) return(.blank_canvas(preset_args, overrides))
 
     # ----------------------------
-    # LONG: 1 fila por opción
-    # (esto evita: eje Y con "título" y colores distintos por opción)
+    # LONG: 1 fila por opcion
+    # (esto evita: eje Y con "titulo" y colores distintos por opcion)
     # ----------------------------
     df_long <- tibble::tibble(
       categoria = as.character(tab$Opciones),
@@ -2416,6 +2497,18 @@ reporte_ppt_plan <- function(
     )
 
     etiquetas_series <- c(pct = "Porcentaje")
+
+    # Detectar si la variable es select_multiple → agregar subtitulo en cursiva
+    if (is.null(overrides$subtitulo)) {
+      ctx_v <- tryCatch(.resolve_ref(var, arg_name = "var"), error = function(e) NULL)
+      if (!is.null(ctx_v) && !is.null(ctx_v$survey) && all(c("type", "name") %in% names(ctx_v$survey))) {
+        mask <- !is.na(ctx_v$survey$name) & ctx_v$survey$name == ctx_v$var
+        tps  <- unique(stats::na.omit(ctx_v$survey$type[mask]))
+        if (any(grepl("^select_multiple(\\s|$)", tps))) {
+          overrides$subtitulo <- "Pregunta de opcion multiple"
+        }
+      }
+    }
 
     if (!exists("graficar_barras_agrupadas", mode = "function", inherits = TRUE)) {
       stop("No existe `graficar_barras_agrupadas()` en el entorno/paquete.", call. = FALSE)
@@ -2433,7 +2526,7 @@ reporte_ppt_plan <- function(
     )
 
     preset_args <- preset_args %||% list()
-    # limpiar cosas que NO aplican a agrupadas (por si vienen de presets genéricos)
+    # limpiar cosas que NO aplican a agrupadas (por si vienen de presets genericos)
     preset_args$var_grupo      <- NULL
     preset_args$colores_grupos <- NULL
     overrides$var_grupo        <- NULL
@@ -2468,7 +2561,7 @@ reporte_ppt_plan <- function(
         n      = as.numeric(.data$n)
       ) |>
       dplyr::mutate(
-        pct = .data$n / sum(.data$n, na.rm = TRUE)  # proporción 0-1
+        pct = .data$n / sum(.data$n, na.rm = TRUE)  # proporcion 0-1
       )
 
     ln <- .list_name_of_var(var)
@@ -3146,7 +3239,7 @@ reporte_ppt_plan <- function(
           codes_box_global <- unname(label_to_code[el$box_labels])
           if (any(is.na(codes_box_global))) {
             stop(
-              "radar_tabla (modo='box'): no se mapearon correctamente los códigos desde `box_labels`.\n",
+              "radar_tabla (modo='box'): no se mapearon correctamente los codigos desde `box_labels`.\n",
               "Labels pedidos: ", paste(el$box_labels, collapse = " | "),
               call. = FALSE
             )
@@ -3192,7 +3285,7 @@ reporte_ppt_plan <- function(
             )
             if (!length(matched_sel)) {
               stop(
-                "radar_tabla (modo='box'): no se mapearon correctamente las categorías desde `box_labels`.\n",
+                "radar_tabla (modo='box'): no se mapearon correctamente las categorias desde `box_labels`.\n",
                 "Labels pedidos: ", paste(el$box_labels, collapse = " | "),
                 "\nLabels disponibles: ", paste(unique(opts_chr), collapse = " | "),
                 call. = FALSE
@@ -3279,7 +3372,7 @@ reporte_ppt_plan <- function(
         pal_series <- pal_series[names(pal_series) %in% grupos_lvl]
       }
 
-      # inyectar en el argumento correcto según cómo se llame en graficar_radar()
+      # inyectar en el argumento correcto segun como se llame en graficar_radar()
       fml <- names(formals(graficar_radar))
 
       if ("colores_series" %in% fml) {
@@ -3293,7 +3386,7 @@ reporte_ppt_plan <- function(
       } else if ("paleta" %in% fml) {
         base_args$paleta <- pal_series
       } else {
-        # último recurso: meterlo en overrides por si tu graficar_radar lo recoge allí
+        # ultimo recurso: meterlo en overrides por si tu graficar_radar lo recoge alli
         overrides$colores_series <- overrides$colores_series %||% pal_series
         overrides$colores_grupos <- overrides$colores_grupos %||% pal_series
         overrides$colores_lineas <- overrides$colores_lineas %||% pal_series
@@ -3326,6 +3419,7 @@ reporte_ppt_plan <- function(
       objetivo = el$objetivo,
       cruce = cruce_var,
       incluir_total = el$incluir_total %||% NULL,
+      modo_semaforo = el$modo_semaforo %||% NULL,
       brecha_filas = el$brecha_filas %||% FALSE,
       etiq_brecha_filas = el$etiq_brecha_filas %||% "Brecha",
       brecha_cols = el$brecha_cols %||% FALSE,
@@ -3342,7 +3436,8 @@ reporte_ppt_plan <- function(
       iter_level = el$iter_level %||% NULL,
       titulo = NULL,
       subtitulo = NULL,
-      nota_pie = NULL
+      nota_pie = NULL,
+      nota_pie_externa = TRUE
     )
 
     args <- .merge_args(base_args, preset_args %||% list(), el$overrides %||% list())
@@ -3375,7 +3470,8 @@ reporte_ppt_plan <- function(
       iter_level = el$iter_level %||% NULL,
       titulo = NULL,
       subtitulo = NULL,
-      nota_pie = NULL
+      nota_pie = NULL,
+      nota_pie_externa = TRUE
     )
 
     args <- .merge_args(base_args, preset_args %||% list(), el$overrides %||% list())
@@ -3409,7 +3505,8 @@ reporte_ppt_plan <- function(
       iter_level = el$iter_level %||% NULL,
       titulo = NULL,
       subtitulo = NULL,
-      nota_pie = NULL
+      nota_pie = NULL,
+      nota_pie_externa = TRUE
     )
 
     args <- .merge_args(base_args, preset_args %||% list(), el$overrides %||% list())
@@ -3456,6 +3553,7 @@ reporte_ppt_plan <- function(
       incluir_total = el$incluir_total %||% TRUE,
       filtros = el$filtros %||% list(),
       usar_pesos = el$usar_pesos %||% TRUE,
+      modo_semaforo = el$modo_semaforo %||% NULL,
       titulo = NULL,
       subtitulo = NULL,
       nota_pie = NULL
@@ -3512,7 +3610,7 @@ reporte_ppt_plan <- function(
     doc <- NULL
   } else {
 
-    # Si el usuario no pasó template_pptx (NULL/NA/"") -> intentar interna
+    # Si el usuario no paso template_pptx (NULL/NA/"") -> intentar interna
     if (is.null(template_pptx) || is.na(template_pptx) || !nzchar(template_pptx)) {
 
       template_interno <- system.file("plantillas/plantilla_16_9.pptx", package = "prosecnur")
@@ -3521,12 +3619,12 @@ reporte_ppt_plan <- function(
         if (isTRUE(mensajes_progreso)) message("Usando plantilla interna: ", template_interno)
         doc <- officer::read_pptx(path = template_interno)
       } else {
-        if (isTRUE(mensajes_progreso)) message("No se encontró plantilla interna. Usando PPT default.")
+        if (isTRUE(mensajes_progreso)) message("No se encontro plantilla interna. Usando PPT default.")
         doc <- officer::read_pptx()
       }
 
     } else {
-      # Plantilla externa explícita
+      # Plantilla externa explicita
       if (!file.exists(template_pptx)) stop("No existe `template_pptx`: ", template_pptx, call. = FALSE)
       if (isTRUE(mensajes_progreso)) message("Usando plantilla externa: ", template_pptx)
       doc <- officer::read_pptx(path = template_pptx)
@@ -3642,7 +3740,7 @@ reporte_ppt_plan <- function(
         if (!is.null(ttl) && nzchar(trimws(ttl))) {
           doc <- .ph_with_strict(doc, ttl, contract$slots$title)
         } else {
-          stop("title_slide requiere `title` no vacío.", call. = FALSE)
+          stop("title_slide requiere `title` no vacio.", call. = FALSE)
         }
 
         # opcionales (solo si vienen)
@@ -3700,12 +3798,14 @@ reporte_ppt_plan <- function(
         render_meta[[length(render_meta) + 1]] <- list(
           kind     = "section",
           title    = slide$title    %||% "",
-          subtitle = slide$subtitle %||% NULL
+          subtitle = slide$subtitle %||% NULL,
+          word_intro = slide$word_intro %||% slide$meta$word_intro %||% NULL,
+          meta = slide$meta %||% list()
         )
       }
 
       if (isTRUE(mensajes_progreso)) {
-        message(sprintf("  • sección: %s", slide$title %||% "<sin título>"))
+        message(sprintf("  • seccion: %s", slide$title %||% "<sin titulo>"))
       }
 
       log_rows[[length(log_rows) + 1]] <- tibble::tibble(
@@ -3735,7 +3835,7 @@ reporte_ppt_plan <- function(
 
       if (isTRUE(mensajes_progreso)) {
         .msg_diapo(i, length(plan), stype, el_plot = el_plot, mensajes_progreso = mensajes_progreso)
-        message("  • gráficos a crear: 1")
+        message("  • graficos a crear: 1")
       }
 
       p <- .render_element(el_plot)
@@ -3747,9 +3847,15 @@ reporte_ppt_plan <- function(
 
       rendered[[length(rendered) + 1]] <- p
 
-      if (isTRUE(build_render_meta)) .push_render_meta_for_element(el_plot, p)
+      if (isTRUE(build_render_meta)) {
+        # Inyectar titulo del slide en el elemento para render_meta Word
+        if (!is.null(title_slide) && is.null(el_plot$title_slide)) {
+          el_plot$title_slide <- title_slide
+        }
+        .push_render_meta_for_element(el_plot, p)
+      }
 
-      # Resolver título del slide si no viene
+      # Resolver titulo del slide si no viene
       if (is.null(title_slide)) {
         title_slide <- el_plot$title_slide %||% {
           if (!is.null(el_plot$var)) .title_of_var(el_plot$var) else {
@@ -3798,6 +3904,9 @@ reporte_ppt_plan <- function(
         right_txt <- NULL
         if (inherits(right_obj, "ppt_element_text")) right_txt <- right_obj$text %||% NULL
         if (is.character(right_obj) && length(right_obj) == 1L) right_txt <- right_obj
+        if (is.null(right_txt) || !nzchar(trimws(as.character(right_txt)[1]))) {
+          right_txt <- .ppt_note_from(p, el_plot$overrides$nota_pie %||% el_plot$nota_pie %||% NULL)
+        }
 
         if (is.null(right_txt) || !nzchar(trimws(right_txt))) right_txt <- " "
         doc <- .ph_with_strict(doc, right_txt, contract$slots$right)
@@ -3827,6 +3936,8 @@ reporte_ppt_plan <- function(
         stop("En `p_slide_2()`, `left` y `right` deben ser `ppt_element`.", call. = FALSE)
       }
 
+      el_left  <- .inject_var_titulo(el_left)
+      el_right <- .inject_var_titulo(el_right)
       pL <- .render_element(el_left)
       pR <- .render_element(el_right)
 
@@ -3837,6 +3948,18 @@ reporte_ppt_plan <- function(
       rendered[[length(rendered) + 1]] <- pR
 
       if (isTRUE(build_render_meta)) {
+        # Inyectar titulo Word: preferir label de variable sobre titulo del slide
+        .resolve_word_title <- function(el, fallback) {
+          if (!is.null(el$title_slide)) return(el)
+          if (!is.null(el$overrides$titulo)) return(el)
+          var_lbl <- if (!is.null(el$var) && nzchar(trimws(el$var)))
+            tryCatch(.title_of_var(el$var), error = function(e) NULL)
+          else NULL
+          el$title_slide <- var_lbl %||% fallback
+          el
+        }
+        el_left  <- .resolve_word_title(el_left,  title_slide)
+        el_right <- .resolve_word_title(el_right, title_slide)
         .push_render_meta_for_element(el_left,  pL)
         .push_render_meta_for_element(el_right, pR)
       }
@@ -3865,6 +3988,14 @@ reporte_ppt_plan <- function(
         doc <- .ph_with_strict(doc, as.character(base_txt)[1], contract$slots$base)
 
         rt_txt <- slots$right_text %||% NULL
+        if (is.null(rt_txt) || !nzchar(trimws(as.character(rt_txt)[1]))) {
+          rt_txt <- .ppt_note_from(
+            pL,
+            el_left$overrides$nota_pie %||%
+              el_left$nota_pie %||%
+              .ppt_note_from(pR, el_right$overrides$nota_pie %||% el_right$nota_pie %||% NULL)
+          )
+        }
         if (!is.null(rt_txt) && is.character(rt_txt) && length(rt_txt) == 1L) {
           doc <- .ph_with_strict(doc, rt_txt, contract$slots$right_text)
         } else {
@@ -3888,13 +4019,13 @@ reporte_ppt_plan <- function(
       next
     }
 
-    # ---- POBLACION_4 (4 gráficos 2x2) ----------------------------------------
+    # ---- POBLACION_4 (4 graficos 2x2) ----------------------------------------
     if (identical(stype, "poblacion_4")) {
 
       contract <- PPT_CONTRACT$poblacion_4
       slots    <- slide$slots %||% list()
 
-      # título (opcional)
+      # titulo (opcional)
       title_slide <- slots$title %||% slide$title %||% NULL
 
       # elementos requeridos (4)
@@ -3908,6 +4039,10 @@ reporte_ppt_plan <- function(
       if (!inherits(el_bl, "ppt_element")) stop("poblacion_4: `bottom_left` debe ser `ppt_element`.", call. = FALSE)
       if (!inherits(el_br, "ppt_element")) stop("poblacion_4: `bottom_right` debe ser `ppt_element`.", call. = FALSE)
 
+      el_ul <- .inject_var_titulo(el_ul)
+      el_ur <- .inject_var_titulo(el_ur)
+      el_bl <- .inject_var_titulo(el_bl)
+      el_br <- .inject_var_titulo(el_br)
       pUL <- .render_element(.inject_title_override(el_ul))
       pUR <- .render_element(.inject_title_override(el_ur))
       pBL <- .render_element(.inject_title_override(el_bl))
@@ -3924,6 +4059,19 @@ reporte_ppt_plan <- function(
       rendered[[length(rendered) + 1]] <- pBR
 
       if (isTRUE(build_render_meta)) {
+        .resolve_word_title_el <- function(el, fallback) {
+          if (!is.null(el$title_slide)) return(el)
+          if (!is.null(el$overrides$titulo)) return(el)
+          var_lbl <- if (!is.null(el$var) && nzchar(trimws(el$var)))
+            tryCatch(.title_of_var(el$var), error = function(e) NULL)
+          else NULL
+          el$title_slide <- var_lbl %||% fallback
+          el
+        }
+        el_ul <- .resolve_word_title_el(el_ul, title_slide)
+        el_ur <- .resolve_word_title_el(el_ur, title_slide)
+        el_bl <- .resolve_word_title_el(el_bl, title_slide)
+        el_br <- .resolve_word_title_el(el_br, title_slide)
         .push_render_meta_for_element(el_ul, pUL)
         .push_render_meta_for_element(el_ur, pUR)
         .push_render_meta_for_element(el_bl, pBL)
@@ -3943,19 +4091,19 @@ reporte_ppt_plan <- function(
         doc <- .ph_with_strict(doc, rvg::dml(ggobj = pBL, bg = "transparent"), contract$slots$bottom_left)
         doc <- .ph_with_strict(doc, rvg::dml(ggobj = pBR, bg = "transparent"), contract$slots$bottom_right)
 
-        # tag (usa body idx 1) — opcional
+        # tag (usa body idx 1)  -  opcional
         tag_txt <- slots$tag %||% NULL
         if (!is.null(tag_txt) && is.character(tag_txt) && length(tag_txt) == 1L && nzchar(trimws(tag_txt))) {
           doc <- .ph_with_strict(doc, tag_txt, contract$slots$tag)
         }
 
-        # center_note (usa body idx 2) — opcional
+        # center_note (usa body idx 2)  -  opcional
         cn_txt <- slots$center_note %||% NULL
         if (!is.null(cn_txt) && is.character(cn_txt) && length(cn_txt) == 1L && nzchar(trimws(cn_txt))) {
           doc <- .ph_with_strict(doc, cn_txt, contract$slots$center_note)
         }
 
-        # base (usa body idx 3) — opcional/auto
+        # base (usa body idx 3)  -  opcional/auto
         base_txt <- slots$base %||% NULL
         if (is.null(base_txt)) {
           base_txt <- .base_auto_from_element(
@@ -3989,7 +4137,7 @@ reporte_ppt_plan <- function(
       next
     }
 
-    # ---- TEXT_R (gráfico izquierda, texto derecha) ------------------------------
+    # ---- TEXT_R (grafico izquierda, texto derecha) ------------------------------
     if (identical(stype, "text_r")) {
 
       contract <- PPT_CONTRACT$text_r
@@ -4005,7 +4153,7 @@ reporte_ppt_plan <- function(
       # render plot
       if (isTRUE(mensajes_progreso)) {
         .msg_diapo(i, length(plan), stype, el_plot = el_plot, mensajes_progreso = mensajes_progreso)
-        message("  • gráficos a crear: 1")
+        message("  • graficos a crear: 1")
       }
 
       p <- .render_element(el_plot)
@@ -4017,7 +4165,7 @@ reporte_ppt_plan <- function(
 
       if (isTRUE(build_render_meta)) .push_render_meta_for_element(el_plot, p)
 
-      # inferir título si no viene
+      # inferir titulo si no viene
       if (is.null(title_slide)) {
         title_slide <- el_plot$title_slide %||% {
           if (!is.null(el_plot$var)) .title_of_var(el_plot$var) else {
@@ -4068,6 +4216,9 @@ reporte_ppt_plan <- function(
 
         # footer opcional
         ft <- slots$footer %||% NULL
+        if (is.null(ft) || !nzchar(trimws(as.character(ft)[1]))) {
+          ft <- .ppt_note_from(p, el_plot$overrides$nota_pie %||% el_plot$nota_pie %||% NULL)
+        }
         if (is.null(ft) || !nzchar(trimws(as.character(ft)[1]))) ft <- " "
         doc <- .ph_with_strict(doc, as.character(ft)[1], contract$slots$footer)
       }
@@ -4081,7 +4232,7 @@ reporte_ppt_plan <- function(
       next
     }
 
-    # ---- TEXT_L (texto izquierda, gráfico derecha) ------------------------------
+    # ---- TEXT_L (texto izquierda, grafico derecha) ------------------------------
     if (identical(stype, "text_l")) {
 
       contract <- PPT_CONTRACT$text_l
@@ -4096,7 +4247,7 @@ reporte_ppt_plan <- function(
 
       if (isTRUE(mensajes_progreso)) {
         .msg_diapo(i, length(plan), stype, el_plot = el_plot, mensajes_progreso = mensajes_progreso)
-        message("  • gráficos a crear: 1")
+        message("  • graficos a crear: 1")
       }
 
       p <- .render_element(el_plot)
@@ -4158,6 +4309,9 @@ reporte_ppt_plan <- function(
 
         # footer opcional
         ft <- slots$footer %||% NULL
+        if (is.null(ft) || !nzchar(trimws(as.character(ft)[1]))) {
+          ft <- .ppt_note_from(p, el_plot$overrides$nota_pie %||% el_plot$nota_pie %||% NULL)
+        }
         if (is.null(ft) || !nzchar(trimws(as.character(ft)[1]))) ft <- " "
         doc <- .ph_with_strict(doc, as.character(ft)[1], contract$slots$footer)
       }
@@ -4198,7 +4352,7 @@ reporte_ppt_plan <- function(
         .push_render_meta_for_element(el2, p2)
       }
 
-      # inferir título si no viene
+      # inferir titulo si no viene
       if (is.null(title_slide)) {
         title_slide <- el1$title_slide %||% if (!is.null(el1$var)) .title_of_var(el1$var) else NULL
       }
@@ -4240,6 +4394,14 @@ reporte_ppt_plan <- function(
 
         # footer opcional
         ft <- slots$footer %||% NULL
+        if (is.null(ft) || !nzchar(trimws(as.character(ft)[1]))) {
+          ft <- .ppt_note_from(
+            p1,
+            el1$overrides$nota_pie %||%
+              el1$nota_pie %||%
+              .ppt_note_from(p2, el2$overrides$nota_pie %||% el2$nota_pie %||% NULL)
+          )
+        }
         if (is.null(ft) || !nzchar(trimws(as.character(ft)[1]))) ft <- " "
         doc <- .ph_with_strict(doc, as.character(ft)[1], contract$slots$footer)
       }
@@ -4315,6 +4477,14 @@ reporte_ppt_plan <- function(
 
         # footer opcional
         ft <- slots$footer %||% NULL
+        if (is.null(ft) || !nzchar(trimws(as.character(ft)[1]))) {
+          ft <- .ppt_note_from(
+            p1,
+            el1$overrides$nota_pie %||%
+              el1$nota_pie %||%
+              .ppt_note_from(p2, el2$overrides$nota_pie %||% el2$nota_pie %||% NULL)
+          )
+        }
         if (is.null(ft) || !nzchar(trimws(as.character(ft)[1]))) ft <- " "
         doc <- .ph_with_strict(doc, as.character(ft)[1], contract$slots$footer)
       }
@@ -4478,7 +4648,7 @@ reporte_ppt_plan <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # Limpiar plan acumulado (si se usó diapo())
+  # Limpiar plan acumulado (si se uso diapo())
   # ---------------------------------------------------------------------------
   if (exists(".ppt_plan_clear", mode = "function", inherits = TRUE)) {
     try(.ppt_plan_clear(env_diapos), silent = TRUE)
@@ -4509,20 +4679,20 @@ reporte_ppt_plan <- function(
 #' Este helper refleja el contrato real que consume `reporte_ppt_plan()`, equivalente
 #' a pasar manualmente una lista con sublistas `args`.
 #'
-#' @param base Lista de parámetros por defecto para texto de base automático.
-#' @param barras_apiladas Lista de parámetros por defecto para `graficar_barras_apiladas()`.
-#' @param multi_apiladas Lista de parámetros por defecto para `graficar_barras_apiladas()` en modo bloque.
-#' @param barras_agrupadas Lista de parámetros por defecto para `graficar_barras_agrupadas()`.
-#' @param barras_numericas Lista de parámetros por defecto para `graficar_barras_numericas()`.
-#' @param boxplot Lista de parámetros por defecto para `graficar_boxplot()`.
-#' @param pie Lista de parámetros por defecto para `graficar_pie(tipo_pie="pie")`.
-#' @param donut Lista de parámetros por defecto para `graficar_pie(tipo_pie="donut")`.
-#' @param radar_tabla Lista de parámetros por defecto para `graficar_radar()`.
-#' @param dim_heatmap Lista de parámetros por defecto para `graficar_heatmap_dimensiones()`.
-#' @param dim_radar Lista de parámetros por defecto para `graficar_radar_dimensiones()`.
-#' @param dim_foda Lista de parámetros por defecto para `graficar_foda_dimensiones()`.
+#' @param base Lista de parametros por defecto para texto de base automatico.
+#' @param barras_apiladas Lista de parametros por defecto para `graficar_barras_apiladas()`.
+#' @param multi_apiladas Lista de parametros por defecto para `graficar_barras_apiladas()` en modo bloque.
+#' @param barras_agrupadas Lista de parametros por defecto para `graficar_barras_agrupadas()`.
+#' @param barras_numericas Lista de parametros por defecto para `graficar_barras_numericas()`.
+#' @param boxplot Lista de parametros por defecto para `graficar_boxplot()`.
+#' @param pie Lista de parametros por defecto para `graficar_pie(tipo_pie="pie")`.
+#' @param donut Lista de parametros por defecto para `graficar_pie(tipo_pie="donut")`.
+#' @param radar_tabla Lista de parametros por defecto para `graficar_radar()`.
+#' @param dim_heatmap Lista de parametros por defecto para `graficar_heatmap_dimensiones()`.
+#' @param dim_radar Lista de parametros por defecto para `graficar_radar_dimensiones()`.
+#' @param dim_foda Lista de parametros por defecto para `graficar_foda_dimensiones()`.
 #' @param numerico Alias legado de `barras_numericas`. Se mantiene por compatibilidad.
-#' @param debug Lista opcional de parámetros de depuración.
+#' @param debug Lista opcional de parametros de depuracion.
 #' @param ... Argumentos extra heredados de versiones previas. Se ignoran.
 #'
 #' @return Objeto con clase `"ppt_presets"`.

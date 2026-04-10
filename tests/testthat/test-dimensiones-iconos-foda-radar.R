@@ -357,6 +357,39 @@ test_that("FODA dispersion fuerza regla vertical por corte en rectangular y burb
   }
 })
 
+test_that("graficar_foda_dimensiones admite modo_semaforo degradado", {
+  skip_if_not_installed("png")
+
+  icon_path <- tempfile(fileext = ".png")
+  png::writePNG(array(1, dim = c(8, 8, 4)), target = icon_path)
+  fx <- make_dimensiones_vertical_fixture(icon_path)
+
+  p <- graficar_foda_dimensiones(
+    data = fx$data,
+    instrumento = fx$instrumento,
+    nivel = "subindices",
+    modo_foda = "dispersion",
+    cruce = "servicio",
+    corte_score = 75,
+    modo_semaforo = "degradado",
+    icono_modo = "reemplazar",
+    forma_bloque_dispersion = "rectangular",
+    usar_canvas = FALSE,
+    exportar = "rplot"
+  )
+
+  gb <- ggplot2::ggplot_build(p)
+  fills <- unique(unlist(lapply(gb$data, function(layer) {
+    if (!("fill" %in% names(layer))) return(character(0))
+    as.character(layer$fill)
+  }), use.names = FALSE))
+  fills <- toupper(fills[!is.na(fills) & nzchar(fills)])
+  pal <- toupper(c("#D84B55", "#E0B44C", "#3A9A5B", "#DFE5EE"))
+
+  expect_gt(length(fills), 1L)
+  expect_true(any(!fills %in% pal))
+})
+
 test_that("FODA burbuja acepta radio_burbuja_rel en distintos valores", {
   skip_if_not_installed("png")
 

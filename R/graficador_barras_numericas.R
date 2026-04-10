@@ -1,96 +1,96 @@
-#' Graficar barras con valores numéricos por categoría
+#' Graficar barras con valores numericos por categoria
 #'
-#' Construye un gráfico de **barras** para comparar una o más series de valores
-#' numéricos dentro de cada categoría (por ejemplo, promedios por distrito,
+#' Construye un grafico de **barras** para comparar una o mas series de valores
+#' numericos dentro de cada categoria (por ejemplo, promedios por distrito,
 #' montos por servicio o indicadores por grupo).
 #'
-#' La función recibe una tabla en formato ancho: una columna con la categoría y
+#' La funcion recibe una tabla en formato ancho: una columna con la categoria y
 #' una o varias columnas con los valores a graficar. Internamente, los datos se
 #' pasan a formato largo para dibujar barras agrupadas (una barra por serie dentro
-#' de cada categoría). De forma opcional, se puede incluir una columna con la base
+#' de cada categoria). De forma opcional, se puede incluir una columna con la base
 #' (`N`) para mostrarla encima de las barras.
 #'
-#' Para mejorar el control del diseño, se puede activar `usar_canvas = TRUE`, que
-#' separa el resultado en cuatro bloques: encabezado (título/subtítulo), panel del
-#' gráfico, leyenda y nota al pie. También existe un modo de depuración con bordes
-#' (`debug_ph_bordes`) para revisar visualmente la distribución de estos bloques.
+#' Para mejorar el control del diseno, se puede activar `usar_canvas = TRUE`, que
+#' separa el resultado en cuatro bloques: encabezado (titulo/subtitulo), panel del
+#' grafico, leyenda y nota al pie. Tambien existe un modo de depuracion con bordes
+#' (`debug_ph_bordes`) para revisar visualmente la distribucion de estos bloques.
 #'
 #' @param data `data.frame` o `tibble` con las columnas indicadas en `var_categoria`
 #'   y `vars_valor`. Si se desea mostrar la base sobre las barras, debe incluir la
 #'   columna indicada en `var_n`.
-#' @param var_categoria Nombre (string) de la columna que define las categorías.
-#' @param var_n Nombre (string) de una columna con la base por categoría (por ejemplo, `N`).
+#' @param var_categoria Nombre (string) de la columna que define las categorias.
+#' @param var_n Nombre (string) de una columna con la base por categoria (por ejemplo, `N`).
 #'   Es opcional y solo se utiliza si `mostrar_n_sobre_barras = TRUE`.
-#' @param vars_valor Vector de strings con los nombres de las columnas numéricas a graficar
+#' @param vars_valor Vector de strings con los nombres de las columnas numericas a graficar
 #'   (una por serie).
 #' @param etiquetas_series Vector **nombrado** para renombrar series en la leyenda.
 #'   Los `names(etiquetas_series)` deben coincidir con `vars_valor` y los valores son
-#'   las etiquetas que se mostrarán.
+#'   las etiquetas que se mostraran.
 #'
-#' @param orientacion Orientación del gráfico: `"vertical"` o `"horizontal"`.
+#' @param orientacion Orientacion del grafico: `"vertical"` o `"horizontal"`.
 #'
 #' @param formato_valor Formato de las etiquetas de valor: `"numero"` o `"moneda"`.
-#' @param decimales Número de decimales a mostrar.
-#' @param simbolo_moneda Símbolo de moneda cuando `formato_valor = "moneda"`.
-#' @param separador_miles Separador de miles para el formateo numérico.
-#' @param separador_decimales Separador decimal para el formateo numérico.
+#' @param decimales Numero de decimales a mostrar.
+#' @param simbolo_moneda Simbolo de moneda cuando `formato_valor = "moneda"`.
+#' @param separador_miles Separador de miles para el formateo numerico.
+#' @param separador_decimales Separador decimal para el formateo numerico.
 #' @param colores_series Vector nombrado de colores por serie (opcional). Los nombres deben
 #'   corresponder a las etiquetas finales (las de `etiquetas_series`).
 #'
 #' @param mostrar_valores Si `TRUE`, agrega etiquetas con el valor de cada barra.
-#' @param umbral_etiqueta Umbral mínimo para etiquetar (en la misma escala de `vars_valor`).
+#' @param umbral_etiqueta Umbral minimo para etiquetar (en la misma escala de `vars_valor`).
 #'   Valores menores se omiten.
-#' @param umbral_interno Umbral para decidir la ubicación de la etiqueta: valores por encima
+#' @param umbral_interno Umbral para decidir la ubicacion de la etiqueta: valores por encima
 #'   se colocan dentro de la barra; por debajo se colocan afuera.
 #'
 #' @param mostrar_n_sobre_barras Si `TRUE`, dibuja la base (`var_n`) encima de cada barra.
 #'   Requiere `var_n`.
 #' @param prefijo_n_sobre_barras Prefijo para el texto de la base (por ejemplo `"N = "`).
-#' @param size_n_sobre_barras Tamaño del texto de la base.
+#' @param size_n_sobre_barras Tamano del texto de la base.
 #' @param color_n_sobre_barras Color del texto de la base.
 #'
-#' @param titulo Título del gráfico (opcional).
-#' @param subtitulo Subtítulo del gráfico (opcional).
-#' @param nota_pie Texto para el pie de página (opcional).
-#' @param pos_titulo Alineación del título y subtítulo: `"centro"`, `"izquierda"` o `"derecha"`.
-#' @param pos_nota_pie Alineación de la nota al pie: `"derecha"`, `"izquierda"` o `"centro"`.
+#' @param titulo Titulo del grafico (opcional).
+#' @param subtitulo Subtitulo del grafico (opcional).
+#' @param nota_pie Texto para el pie de pagina (opcional).
+#' @param pos_titulo Alineacion del titulo y subtitulo: `"centro"`, `"izquierda"` o `"derecha"`.
+#' @param pos_nota_pie Alineacion de la nota al pie: `"derecha"`, `"izquierda"` o `"centro"`.
 #'
 #' @param color_titulo,color_subtitulo,color_nota_pie,color_leyenda Colores de textos.
-#' @param size_titulo,size_subtitulo,size_nota_pie,size_leyenda Tamaños de textos.
-#' @param color_texto_barras,size_texto_barras Color y tamaño de las etiquetas de valor.
-#' @param color_ejes,size_ejes Color y tamaño de las etiquetas de ejes.
-#' @param color_fondo Color de fondo del gráfico. Por defecto transparente (`NA`).
+#' @param size_titulo,size_subtitulo,size_nota_pie,size_leyenda Tamanos de textos.
+#' @param color_texto_barras,size_texto_barras Color y tamano de las etiquetas de valor.
+#' @param color_ejes,size_ejes Color y tamano de las etiquetas de ejes.
+#' @param color_fondo Color de fondo del grafico. Por defecto transparente (`NA`).
 #'
 #' @param extra_derecha_rel Espacio adicional relativo para acomodar etiquetas fuera de las barras.
-#' @param ancho_max_eje_cat Si se define, aplica “wrap” a las etiquetas de categorías usando
+#' @param ancho_max_eje_cat Si se define, aplica "wrap" a las etiquetas de categorias usando
 #'   ese ancho (requiere `stringr`).
 #' @param mostrar_leyenda Si `FALSE`, oculta la leyenda.
 #' @param invertir_leyenda Si `TRUE`, invierte el orden de la leyenda.
-#' @param invertir_barras Si `TRUE`, invierte el orden de las categorías.
-#' @param textos_negrita Vector de palabras clave para aplicar negrita a elementos del gráfico.
+#' @param invertir_barras Si `TRUE`, invierte el orden de las categorias.
+#' @param textos_negrita Vector de palabras clave para aplicar negrita a elementos del grafico.
 #'   Se reconoce, por ejemplo: `"titulo"`, `"valores"`, `"leyenda"`.
 #'
 #' @param usar_canvas Si `TRUE`, arma el resultado en cuatro bloques (encabezado, panel,
 #'   leyenda y pie) usando `cowplot`.
-#' @param canvas_h_title Altura relativa del bloque de título/subtítulo (0–1).
-#' @param canvas_h_legend Altura relativa del bloque de leyenda (0–1).
-#' @param canvas_h_caption Altura relativa del bloque de nota al pie (0–1).
-#' @param canvas_pad_top Separación superior adicional (0–1) antes del primer bloque.
+#' @param canvas_h_title Altura relativa del bloque de titulo/subtitulo (0-1).
+#' @param canvas_h_legend Altura relativa del bloque de leyenda (0-1).
+#' @param canvas_h_caption Altura relativa del bloque de nota al pie (0-1).
+#' @param canvas_pad_top Separacion superior adicional (0-1) antes del primer bloque.
 #' @param mostrar_eje_y Si `FALSE` y `orientacion = "vertical"`, oculta el eje Y (texto y marcas).
 #'
 #' @param debug_ph_bordes Si `TRUE`, dibuja bordes de referencia en los bloques del canvas.
 #' @param debug_color_borde Color de esos bordes.
 #' @param debug_lwd Grosor de esos bordes.
 #'
-#' @param exportar Tipo de salida: `"rplot"` devuelve el objeto gráfico; `"png"` guarda un PNG;
-#'   `"ppt"` agrega una diapositiva a un PPTX; `"word"` agrega el gráfico a un DOCX.
+#' @param exportar Tipo de salida: `"rplot"` devuelve el objeto grafico; `"png"` guarda un PNG;
+#'   `"ppt"` agrega una diapositiva a un PPTX; `"word"` agrega el grafico a un DOCX.
 #' @param path_salida Ruta del archivo de salida cuando `exportar` no es `"rplot"`.
-#' @param ancho,alto Tamaño del gráfico (en pulgadas) al exportar.
-#' @param alto_por_categoria Altura sugerida por categoría (en pulgadas) para estimar el alto.
-#' @param dpi Resolución (DPI) al exportar PNG.
+#' @param ancho,alto Tamano del grafico (en pulgadas) al exportar.
+#' @param alto_por_categoria Altura sugerida por categoria (en pulgadas) para estimar el alto.
+#' @param dpi Resolucion (DPI) al exportar PNG.
 #'
-#' @return Si `exportar = "rplot"`, devuelve un objeto gráfico (`ggplot` o un objeto armado con
-#'   `cowplot` cuando `usar_canvas = TRUE`). En otros casos, exporta a archivo y devuelve el gráfico
+#' @return Si `exportar = "rplot"`, devuelve un objeto grafico (`ggplot` o un objeto armado con
+#'   `cowplot` cuando `usar_canvas = TRUE`). En otros casos, exporta a archivo y devuelve el grafico
 #'   de forma invisible.
 #'
 #' @examples
@@ -109,7 +109,7 @@
 #'   vars_valor = c("v1", "v2"),
 #'   etiquetas_series = c(v1 = "Serie 1", v2 = "Serie 2"),
 #'   titulo = "Ejemplo",
-#'   subtitulo = "Barras numéricas",
+#'   subtitulo = "Barras numericas",
 #'   mostrar_n_sobre_barras = TRUE
 #' )
 #'
@@ -169,13 +169,29 @@ graficar_barras_numericas <- function(
     size_ejes            = 9,
     color_fondo          = NA,
 
+    # Geometria de barras
+    ancho_barras         = 0.6,
+    grosor_barras        = NULL,   # alias de ancho_barras (compatibilidad barras_agrupadas)
+    separacion_grupos    = 0.20,   # fraccion de espacio vacio entre grupos de categoria (0-0.6)
+
     # Layout
     extra_derecha_rel    = 0.10,
     ancho_max_eje_cat    = NULL,
     mostrar_leyenda      = TRUE,
     invertir_leyenda     = FALSE,
     invertir_barras      = FALSE,
+    invertir_series      = FALSE,
     textos_negrita       = NULL,
+
+    # Leyenda
+    legend_n_por_fila    = NULL,
+    legend_key_cm        = 0.40,
+    legend_espaciado     = 15,
+    legend_text_gap      = 3,    # margen izq. del texto de leyenda (espacio chip→texto, en pt)
+
+    # Alias nombre barras_agrupadas → barras_numericas
+    color_texto_barras_fuera = NULL,  # alias de color_texto_barras_externo
+    canvas_h_header_in       = NULL,  # alias de canvas_h_title (via dim_alias_radar_extra_args)
 
     # ==========================
     # CANVAS
@@ -201,10 +217,16 @@ graficar_barras_numericas <- function(
     ancho                = 10,
     alto                 = 6,
     alto_por_categoria   = NULL,
-    dpi                  = 300
+    dpi                  = 300,
+    ...
 ) {
 
   `%||%` <- function(x, y) if (!is.null(x)) x else y
+
+  # Aliases de compatibilidad con barras_agrupadas / radarbar
+  if (!is.null(grosor_barras))            ancho_barras  <- grosor_barras
+  if (!is.null(color_texto_barras_fuera)) color_texto_barras_externo <- color_texto_barras_fuera
+  if (!is.null(canvas_h_header_in))       canvas_h_title <- canvas_h_header_in
 
   orientacion   <- match.arg(orientacion)
   orden_categorias <- match.arg(orden_categorias)
@@ -251,12 +273,14 @@ graficar_barras_numericas <- function(
       values_to = ".valor"
     )
 
-  if (!is.numeric(df_long$.valor)) stop("Las columnas de `vars_valor` deben ser numéricas.", call. = FALSE)
+  if (!is.numeric(df_long$.valor)) stop("Las columnas de `vars_valor` deben ser numericas.", call. = FALSE)
 
   df_long$.serie <- dplyr::recode(df_long$.col_val, !!!etiquetas_series)
-  df_long$.serie <- factor(df_long$.serie, levels = unname(etiquetas_series))
+  serie_lvls <- unname(etiquetas_series)
+  if (invertir_series) serie_lvls <- rev(serie_lvls)
+  df_long$.serie <- factor(df_long$.serie, levels = serie_lvls)
 
-  # orden categorías
+  # orden categorias
   cat_vec  <- df_long[[var_categoria]]
   cat_lvls <- unique(cat_vec)
   if (!identical(orden_categorias, "original")) {
@@ -287,13 +311,20 @@ graficar_barras_numericas <- function(
   # ---------------------------------------------------------------------------
   # 2) Plot base (panel)
   # ---------------------------------------------------------------------------
+  # Ancho de grupo y de barra: el grupo ocupa (1 - separacion_grupos) del espacio de
+  # cada categoria; cada barra se ajusta para caber sin solaparse dentro del grupo.
+  sep_grupos   <- .dim_clamp(suppressWarnings(as.numeric(separacion_grupos)[1]), 0, 0.60)
+  if (!is.finite(sep_grupos)) sep_grupos <- 0.20
+  grupo_ancho  <- 1.0 - sep_grupos
+  bar_w_eff    <- ancho_barras   # grosor de cada barra; dodge controla el espaciado entre grupos
+
   p <- ggplot2::ggplot(
     df_long,
     ggplot2::aes_string(x = var_categoria, y = ".valor", fill = ".serie")
   ) +
     ggplot2::geom_col(
-      position = ggplot2::position_dodge(width = 0.7),
-      width    = 0.6
+      position = ggplot2::position_dodge(width = grupo_ancho),
+      width    = bar_w_eff
     ) +
     ggplot2::scale_y_continuous(
       limits = c(0, y_max),
@@ -306,7 +337,7 @@ graficar_barras_numericas <- function(
   if (isTRUE(mostrar_valores)) {
 
     if (!requireNamespace("scales", quietly = TRUE)) {
-      stop("Para etiquetas numéricas se requiere 'scales'.", call. = FALSE)
+      stop("Para etiquetas numericas se requiere 'scales'.", call. = FALSE)
     }
 
     df_lab <- df_long
@@ -347,7 +378,7 @@ graficar_barras_numericas <- function(
               group = ".serie"
             ),
             inherit.aes = FALSE,
-            position    = ggplot2::position_dodge(width = 0.7),
+            position    = ggplot2::position_dodge(width = grupo_ancho),
             vjust       = 0.5,
             hjust       = 0.5,
             color       = color_texto_barras_interno,
@@ -371,7 +402,7 @@ graficar_barras_numericas <- function(
               group = ".serie"
             ),
             inherit.aes = FALSE,
-            position    = ggplot2::position_dodge(width = 0.7),
+            position    = ggplot2::position_dodge(width = grupo_ancho),
             vjust       = 0,
             hjust       = 0.5,
             color       = color_texto_barras_externo,
@@ -396,7 +427,7 @@ graficar_barras_numericas <- function(
               group = ".serie"
             ),
             inherit.aes = FALSE,
-            position    = ggplot2::position_dodge(width = 0.7),
+            position    = ggplot2::position_dodge(width = grupo_ancho),
             hjust       = 0.5,
             vjust       = 0.5,
             color       = color_texto_barras_interno,
@@ -420,7 +451,7 @@ graficar_barras_numericas <- function(
               group = ".serie"
             ),
             inherit.aes = FALSE,
-            position    = ggplot2::position_dodge(width = 0.7),
+            position    = ggplot2::position_dodge(width = grupo_ancho),
             hjust       = 0,
             vjust       = 0.5,
             color       = color_texto_barras_externo,
@@ -433,11 +464,11 @@ graficar_barras_numericas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 4) N encima de cada barra (opcional) — por serie y categoría
+  # 4) N encima de cada barra (opcional)  -  por serie y categoria
   # ---------------------------------------------------------------------------
   if (isTRUE(mostrar_n_sobre_barras) && !is.null(var_n) && nzchar(var_n) && var_n %in% names(data)) {
 
-    # df base por categoría
+    # df base por categoria
     df_n <- data |>
       dplyr::select(dplyr::all_of(c(var_categoria, var_n))) |>
       dplyr::distinct()
@@ -445,7 +476,7 @@ graficar_barras_numericas <- function(
     # asegurar niveles iguales al panel
     df_n[[var_categoria]] <- factor(df_n[[var_categoria]], levels = levels(df_long[[var_categoria]]))
 
-    # valor máximo por (categoría, serie) para ubicar N encima de cada barra
+    # valor maximo por (categoria, serie) para ubicar N encima de cada barra
     df_top <- df_long |>
       dplyr::group_by(.data[[var_categoria]], .data$.serie) |>
       dplyr::summarise(.valor_max = max(.data$.valor, na.rm = TRUE), .groups = "drop")
@@ -467,7 +498,7 @@ graficar_barras_numericas <- function(
           group = ".serie"
         ),
         inherit.aes = FALSE,
-        position    = ggplot2::position_dodge(width = 0.7),
+        position    = ggplot2::position_dodge(width = ancho_barras + 0.1),
         vjust       = 0,
         hjust       = 0.5,
         size        = size_n_sobre_barras,
@@ -481,7 +512,7 @@ graficar_barras_numericas <- function(
     p <- p + ggplot2::scale_fill_manual(values = colores_series)
   }
 
-  # Wrap categorías
+  # Wrap categorias
   if (!is.null(ancho_max_eje_cat)) {
     if (!requireNamespace("stringr", quietly = TRUE)) {
       stop("Para usar `ancho_max_eje_cat` se requiere 'stringr'.", call. = FALSE)
@@ -489,7 +520,7 @@ graficar_barras_numericas <- function(
     if (orientacion == "vertical") {
       p <- p + ggplot2::scale_x_discrete(labels = function(x) stringr::str_wrap(x, width = ancho_max_eje_cat))
     } else {
-      # en horizontal, tras coord_flip, el eje de categorías es y
+      # en horizontal, tras coord_flip, el eje de categorias es y
       p <- p + ggplot2::scale_x_discrete(labels = function(x) stringr::str_wrap(x, width = ancho_max_eje_cat))
     }
   }
@@ -556,11 +587,18 @@ graficar_barras_numericas <- function(
 
   # Leyenda: filas
   n_items_leyenda <- length(levels(df_long$.serie))
-  n_filas_leyenda <- max(1L, ceiling(n_items_leyenda / 5L))
+  n_por_fila_use  <- suppressWarnings(as.integer(legend_n_por_fila)[1])
+  n_por_fila_use  <- if (!is.na(n_por_fila_use) && n_por_fila_use >= 1L) n_por_fila_use else 5L
+  n_filas_leyenda <- max(1L, ceiling(n_items_leyenda / n_por_fila_use))
   if (mostrar_leyenda) {
     p <- p +
       ggplot2::guides(
-        fill = ggplot2::guide_legend(nrow = n_filas_leyenda, reverse = invertir_leyenda)
+        fill = ggplot2::guide_legend(
+          nrow      = n_filas_leyenda,
+          reverse   = invertir_leyenda,
+          keywidth  = grid::unit(legend_key_cm, "cm"),
+          keyheight = grid::unit(legend_key_cm, "cm")
+        )
       )
   }
 
@@ -595,7 +633,12 @@ graficar_barras_numericas <- function(
     if (mostrar_leyenda && n_items_leyenda > 0) {
       leg <- cowplot::get_legend(
         p + ggplot2::theme(
-          legend.position = "bottom",
+          legend.position  = "bottom",
+          legend.text      = ggplot2::element_text(
+            color  = color_leyenda,
+            size   = size_leyenda,
+            margin = ggplot2::margin(l = legend_text_gap, r = legend_espaciado, unit = "pt")
+          ),
           plot.margin = ggplot2::margin(0, 0, 0, 0)
         )
       )
@@ -607,17 +650,17 @@ graficar_barras_numericas <- function(
       plot.margin     = ggplot2::margin(6, 6, 6, 6)
     )
 
-    # --- Bloque título/subtítulo (CENTRADOS dentro del placeholder, sin solaparse) ---
+    # --- Bloque titulo/subtitulo (CENTRADOS dentro del placeholder, sin solaparse) ---
     x_t <- switch(pos_titulo, "izquierda" = 0, "centro" = 0.5, "derecha" = 1, 0.5)
     h_t <- switch(pos_titulo, "izquierda" = 0, "centro" = 0.5, "derecha" = 1, 0.5)
 
     # Centro vertical del placeholder
     y_mid <- 0.50
 
-    # Separación vertical (relativa al placeholder). 0.16–0.20 suele ir bien.
+    # Separacion vertical (relativa al placeholder). 0.16-0.20 suele ir bien.
     title_gap <- 0.18
 
-    # Si no hay subtítulo, el título va al centro exacto
+    # Si no hay subtitulo, el titulo va al centro exacto
     tiene_sub <- !is.null(subtitulo) && nzchar(subtitulo)
 
     y_title <- if (tiene_sub) y_mid + title_gap/2 else y_mid
@@ -674,7 +717,7 @@ graficar_barras_numericas <- function(
   }
 
   # ---------------------------------------------------------------------------
-  # 6) Exportación (con p_final)
+  # 6) Exportacion (con p_final)
   # ---------------------------------------------------------------------------
   if (exportar == "rplot") return(p_final)
 

@@ -1,0 +1,1024 @@
+---
+title: "Guía aplicada de entregables"
+subtitle: "Libro de códigos, base para SPSS, tablas de frecuencias y cruces y reporte de producción de enumeradores"
+date: today
+date-format: long
+title-block-style: none
+lang: es
+format:
+  typst:
+    papersize: a4
+    margin:
+      x: 1.9cm
+      top: 2.7cm
+      bottom: 2.2cm
+    fontsize: 10pt
+    include-in-header:
+      - files_manuales/typst/manuales_base.typ
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| include: false
+manual_dir <- normalizePath(dirname(knitr::current_input()), winslash = "/")
+manual_file <- function(...) file.path(manual_dir, "files_manuales", ...)
+manual_qmd <- basename(knitr::current_input())
+
+if (!requireNamespace("prosecnur", quietly = TRUE)) {
+  stop("Instale o cargue `prosecnur` antes de renderizar esta guía.", call. = FALSE)
+}
+
+library(prosecnur)
+
+manual_fecha_humana <- local({
+  meses <- c(
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+  )
+  hoy <- Sys.Date()
+  paste0(
+    as.integer(format(hoy, "%d")), " de ",
+    meses[as.integer(format(hoy, "%m"))], " de ",
+    format(hoy, "%Y")
+  )
+})
+```
+
+```{r}
+#| echo: false
+#| results: asis
+cat("```{=typst}\n")
+cat("#set page(\n")
+cat("  header: context [\n")
+cat("    #grid(\n")
+cat("      columns: (1fr, auto),\n")
+cat("      gutter: 8pt,\n")
+cat("      align: center + horizon,\n")
+cat("      [#text(fill: rgb(56, 84, 112), size: 8pt, weight: \"bold\")[Guía aplicada de entregables]],\n")
+cat("      [#image(\"files_manuales/img/logo_pulso.png\", width: 1.45cm)],\n")
+cat("    )\n")
+cat("    #v(0.15cm)\n")
+cat("    #line(length: 100%, stroke: (paint: rgb(196, 207, 219), thickness: 0.8pt))\n")
+cat("  ],\n")
+cat("  footer: context [\n")
+cat("    #align(right)[#text(fill: rgb(94, 116, 140), size: 8pt)[#counter(page).display()]]\n")
+cat("  ],\n")
+cat(")\n\n")
+cat("#block(\n")
+cat("  width: 100%,\n")
+cat("  inset: (x: 14pt, y: 12pt),\n")
+cat("  fill: rgb(246, 248, 251),\n")
+cat("  stroke: (paint: rgb(196, 207, 219), thickness: 1pt),\n")
+cat("  radius: 8pt,\n")
+cat(")[\n")
+cat("  #grid(\n")
+cat("    columns: (1.45fr, auto),\n")
+cat("    gutter: 10pt,\n")
+cat("    align: center + horizon,\n")
+cat("    [\n")
+cat("      #text(fill: rgb(26, 74, 122), size: 17pt, weight: \"bold\")[Guía aplicada de entregables]\n")
+cat("      #v(0.18cm)\n")
+cat("      #text(fill: rgb(56, 84, 112), size: 10pt)[Libro de códigos, base para SPSS, tablas de frecuencias y cruces y reporte de producción de enumeradores]\n")
+cat("      #v(0.22cm)\n")
+cat("      #text(fill: rgb(94, 116, 140), size: 8.8pt, style: \"italic\")[Actualizado el ", manual_fecha_humana, "]\n", sep = "")
+cat("    ],\n")
+cat("    [#image(\"files_manuales/img/logo_pulso.png\", width: 2.4cm)],\n")
+cat("  )\n")
+cat("]\n")
+cat("```\n")
+```
+
+```{r}
+#| include: false
+rep_dir <- manual_file("data_ejemplo", "reportes")
+
+data_cruda_demo <- readxl::read_excel(file.path(rep_dir, "OPS_DATA_FINAL.xlsx"))
+rp_inst_demo <- reporte_instrumento(
+  path = file.path(rep_dir, "OPS_INST_FINAL.xlsx"),
+  listas_ordinales = c(
+    "poblacion_mensual", "trato_discriminatorio", "frecuencia",
+    "rango_atencion", "p103_recod_lista", "p118_recod_lista",
+    "p125_recod_lista"
+  ),
+  vars_fecha = "fecha_visita",
+  vars_hora = c("hora_inicio", "hora_fin")
+)
+rp_data_demo <- reporte_data(data_cruda_demo, rp_inst_demo)
+
+path_codebook_demo <- tempfile("codebook_", fileext = ".xlsx")
+reporte_codebook(rp_data_demo, path_xlsx = path_codebook_demo)
+
+path_sav_demo <- tempfile("reporte_", fileext = ".sav")
+path_sps_demo <- tempfile("niveles_", fileext = ".sps")
+reporte_spss(rp_data_demo, path_sav = path_sav_demo, path_sps = path_sps_demo)
+
+secciones_demo <- list(
+  "Perfil general" = c("region", "p102", "p112"),
+  "Capacidad declarada" = c("p103_a_recod", "p103_b_recod", "p103_c_recod")
+)
+
+path_freq_demo <- tempfile("frecuencias_", fileext = ".xlsx")
+reporte_frecuencias(
+  data = rp_data_demo,
+  instrumento = rp_inst_demo,
+  secciones = secciones_demo,
+  path_xlsx = path_freq_demo
+)
+
+path_cruces_demo <- tempfile("cruces_", fileext = ".xlsx")
+reporte_cruces(
+  data = rp_data_demo,
+  instrumento = rp_inst_demo,
+  SECCIONES = secciones_demo,
+  cruces = "region",
+  modo = "estandar",
+  path_xlsx = path_cruces_demo
+)
+```
+
+```{=typst}
+#set table(
+  inset: (x: 6pt, y: 4pt),
+)
+
+#show table.cell.where(y: 0): it => {
+  set table.cell(fill: rgb(26, 74, 122))
+  set text(fill: white, weight: "bold")
+  it
+}
+
+#let manual_node(fill_color, stroke_color, label) = block(
+  width: 100%,
+  inset: (x: 8pt, y: 6pt),
+  fill: fill_color,
+  stroke: (paint: stroke_color, thickness: 1.2pt),
+  radius: 4pt,
+)[
+  #align(center + horizon)[#text(weight: "bold", size: 8.3pt)[#label]]
+]
+
+#let manual_node_soft(fill_color, stroke_color, label) = block(
+  width: 100%,
+  inset: (x: 8pt, y: 6pt),
+  fill: fill_color,
+  stroke: (paint: stroke_color, thickness: 0.9pt),
+  radius: 4pt,
+)[
+  #align(center + horizon)[#text(weight: "bold", size: 7.8pt, fill: rgb(92, 104, 118))[#label]]
+]
+
+#let manual_title(label) = align(center)[
+  #block(
+    inset: (x: 10pt, y: 4pt),
+    fill: rgb(237, 243, 250),
+    stroke: (paint: rgb(122, 151, 184), thickness: 1pt),
+    radius: 4pt,
+  )[
+    #text(fill: rgb(26, 74, 122), weight: "bold")[#label]
+  ]
+]
+
+#let manual_note(label) = align(center)[
+  #block(
+    width: 88%,
+    inset: (x: 10pt, y: 8pt),
+    fill: rgb(246, 248, 251),
+    stroke: (paint: rgb(157, 178, 201), thickness: 1pt),
+    radius: 4pt,
+  )[
+    #text(fill: rgb(53, 83, 111))[#label]
+  ]
+]
+
+#let manual_arrow = align(center + horizon)[
+  #text(fill: rgb(94, 116, 140), weight: "bold", size: 12pt)[→]
+]
+
+#let manual_down = align(center + horizon)[
+  #text(fill: rgb(94, 116, 140), weight: "bold", size: 12pt)[↓]
+]
+```
+
+# Para qué sirven los entregables estandarizados
+
+Cuando un estudio termina las fases de validación, limpieza y codificación de
+variables abiertas, la base de datos y el instrumento quedan listos para la
+producción de entregables. Dentro de `prosecnur`, las funciones de la familia
+`rp_*` y las funciones `reporte_*` concentran esta etapa del flujo. La lógica
+de trabajo gira alrededor de dos insumos centrales en su versión final: la base
+adaptada y el instrumento adaptado. En esta etapa ya se trabaja con la variante de
+reporte del flujo `rp_*`: el instrumento se consolida en `rp_inst` y la base
+adaptada se consolida en `rp_data`. A partir de esos objetos se generan las
+salidas finales.
+
+Los cinco productos que cubre esta guía son:
+
+- **Codebook**: un Excel que documenta cada variable con su etiqueta, tipo de
+  medición y lista de opciones válidas. Es la referencia técnica del estudio.
+- **SPSS**: un archivo `.sav` (la base con etiquetas) y un `.sps` (la sintaxis
+  para niveles de medición y formatos). Queda listo para abrirse en SPSS.
+- **Frecuencias**: un Excel con tablas descriptivas organizadas por secciones
+  temáticas. Muestra conteos y porcentajes para cada variable.
+- **Cruces**: un Excel con tabulaciones cruzadas donde cada variable se
+  desglosa por una variable de comparación, por ejemplo región.
+- **Enumeradores**: un PDF con tablas de seguimiento de producción por
+  encuestador, útil después del trabajo de campo.
+
+# Dónde estamos en el paquete
+
+Esta guía se ubica en la zona de **reportes y entregables** del paquete. Se
+asume que ya se dispone de un instrumento adaptado y de una base adaptada para
+el flujo de reporte. El trabajo central consiste en convertir `rp_inst` y
+`rp_data` en entregables más cercanos a anexos, tablas y salidas
+documentales.
+
+```{=typst}
+#manual_title([Ubicación de esta guía dentro del paquete])
+#v(0.45em)
+#grid(
+  columns: (1fr, auto, 1fr, auto, 1fr, auto, 1fr, auto, 1fr, auto, 1fr),
+  gutter: 6pt,
+  align: center + horizon,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [Origen]),
+  manual_arrow,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [Ingreso]),
+  manual_arrow,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [Validación]),
+  manual_arrow,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [Codificación]),
+  manual_arrow,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [Adaptación]),
+  manual_arrow,
+  manual_node(rgb(255, 241, 201), rgb(200, 148, 0), [Reportes]),
+)
+#v(0.45em)
+#grid(
+  columns: (1fr, 1fr),
+  gutter: 10pt,
+  align: center + horizon,
+  manual_node(rgb(255, 244, 216), rgb(200, 148, 0), [Anexos y tablas \
+  Foco de esta guía]),
+  manual_node_soft(rgb(246, 248, 251), rgb(188, 197, 206), [PPT · Word · dashboard \
+  Otra capa del paquete]),
+)
+#v(0.4em)
+#manual_note([
+  Esta guía parte de una base y un instrumento ya adaptados y se concentra en
+  reportes documentales, tabulares y operativos. Las salidas editoriales o
+  visuales más amplias existen, pero quedan fuera del foco principal.
+])
+```
+
+La idea central es simple: la base no se prepara una vez por cada producto.
+Primero se organiza el instrumento, después se organiza la base y recién a
+partir de ahí se generan los entregables.
+
+```{=typst}
+#manual_title([Arquitectura de objetos y salidas])
+#v(0.45em)
+#grid(
+  columns: (1fr, auto, 1fr, auto, 1fr, auto, 1fr),
+  gutter: 6pt,
+  align: center + horizon,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [Instrumento adaptado]),
+  manual_arrow,
+  manual_node(rgb(237, 243, 250), rgb(74, 120, 194), [reporte_instrumento()]),
+  manual_arrow,
+  manual_node(rgb(237, 243, 250), rgb(74, 120, 194), [rp_inst]),
+  manual_arrow,
+  manual_node(rgb(255, 244, 216), rgb(200, 148, 0), [Carril de anexos]),
+)
+#v(0.35em)
+#grid(
+  columns: (1fr, auto, 1fr, auto, 1fr, auto, 1fr),
+  gutter: 6pt,
+  align: center + horizon,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [Base adaptada]),
+  manual_arrow,
+  manual_node(rgb(237, 243, 250), rgb(74, 120, 194), [reporte_data()]),
+  manual_arrow,
+  manual_node(rgb(237, 243, 250), rgb(74, 120, 194), [rp_data]),
+  manual_arrow,
+  manual_node(rgb(239, 229, 248), rgb(111, 60, 143), [Carril operativo]),
+)
+#v(0.45em)
+#manual_note([
+  Todo el esfuerzo de etiquetado, clasificación de variables y asignación de
+  atributos ocurre una sola vez. Después, las funciones de salida consumen
+  objetos ya preparados.
+])
+#v(0.35em)
+#grid(
+  columns: 4,
+  gutter: 7pt,
+  align: center + horizon,
+  manual_node(rgb(231, 244, 228), rgb(47, 138, 70), [reporte_codebook()]),
+  manual_node(rgb(231, 244, 228), rgb(47, 138, 70), [reporte_spss()]),
+  manual_node(rgb(255, 244, 216), rgb(200, 148, 0), [reporte_frecuencias()]),
+  manual_node(rgb(255, 244, 216), rgb(200, 148, 0), [reporte_cruces()]),
+)
+#v(0.3em)
+#grid(
+  columns: (1fr, 1fr),
+  gutter: 10pt,
+  align: center + horizon,
+  manual_node(rgb(239, 229, 248), rgb(111, 60, 143), [reporte_enumeradores() \
+  PDF por modalidad y cortes]),
+  manual_node_soft(rgb(246, 248, 251), rgb(188, 197, 206), [Otras salidas del paquete \
+  PPT · Word · dashboard]),
+)
+```
+
+La forma del flujo es intencional: muchas decisiones convergen en los mismos
+dos objetos de preparación y, desde allí, se abren múltiples salidas. Si cambia
+la base porque se agregan registros o se corrige un dato, basta con volver a
+ejecutar `reporte_data()` y regenerar las salidas necesarias. Si cambia el
+instrumento porque se ajustan etiquetas, se retiran instrucciones heredadas del
+XLSForm o se actualizan metadatos de cara al cliente, conviene regenerar
+`reporte_instrumento()` y luego reconstruir `rp_data` antes de volver a exportar
+los entregables.
+
+Esta guía deja fuera dimensiones, dashboard, interactivos y productos
+editoriales más complejos. Aquí se trabaja con cinco salidas muy operativas:
+
+| Salida | Formato final | Cuándo conviene usarla |
+|------------------------|------------------------|------------------------|
+| `reporte_codebook()` | Excel | Para documentar variables y categorías |
+| `reporte_spss()` | `.sav` + `.sps` | Para compartir la base en SPSS |
+| `reporte_frecuencias()` | Excel | Para tablas de frecuencia |
+| `reporte_cruces()` | Excel | Para tablas por variable de cruce |
+| `reporte_enumeradores()` | PDF | Para reporte final de producción de campo |
+
+# Qué archivos usa el ejemplo
+
+El ejemplo parte de dos archivos porque los entregables combinan estructura y
+datos observados. El instrumento final define nombres, labels, tipos de
+pregunta, listas y órdenes. La base final aporta los registros concretos que se
+quieren documentar, tabular o exportar. Sin esos dos insumos, la etapa de
+reportes queda incompleta.
+
+```{r}
+list.files(manual_file("data_ejemplo", "reportes"))
+```
+
+La lógica práctica del ejemplo es la siguiente:
+
+- el XLSX del instrumento alimenta `reporte_instrumento()`;
+- el XLSX de la base alimenta `reporte_data()`.
+
+**`OPS_INST_FINAL.xlsx`** es el instrumento adaptado en formato XLSForm.
+Contiene las hojas `survey` (con cada pregunta, su tipo y sus etiquetas) y
+`choices` (con cada opción de respuesta, su código y su etiqueta). El sufijo
+"FINAL" indica que ya pasó por el flujo de codificación.
+
+**`OPS_DATA_FINAL.xlsx`** es la base adaptada con los datos reales del estudio.
+Cada fila corresponde a un registro y cada columna corresponde a una variable,
+incluidas las columnas `_recod` generadas durante la codificación.
+
+# Paso 1. Preparar el instrumento de reporte
+
+`reporte_instrumento()` convierte el instrumento final en un objeto de trabajo
+que contiene labels, tipos de pregunta y detalles de medición.
+
+En términos concretos, esta función lee el XLSForm y construye un diccionario
+interno. Detecta automáticamente la columna de etiquetas, construye tablas de
+correspondencia entre códigos y etiquetas en ambas direcciones, determina qué
+tipo de medición le corresponde a cada variable y organiza el orden de las
+opciones de respuesta para cada pregunta.
+
+El resultado es un objeto de clase `prosecnur_instrumento` que las funciones
+siguientes consultan para rotular, ordenar y formatear cada variable en los
+entregables.
+
+```{r}
+#| eval: false
+library(prosecnur)
+library(readxl)
+
+# Leer la base cruda que después se convertirá en rp_data.
+data_cruda <- read_excel("files_manuales/data_ejemplo/reportes/OPS_DATA_FINAL.xlsx")
+
+# Construir el objeto instrumento que funcionará como diccionario.
+rp_inst <- reporte_instrumento(
+  # Ruta al instrumento o XLSForm final.
+  path = "files_manuales/data_ejemplo/reportes/OPS_INST_FINAL.xlsx",
+
+  # Listas que deben tratarse como ordinales.
+  listas_ordinales = c(
+    "poblacion_mensual", "trato_discriminatorio", "frecuencia",
+    "rango_atencion", "p103_recod_lista", "p118_recod_lista",
+    "p125_recod_lista"
+  ),
+
+  # Variables de fecha (opcional).
+  vars_fecha = "fecha_visita",
+
+  # Variables de hora (opcional).
+  vars_hora = c("hora_inicio", "hora_fin")
+)
+```
+
+`rp_inst` funciona como el diccionario que acompaña a la base. A partir de este
+objeto, los entregables siguientes ya saben cómo rotular y ordenar mejor las
+variables.
+
+**`listas_ordinales`** es uno de los parámetros más importantes después de la
+ruta. Conviene leerlo en tres ideas cortas:
+
+- **Qué resuelve.** Por defecto, el paquete trata todas las variables
+  `select_one` como nominales, es decir, categorías sin orden intrínseco.
+- **Cuándo se usa.** Debe declararse cuando una lista representa una escala,
+  por ejemplo frecuencia ("nunca, a veces, siempre"), acuerdo ("muy en
+  desacuerdo, en desacuerdo, de acuerdo, muy de acuerdo") o satisfacción
+  ("insatisfecho, neutral, satisfecho").
+- **Qué efecto tiene.** Cuando una lista se declara como ordinal, el paquete
+  asigna la medición `"ordinal"` a todas las variables que la usan y las
+  funciones posteriores preservan el orden original de las opciones en lugar de
+  ordenar por frecuencia o alfabéticamente.
+
+Para identificar qué listas son ordinales, conviene revisar la hoja `choices`
+del instrumento. Allí deben buscarse listas cuyos códigos representen una
+escala, por ejemplo 1 = nunca, 2 = a veces, 3 = frecuentemente, 4 = siempre. El
+valor que se pasa a `listas_ordinales` es el `list_name` de esa lista, no el
+nombre de la variable.
+
+**`vars_fecha`** y **`vars_hora`** indican qué columnas contienen fechas y
+horas. Estas variables reciben un tratamiento especial: se excluyen de las
+tablas de frecuencias, porque no suele tener sentido contar la frecuencia de
+cada fecha única, y se formatean correctamente en las exportaciones SPSS.
+
+# Paso 2. Preparar la base de reporte
+
+`reporte_data()` toma la base original y la deja lista para salidas
+estandarizadas. Es el punto en que la base deja de ser "solo datos" y pasa a
+ser una base preparada para reportar.
+
+Internamente, la función asigna atributos a cada columna de la base usando la
+información del diccionario. Para cada variable:
+
+- asigna un atributo `label` con el texto de la pregunta, por ejemplo
+  "¿Cuál es la región del establecimiento?";
+- para variables `select_one`, asigna un atributo `labels` con la
+  correspondencia entre códigos y etiquetas, por ejemplo `1 = "Norte"` y
+  `2 = "Sur"`;
+- asigna un atributo `measure` con el nivel de medición sugerido:
+  `"nominal"`, `"ordinal"` o `"scale"`.
+
+Además, transforma las variables `select_multiple`: las descompone en columnas
+dummy, una por opción, con valores 1 = seleccionó, 0 = no seleccionó y
+`NA = no respondió la pregunta`, y elimina la columna madre original. Las
+columnas dummy se nombran con el patrón `variable.codigo`, por ejemplo
+`servicios.1` y `servicios.2`.
+
+El resultado es un tibble con clase adicional `prosecnur_reporte_tbl` que lleva
+el instrumento como atributo incorporado. Esto hace que, en la mayoría de los
+casos, las funciones siguientes no necesiten recibir el instrumento por
+separado.
+
+```{r}
+#| eval: false
+rp_data <- reporte_data(
+  # Base ya adaptada para reporte.
+  data = data_cruda,
+
+  # Instrumento ya procesado.
+  instrumento = rp_inst
+)
+```
+
+```{=typst}
+#manual_title([Responsabilidades por función en esta etapa])
+#v(0.45em)
+#grid(
+  columns: (1fr, 1fr),
+  gutter: 10pt,
+  align: center + horizon,
+  manual_node(rgb(237, 243, 250), rgb(74, 120, 194), [reporte_instrumento() \
+  Lee `survey` y `choices` \
+  Detecta labels \
+  Arma diccionarios y reglas de medida]),
+  manual_node(rgb(237, 243, 250), rgb(74, 120, 194), [reporte_data() \
+  Aplica `label`, `labels` y `measure` \
+  Normaliza `select_one` y `select_multiple` \
+  Deja la base lista para exportación]),
+)
+#v(0.35em)
+#grid(
+  columns: (1fr, auto, 1fr),
+  gutter: 8pt,
+  align: center + horizon,
+  manual_node(rgb(255, 244, 216), rgb(200, 148, 0), [Funciones de salida \
+  Documentan, tabulan o exportan]),
+  manual_arrow,
+  manual_node_soft(rgb(246, 248, 251), rgb(188, 197, 206), [No rehacen la preparación \
+  Consumen objetos ya resueltos]),
+)
+```
+
+# Todas las salidas del paquete
+
+| Si se necesita... | Se usa esta función | El archivo final suele ser... |
+|----|----|----|
+| Documentación de variables | `reporte_codebook()` | un Excel |
+| Entrega para SPSS | `reporte_spss()` | `.sav` y `.sps` |
+| Descriptivos básicos | `reporte_frecuencias()` | un Excel |
+| Cruces | `reporte_cruces()` | un Excel |
+| Producción de enumeradores | `reporte_enumeradores()` | un PDF |
+
+```{=typst}
+#manual_title([Qué función usar según el entregable])
+#v(0.45em)
+#grid(
+  columns: (1.25fr, auto, 1fr),
+  gutter: 8pt,
+  align: center + horizon,
+  manual_node(rgb(231, 244, 228), rgb(47, 138, 70), [Documentar variables]),
+  manual_arrow,
+  manual_node(rgb(249, 252, 248), rgb(47, 138, 70), [reporte_codebook()]),
+)
+#v(0.25em)
+#grid(
+  columns: (1.25fr, auto, 1fr),
+  gutter: 8pt,
+  align: center + horizon,
+  manual_node(rgb(231, 244, 228), rgb(47, 138, 70), [Entregar base en SPSS]),
+  manual_arrow,
+  manual_node(rgb(249, 252, 248), rgb(47, 138, 70), [reporte_spss()]),
+)
+#v(0.25em)
+#grid(
+  columns: (1.25fr, auto, 1fr),
+  gutter: 8pt,
+  align: center + horizon,
+  manual_node(rgb(255, 244, 216), rgb(200, 148, 0), [Producir anexos descriptivos]),
+  manual_arrow,
+  manual_node(rgb(255, 251, 240), rgb(200, 148, 0), [reporte_frecuencias()]),
+)
+#v(0.25em)
+#grid(
+  columns: (1.25fr, auto, 1fr),
+  gutter: 8pt,
+  align: center + horizon,
+  manual_node(rgb(255, 244, 216), rgb(200, 148, 0), [Comparar resultados entre grupos]),
+  manual_arrow,
+  manual_node(rgb(255, 251, 240), rgb(200, 148, 0), [reporte_cruces()]),
+)
+#v(0.25em)
+#grid(
+  columns: (1.25fr, auto, 1fr),
+  gutter: 8pt,
+  align: center + horizon,
+  manual_node(rgb(239, 229, 248), rgb(111, 60, 143), [Cerrar reporte operativo de campo]),
+  manual_arrow,
+  manual_node(rgb(251, 248, 254), rgb(111, 60, 143), [reporte_enumeradores()]),
+)
+#v(0.4em)
+#manual_note([
+  Esta guía cubre el carril de anexos, exportación y cierre operativo. Otros
+  productos del paquete, como PPT, Word o dashboard, existen en otra capa.
+])
+```
+
+En un proyecto típico, los entregables no se generan todos al mismo tiempo. El
+codebook suele producirse primero como referencia interna. El SPSS se genera
+cuando se solicita esa entrega. Las frecuencias suelen ser la primera lectura
+analítica. Los cruces aparecen cuando el análisis se profundiza. El reporte de
+enumeradores suele tener sentido al final del trabajo de campo.
+
+# Salida 1. Codebook
+
+```{=typst}
+#manual_title([Flujo de esta salida])
+#v(0.3em)
+#grid(
+  columns: (1fr, auto, 1fr, auto, 1fr),
+  gutter: 8pt,
+  align: center + horizon,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [rp_data \
+  labels + códigos]),
+  manual_arrow,
+  manual_node(rgb(231, 244, 228), rgb(47, 138, 70), [reporte_codebook()]),
+  manual_arrow,
+  manual_node(rgb(249, 252, 248), rgb(47, 138, 70), [Excel \
+  libro de códigos]),
+)
+```
+
+Un codebook, también llamado libro de códigos o diccionario de datos, es un
+documento de referencia que describe cada variable de la base de datos. Si otra
+persona recibe la base y necesita entender qué significa la columna
+`p103_a_recod`, qué códigos tiene, qué etiqueta corresponde a cada código y qué
+tipo de medición se le asignó, esa información se encuentra en el codebook.
+
+El Excel que genera `reporte_codebook()` tiene un formato estandarizado. Para
+cada variable, crea un bloque visual que incluye:
+
+- el nombre de la variable en cursiva;
+- la etiqueta de la pregunta;
+- una tabla de valores válidos con cada código y su etiqueta correspondiente.
+
+Los bloques están separados por bordes y espaciado para facilitar la lectura.
+En condiciones normales, el codebook documenta variables y categorías. Si en
+algún caso llegaran a aparecer estadísticas descriptivas para una variable
+numérica continua dentro del codebook, eso debería leerse como una anomalía del
+paquete y no como el comportamiento esperado de esta salida.
+
+La función tiene un parámetro llamado `codigos_solo_si_presentes` que resulta
+especialmente útil para manejar códigos especiales como 97 ("no aplica"),
+98 ("no responde") y 99 ("rechaza"). Si esos códigos se incluyen en el
+parámetro, solo aparecerán en el codebook cuando realmente existan en la base.
+Así se evita mostrar categorías fantasma que pertenecen a la lista original,
+pero que no se presentan en la data observada. Por ejemplo, si muchas variables
+usan una lista que contiene la opción "No aplica = 97", esa opción se mostrará
+solo en las variables donde efectivamente aparece al menos una vez en la base.
+En las variables que comparten la lista, pero nunca registran ese valor, la
+categoría no se exportará.
+
+```{r}
+#| eval: false
+reporte_codebook(
+  # Base lista para reporte.
+  data = rp_data,
+
+  # Ruta del Excel final.
+  path_xlsx = "codebook_estudio.xlsx"
+)
+```
+
+# Salida 2. SPSS
+
+```{=typst}
+#manual_title([Flujo de esta salida])
+#v(0.3em)
+#grid(
+  columns: (1fr, auto, 1fr, auto, 1fr),
+  gutter: 8pt,
+  align: center + horizon,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [rp_data \
+  tipos + labels]),
+  manual_arrow,
+  manual_node(rgb(231, 244, 228), rgb(47, 138, 70), [reporte_spss()]),
+  manual_arrow,
+  manual_node(rgb(249, 252, 248), rgb(47, 138, 70), [.sav + .sps \
+  entrega SPSS]),
+)
+```
+
+Muchos equipos de investigación trabajan con SPSS como herramienta principal de
+análisis. Para esos equipos, recibir un archivo `.sav` con las variables ya
+etiquetadas y los niveles de medición correctamente asignados representa un
+ahorro significativo de tiempo. Si la entrega final debe abrirse en SPSS, este
+es el paso principal.
+
+`reporte_spss()` produce dos archivos complementarios. El archivo `.sav` es la
+base de datos con todas las etiquetas de variable (`VARIABLE LABELS`) y
+etiquetas de valor (`VALUE LABELS`) ya incorporadas. Cuando un usuario de SPSS
+abre este archivo, ve los nombres de las preguntas y las opciones de respuesta
+en texto legible, no solo códigos numéricos.
+
+El archivo `.sps` es un archivo de sintaxis que complementa al `.sav`. Contiene
+instrucciones para establecer los niveles de medición (`VARIABLE LEVEL`) y los
+formatos de visualización (`FORMATS`) de cada variable. Esa sintaxis puede
+ejecutarse después de abrir el `.sav` para completar la configuración.
+
+```{r}
+#| eval: false
+reporte_spss(
+  # Base lista para exportación.
+  data = rp_data,
+
+  # Archivo principal de SPSS.
+  path_sav = "estudio_final.sav",
+
+  # Archivo complementario para niveles o formatos.
+  path_sps = "estudio_final_niveles.sps"
+)
+```
+
+# Salida 3. Tabla de frecuencias
+
+```{=typst}
+#manual_title([Flujo de esta salida])
+#v(0.3em)
+#grid(
+  columns: (1fr, auto, 1fr, auto, 1fr, auto, 1fr),
+  gutter: 7pt,
+  align: center + horizon,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [rp_data]),
+  manual_arrow,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [rp_inst + secciones]),
+  manual_arrow,
+  manual_node(rgb(255, 244, 216), rgb(200, 148, 0), [reporte_frecuencias()]),
+  manual_arrow,
+  manual_node(rgb(255, 251, 240), rgb(200, 148, 0), [Excel \
+  anexos descriptivos]),
+)
+```
+
+## Qué es una tabla de frecuencias
+
+Una tabla de frecuencias muestra, para cada variable categórica, cuántas veces
+aparece cada opción de respuesta y qué porcentaje del total representa. Es la
+forma más directa de describir la distribución de una variable. Por ejemplo,
+para la variable "región", la tabla podría mostrar: Norte (45 registros, 30%),
+Sur (60 registros, 40%) y Este (45 registros, 30%). Para variables ordinales,
+las opciones aparecen en su orden natural; para nominales, pueden ordenarse por
+frecuencia descendente o según el orden del instrumento.
+
+Para variables numéricas, si se declaran con el parámetro `numericas`, en lugar
+de una tabla de conteos la función genera un resumen estadístico con N, media,
+desviación estándar, mínimo, percentiles 25 y 75, mediana y máximo.
+
+## Qué se necesita antes
+
+Antes de exportar frecuencias, conviene definir bloques o secciones de
+variables. Las secciones organizan las variables del estudio en grupos temáticos
+dentro del Excel de salida. Sin esa agrupación, el archivo se vuelve una lista
+larga de tablas sin estructura.
+
+Una sección se define como un par nombre-variables: el nombre aparece como
+encabezado en el Excel y las variables son las columnas de la base que se
+incluirán en ese bloque. Se pueden crear tantas secciones como haga falta,
+agrupando las variables según la lógica del cuestionario o la lógica del
+análisis.
+
+```{r}
+SECCIONES <- list(
+  "Perfil general" = c("region", "p102", "p112"),
+  "Capacidad declarada" = c("p103_a_recod", "p103_b_recod", "p103_c_recod")
+)
+```
+
+```{r}
+#| eval: false
+reporte_frecuencias(
+  # Base ya preparada.
+  data = rp_data,
+
+  # Instrumento con labels y órdenes.
+  instrumento = rp_inst,
+
+  # Bloques de variables que se reportarán juntas.
+  secciones = SECCIONES,
+
+  # Orden de categorías dentro de cada tabla.
+  orden = "original",
+
+  # Excel final de frecuencias.
+  path_xlsx = "frecuencias_estudio.xlsx"
+)
+```
+
+## Qué aparece en el Excel de salida
+
+El Excel queda organizado por las secciones definidas. Cada sección comienza con
+un encabezado grande y en negrita, seguido de las tablas de frecuencia de cada
+variable incluida. Cada tabla muestra el nombre de la variable, las filas con
+cada opción de respuesta junto a su conteo (`n`) y su porcentaje (`%`), y una
+fila de total.
+
+El parámetro `orden` controla cómo se ordenan las opciones dentro de cada
+tabla: `"desc"` ordena de mayor a menor frecuencia, `"asc"` de menor a mayor y
+`"original"` respeta el orden definido en el instrumento. Para variables
+ordinales, el orden del instrumento suele ser el más apropiado.
+
+Si `secciones = NULL` y el instrumento tiene una columna `section` o `seccion`
+en la hoja `survey`, la función detecta las secciones automáticamente. Esto
+resulta útil cuando el XLSForm ya trae esa estructura.
+
+# Salida 4. Tablas de frecuencia con cruces
+
+```{=typst}
+#manual_title([Flujo de esta salida])
+#v(0.3em)
+#grid(
+  columns: (1fr, auto, 1fr, auto, 1fr, auto, 1fr),
+  gutter: 7pt,
+  align: center + horizon,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [rp_data]),
+  manual_arrow,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [rp_inst + secciones + cruce]),
+  manual_arrow,
+  manual_node(rgb(255, 244, 216), rgb(200, 148, 0), [reporte_cruces()]),
+  manual_arrow,
+  manual_node(rgb(255, 251, 240), rgb(200, 148, 0), [Excel \
+  comparativo]),
+)
+```
+
+## Qué es una tabulación cruzada
+
+Una tabulación cruzada, o cruce, muestra la distribución de una variable
+desglosada por las categorías de otra variable. Si una tabla de frecuencias dice
+"el 40% de los establecimientos reporta trato discriminatorio", una tabulación
+cruzada permite ver, por ejemplo, que en la región Norte el valor es 55% y en
+la región Sur es 28%.
+
+## Qué cambia respecto a frecuencias
+
+La lógica es muy parecida a la de las frecuencias simples, pero ahora además se
+define la variable contra la que se cruzará cada pregunta. Esa variable de cruce
+se pasa en el parámetro `cruces` y aparece como encabezado de columna en cada
+tabla, con una columna por cada categoría más una columna de total. El esquema
+no cambia demasiado: se conserva la lógica de frecuencias y se añade una
+variable de comparación.
+
+Variables como región, sexo, grupo etario o tipo de establecimiento suelen ser
+las más comunes para este tipo de salida. Si la variable de cruce tiene
+demasiadas categorías, por ejemplo municipio con 50 valores, la tabla se vuelve
+muy ancha y difícil de leer.
+
+```{r}
+#| eval: false
+reporte_cruces(
+  # Base ya preparada.
+  data = rp_data,
+
+  # Instrumento con diccionario y órdenes.
+  instrumento = rp_inst,
+
+  # Bloques de variables que entrarán al cruce.
+  SECCIONES = SECCIONES,
+
+  # Variable contra la que se realiza el cruce.
+  cruces = "region",
+
+  # En esta guía solo se usa el modo estándar.
+  # La función también tiene un modo para dimensiones.
+  modo = "estandar",
+
+  # Excel final.
+  path_xlsx = "cruces_estudio.xlsx"
+)
+```
+
+El modo estándar produce tablas de contingencia clásicas: filas con las
+opciones de respuesta, columnas con las categorías de la variable de cruce y,
+en cada celda, el conteo y el porcentaje de columna. Opcionalmente puede
+activarse `show_sig = TRUE`, que aplica pruebas t de Welch con corrección de
+Bonferroni y marca con letras (A, B, C...) las columnas donde las diferencias
+son estadísticamente significativas.
+
+El Excel de salida tiene una estructura de encabezado de tres niveles: el nombre
+de la sección, el texto de la pregunta y los encabezados de columna con cada
+categoría de la variable de cruce más el total.
+
+Existe también un `modo = "dimensiones"` para trabajar con indicadores
+compuestos e índices, valores numéricos de 0 a 100. Ese modo añade semáforos de
+color, brechas entre categorías y una hoja de metodología. Aquí no se cubre
+porque pertenece a una capa de documentación más avanzada.
+
+# Salida 5. Producción de enumeradores
+
+```{=typst}
+#manual_title([Flujo de esta salida])
+#v(0.3em)
+#grid(
+  columns: (1fr, auto, 1fr, auto, 1fr),
+  gutter: 8pt,
+  align: center + horizon,
+  manual_node(rgb(246, 248, 251), rgb(71, 107, 141), [data \
+  enumerador + cortes]),
+  manual_arrow,
+  manual_node(rgb(239, 229, 248), rgb(111, 60, 143), [reporte_enumeradores()]),
+  manual_arrow,
+  manual_node(rgb(251, 248, 254), rgb(111, 60, 143), [PDF final \
+  producción de campo]),
+)
+```
+
+A diferencia de las otras salidas, `reporte_enumeradores()` no produce un Excel
+de tablas sino un PDF ya organizado para seguimiento y circulación.
+
+El reporte de enumeradores responde a una necesidad operativa concreta:
+finalizado el trabajo de campo, conviene saber cuántas encuestas completó cada
+enumerador, si la producción es coherente y si se están cumpliendo las cuotas.
+El resultado es un documento que puede circular directamente por correo o
+usarse en reuniones de coordinación.
+
+El PDF generado incluye indicadores clave, como el total de encuestas y el
+total de enumeradores, una tabla resumen de producción por enumerador y
+secciones desglosadas por cada variable de corte definida. Si el estudio tiene
+múltiples modalidades de recolección, por ejemplo presencial y telefónica, el
+reporte puede generar PDFs separados por modalidad.
+
+```{r}
+#| eval: false
+reporte_enumeradores(
+  # Base en la que ya existe el identificador del enumerador.
+  data = rp_data,
+
+  # Columna que identifica al encuestador.
+  col_enumerador = "nombre_encuestador",
+
+  # Cortes simples que se incluirán dentro del resumen.
+  cols_corte = c("region", "sexo_encuestado_principal"),
+
+  # Ruta del PDF final.
+  output_file = "reporte_enumeradores.pdf",
+
+  # Título principal del documento.
+  titulo = "Producción de enumeradores",
+
+  # Subtítulo explicativo.
+  subtitulo = "Seguimiento por región y sexo principal",
+
+  # Mínimo de encuestas para mostrar un enumerador.
+  min_encuestas = 1
+)
+```
+
+## Entender los parámetros principales
+
+**`col_enumerador`**: columna de la base que identifica a cada encuestador.
+Puede ser un nombre, un código o un identificador único. Es el campo
+obligatorio.
+
+**`cols_corte`**: variables por las que se desglosa la producción. Típicamente
+son variables como región, sexo de la persona encuestada o tipo de
+establecimiento. El reporte mostrará una tabla cruzada de enumerador × categoría
+para cada variable de corte.
+
+**`min_encuestas`**: umbral mínimo de producción para mostrar un enumerador. Si
+hay registros de prueba o enumeradores que solo completaron una encuesta, ese
+filtro permite excluirlos.
+
+**`col_modalidad`** y **`modalidad_reglas`**: si el estudio recolecta datos de
+forma presencial y telefónica, el reporte puede separarse por modalidad. Para
+eso se indica la columna que clasifica la modalidad o se definen reglas de
+clasificación.
+
+En términos operativos, suele ser más útil generar este reporte al final del
+trabajo de campo, cuando ya sirve para revisar productividad, consistencia y
+posibles alertas de cierre.
+
+# Qué revisar cuando hace falta cambiar algo
+
+| Cambio necesario | Lo primero que conviene revisar |
+|------------------------------------|------------------------------------|
+| Nombre o ruta del archivo final | `path_xlsx`, `path_sav`, `path_sps` u `output_file` |
+| Variables incluidas en tablas | `secciones` o `SECCIONES` |
+| Variable de cruce | `cruces` |
+| Tratamiento de ordinales, fechas u horas | `reporte_instrumento()` |
+| Cortes del reporte de enumeradores | `cols_corte` |
+
+# Problemas frecuentes y dónde mirar
+
+| Problema | Primer lugar para revisar |
+|------------------------------------|------------------------------------|
+| `reporte_frecuencias()` no sabe cómo agrupar variables | `secciones` o la estructura del instrumento |
+| El `.sav` no sale como se esperaba | El objeto `rp_data` |
+| El codebook se ve incompleto | Labels y atributos dentro de `rp_data` |
+| El PDF de enumeradores no muestra bien los cortes | `col_enumerador`, `cols_corte` y la existencia real de esas columnas |
+| Variables ordinales en orden incorrecto | `listas_ordinales` en `reporte_instrumento()` |
+| Tablas de frecuencia con filas vacías | La variable puede no existir en los datos |
+| El PDF de enumeradores no renderiza | Quarto y Typst deben estar instalados |
+
+A continuación, más detalle sobre los problemas más comunes:
+
+**Las frecuencias no agrupan las variables.** Si `reporte_frecuencias()` no
+sabe qué variables incluir, lo más probable es que `secciones` sea `NULL` y que
+el instrumento no tenga una columna `section` o `seccion` en la hoja `survey`.
+La solución más directa es definir `secciones` manualmente como una lista
+nombrada.
+
+**El `.sav` no tiene etiquetas.** Conviene revisar que `reporte_data()` haya
+asignado correctamente los atributos `labels` a las variables. Si
+`attr(rp_data$variable, "labels")` devuelve `NULL`, el problema suele estar en
+la correspondencia entre la hoja `choices` del instrumento y los nombres de
+columna de la base.
+
+**El codebook se ve incompleto.** Si faltan variables o las etiquetas aparecen
+vacías, conviene confirmar que `rp_inst$var_labels` contiene las etiquetas
+esperadas. Un instrumento con columnas de etiqueta mal nombradas producirá un
+diccionario incompleto.
+
+**El PDF de enumeradores falla al renderizar.** Esta función usa Quarto con
+backend Typst para generar el PDF. Ambas herramientas deben estar instaladas en
+el sistema. Si Quarto no está disponible, aparecerá un error al intentar
+renderizar.
+
+```{r}
+#| results: asis
+#| echo: false
+source(manual_file("scripts", "diccionario_argumentos.R"))
+
+manual_render_argument_dictionary(
+  qmd_path = knitr::current_input(),
+  package = "prosecnur",
+  prioridad = c(
+    "reporte_instrumento",
+    "reporte_data",
+    "reporte_codebook",
+    "reporte_spss",
+    "reporte_frecuencias",
+    "reporte_cruces",
+    "reporte_enumeradores",
+    "diapo",
+    "reporte_ppt_plan"
+  )
+)
+```

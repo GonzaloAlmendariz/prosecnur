@@ -32,6 +32,13 @@
 #' @param mostrar_chip Si `TRUE`, agrega chip con la media por categoria.
 #' @param color_media,size_media Compatibilidad visual para el chip.
 #' @param cortes_chip,chip_colores,chip_texto_color,chip_decimales,chip_sufijo Estilo del chip.
+#' @param modo_semaforo Modo del semaforo para los chips: `"grupos"`,
+#'   `"degradado_automatico"` o `"degradado_manual"`. `"degradado"` se mantiene
+#'   como alias de compatibilidad hacia `"degradado_automatico"`.
+#' @param semaforo_gradiente_colores,semaforo_gradiente_valores,semaforo_gradiente_limites
+#'   Parametros del gradiente manual para los chips.
+#' @param semaforo_gradiente_segmentos Numero de segmentos internos del
+#'   gradiente automatico.
 #' @param mostrar_n_por_categoria Si `TRUE`, imprime base por categoria.
 #' @param prefijo_n,size_n,color_n Estilo de texto de base.
 #' @param titulo,subtitulo,nota_pie Textos del grafico.
@@ -90,6 +97,11 @@ graficar_media_rango <- function(
     color_media       = "#173B63",
     size_media        = 2.3,
     cortes_chip       = NULL,
+    modo_semaforo     = c("grupos", "degradado_automatico", "degradado_manual", "degradado"),
+    semaforo_gradiente_colores = NULL,
+    semaforo_gradiente_valores = NULL,
+    semaforo_gradiente_limites = NULL,
+    semaforo_gradiente_segmentos = 20L,
     chip_colores      = c(rojo = "#C62828", ambar = "#EF6C00", verde = "#2E7D32"),
     chip_texto_color  = "#FFFFFF",
     chip_decimales    = 1,
@@ -213,6 +225,11 @@ graficar_media_rango <- function(
 
   orientacion <- match.arg(orientacion)
   modo <- match.arg(modo)
+  modo_semaforo <- .dim_normalize_semaforo_modo(modo_semaforo)
+  semaforo_gradiente_segmentos <- .dim_normalize_gradiente_segmentos(
+    semaforo_gradiente_segmentos,
+    default = 20L
+  )
   marker_style <- match.arg(marker_style)
   pos_delta <- match.arg(pos_delta)
   tipo_rango <- match.arg(tipo_rango)
@@ -446,7 +463,12 @@ graficar_media_rango <- function(
       verde = chip_cols[["verde"]]
     ),
     digits = 0,
-    na_color = NA_character_
+    na_color = NA_character_,
+    modo = modo_semaforo,
+    gradiente_colores = semaforo_gradiente_colores,
+    gradiente_valores = semaforo_gradiente_valores,
+    gradiente_limites = semaforo_gradiente_limites,
+    gradiente_segmentos = semaforo_gradiente_segmentos
   )
   delta_abs_round <- abs(round(sum_df$delta_ref, chip_decimales))
   sum_df$delta_label_min <- ifelse(
@@ -484,6 +506,113 @@ graficar_media_rango <- function(
   span_use <- diff(range(ylim_use, na.rm = TRUE))
   if (!is.finite(span_use) || span_use <= 0) span_use <- 10
 
+  .fit_fontsize_pt <- function(label, width_in, height_in,
+                               max_pt = 18, min_pt = 7,
+                               fontface = "plain",
+                               lineheight = 0.95) {
+    if (!is.finite(width_in) || width_in <= 0 || !is.finite(height_in) || height_in <= 0) {
+      return(min_pt)
+    }
+    sizes_try <- seq(max_pt, min_pt, by = -0.25)
+    for (pt in sizes_try) {
+      tg <- grid::textGrob(
+        label,
+        gp = grid::gpar(fontsize = pt, fontface = fontface, lineheight = lineheight)
+      )
+      tw <- suppressWarnings(grid::convertWidth(grid::grobWidth(tg), "in", valueOnly = TRUE))
+      th <- suppressWarnings(grid::convertHeight(grid::grobHeight(tg), "in", valueOnly = TRUE))
+      if (is.finite(tw) && is.finite(th) && tw <= width_in && th <= height_in) {
+        return(pt)
+      }
+    }
+    min_pt
+  }
+
+  .build_ref_slot_grob <- function(box_w_in, box_h_in,
+                                   top_label, chip_label,
+                                   box_fill, box_border,
+                                   top_colour, chip_fill,
+                                   chip_text_colour) {
+    if (!is.finite(box_w_in) || box_w_in <= 0) box_w_in <- 1
+    if (!is.finite(box_h_in) || box_h_in <= 0) box_h_in <- 1
+
+    label_w_in <- box_w_in * 0.80
+    label_h_in <- box_h_in * 0.34
+    chip_max_w_in <- box_w_in * 0.54
+    chip_h_in <- box_h_in * 0.26
+
+    top_pt <- .fit_fontsize_pt(
+      top_label,
+      width_in = label_w_in,
+      height_in = label_h_in,
+      max_pt = max(11, size_ejes * 2.0),
+      min_pt = max(7, size_ejes * 0.90),
+      fontface = "bold",
+      lineheight = 0.88
+    )
+
+    chip_pt <- .fit_fontsize_pt(
+      chip_label,
+      width_in = chip_max_w_in * 0.62,
+      height_in = chip_h_in * 0.56,
+      max_pt = max(10, size_media * 3.7),
+      min_pt = max(8, size_media * 2.6),
+      fontface = "bold",
+      lineheight = 0.95
+    )
+
+    chip_tg <- grid::textGrob(
+      chip_label,
+      gp = grid::gpar(fontsize = chip_pt, fontface = "bold", col = chip_text_colour)
+    )
+    chip_text_w_in <- suppressWarnings(grid::convertWidth(grid::grobWidth(chip_tg), "in", valueOnly = TRUE))
+    chip_text_h_in <- suppressWarnings(grid::convertHeight(grid::grobHeight(chip_tg), "in", valueOnly = TRUE))
+    if (!is.finite(chip_text_w_in) || chip_text_w_in <= 0) chip_text_w_in <- chip_max_w_in * 0.42
+    if (!is.finite(chip_text_h_in) || chip_text_h_in <= 0) chip_text_h_in <- chip_h_in * 0.55
+
+    chip_w_in <- min(chip_max_w_in, max(box_w_in * 0.30, chip_text_w_in + box_w_in * 0.08))
+    chip_h_in <- min(box_h_in * 0.30, max(box_h_in * 0.20, chip_text_h_in + box_h_in * 0.06))
+
+    chip_w_npc <- max(0.24, min(0.62, chip_w_in / box_w_in))
+    chip_h_npc <- max(0.18, min(0.34, chip_h_in / box_h_in))
+
+    grid::grobTree(
+      grid::roundrectGrob(
+        x = 0.5, y = 0.5,
+        width = 1, height = 1,
+        r = grid::unit(0.12, "snpc"),
+        gp = grid::gpar(col = box_border, fill = box_fill, lwd = 2.1)
+      ),
+      grid::textGrob(
+        top_label,
+        x = 0.5, y = 0.73,
+        just = c("center", "center"),
+        gp = grid::gpar(
+          col = top_colour,
+          fontsize = top_pt,
+          fontface = "bold",
+          lineheight = 0.88
+        )
+      ),
+      grid::roundrectGrob(
+        x = 0.5, y = 0.26,
+        width = chip_w_npc, height = chip_h_npc,
+        r = grid::unit(0.22, "snpc"),
+        gp = grid::gpar(col = box_border, fill = chip_fill, lwd = 1.4)
+      ),
+      grid::textGrob(
+        chip_label,
+        x = 0.5, y = 0.26,
+        just = c("center", "center"),
+        gp = grid::gpar(
+          col = chip_text_colour,
+          fontsize = chip_pt,
+          fontface = "bold"
+        )
+      )
+    )
+  }
+
   if (isTRUE(mostrar_ref_line)) {
     ref_line_colour <- "#9AA6B8"
     ref_box_fill <- if (is.na(color_fondo)) "#F2F4F7" else color_fondo
@@ -497,7 +626,12 @@ graficar_media_rango <- function(
         verde = chip_cols[["verde"]]
       ),
       digits = 0,
-      na_color = NA_character_
+      na_color = NA_character_,
+      modo = modo_semaforo,
+      gradiente_colores = semaforo_gradiente_colores,
+      gradiente_valores = semaforo_gradiente_valores,
+      gradiente_limites = semaforo_gradiente_limites,
+      gradiente_segmentos = semaforo_gradiente_segmentos
     )[1]
 
     if (isTRUE(use_ref_slot)) {
@@ -519,15 +653,33 @@ graficar_media_rango <- function(
         y = ref_value_plot,
         yend = ref_value_plot
       )
-      ref_box_text_df <- data.frame(
-        x = 1,
-        y = ref_value_plot + ref_box_half_h * 0.38,
-        label = ref_box_label
-      )
-      ref_chip_df <- data.frame(
-        x = 1,
-        y = ref_value_plot - ref_box_half_h * 0.51,
-        label = .fmt_num(ref_value)
+      .has_title <- (!is.null(titulo) && nzchar(trimws(as.character(titulo)[1]))) ||
+        (!is.null(subtitulo) && nzchar(trimws(as.character(subtitulo)[1])))
+      .has_caption <- !is.null(nota_pie) && nzchar(trimws(as.character(nota_pie)[1]))
+      .has_legend <- isTRUE(mostrar_leyenda)
+      panel_h_rel <- if (isTRUE(usar_canvas)) {
+        h_title <- if (.has_title) canvas_h_title else 0
+        h_caption <- if (.has_caption) canvas_h_caption else 0
+        h_legend <- if (.has_legend) canvas_h_legend else 0
+        h_pad <- max(0, canvas_pad_top)
+        max(0.20, 1 - (h_title + h_legend + h_caption + h_pad))
+      } else {
+        1
+      }
+      panel_w_in <- ancho * 0.84
+      panel_h_in <- alto * panel_h_rel * 0.74
+      ref_box_w_in <- panel_w_in * ((ref_box_xmax - ref_box_xmin) / max(1, length(x_levels_plot)))
+      ref_box_h_in <- panel_h_in * ((ref_box_ymax - ref_box_ymin) / max(diff(ylim_use), 1e-6))
+      ref_slot_grob <- .build_ref_slot_grob(
+        box_w_in = ref_box_w_in,
+        box_h_in = ref_box_h_in,
+        top_label = ref_box_label,
+        chip_label = .fmt_num(ref_value),
+        box_fill = ref_box_fill,
+        box_border = ref_line_colour,
+        top_colour = ref_text_colour,
+        chip_fill = ref_chip_fill,
+        chip_text_colour = chip_texto_color
       )
 
       p_core <- p_core +
@@ -558,45 +710,11 @@ graficar_media_rango <- function(
           linetype = "solid"
         ) +
         ggplot2::annotation_custom(
-          grob = grid::roundrectGrob(
-            r = grid::unit(0.12, "snpc"),
-            gp = grid::gpar(
-              col = ref_line_colour,
-              fill = ref_box_fill,
-              lwd = 2.1
-            )
-          ),
+          grob = ref_slot_grob,
           xmin = ref_box_xmin,
           xmax = ref_box_xmax,
           ymin = ref_box_ymin,
           ymax = ref_box_ymax
-        ) +
-        ggplot2::geom_text(
-          data = ref_box_text_df,
-          ggplot2::aes(x = .data$x, y = .data$y, label = .data$label),
-          inherit.aes = FALSE,
-          hjust = 0.5,
-          vjust = 0.5,
-          fontface = "bold",
-          lineheight = 0.90,
-          size = max(3.4, size_ejes * 0.34),
-          colour = ref_text_colour
-        ) +
-        ggplot2::geom_label(
-          data = ref_chip_df,
-          ggplot2::aes(x = .data$x, y = .data$y, label = .data$label),
-          inherit.aes = FALSE,
-          hjust = 0.5,
-          vjust = 0.5,
-          fontface = "bold",
-          size = max(3.1, size_media * 1.14),
-          label.r = grid::unit(0.32, "lines"),
-          label.padding = grid::unit(0.24, "lines"),
-          colour = chip_texto_color,
-          fill = ref_chip_fill,
-          label.size = 0.65,
-          linewidth = 0.65,
-          border.colour = ref_line_colour
         )
     } else {
       p_core <- p_core +
@@ -644,7 +762,7 @@ graficar_media_rango <- function(
   }
 
   if (isTRUE(mostrar_media) && identical(modo, "score_ref")) {
-    sum_df$delta_mid <- (sum_df$media + ref_value_plot) / 2
+    sum_df$delta_mid <- ref_value_plot + (sum_df$media - ref_value_plot) * 0.38
     delta_offset_y <- max(0.9, span_use * 0.022)
     delta_small <- delta_abs_round > 0 & delta_abs_round <= 1
     sum_df$delta_y_plot <- ifelse(

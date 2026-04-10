@@ -58,6 +58,7 @@
 #'
 #' @param mostrar_leyenda Si `TRUE`, muestra la leyenda.
 #' @param leyenda_posicion Posición de leyenda: `"abajo"` o `"derecha"`.
+#' @param invertir_leyenda Si `TRUE`, invierte el orden visual de la leyenda.
 #' @param legend_n_por_fila Ítems por fila de leyenda.
 #' @param legend_key_cm Tamaño de key de leyenda (cm).
 #' @param legend_espaciado Espaciado lateral del texto de leyenda (pt).
@@ -180,6 +181,7 @@ graficar_radar <- function(
 
     mostrar_leyenda   = TRUE,
     leyenda_posicion  = c("abajo", "derecha"),
+    invertir_leyenda  = FALSE,
     legend_n_por_fila = 6L,
 
     legend_key_cm           = 0.35,
@@ -936,20 +938,23 @@ graficar_radar <- function(
     lab_axes_text <- lab_axes[lab_axes$eje %in% stringr::str_wrap(ejes_sin_icono, width = wrap_ejes), ]
   }
 
-  p <- p + ggplot2::geom_text(
-    data = lab_axes_text,
-    ggplot2::aes(
-      x = .data$x,
-      y = .data$y,
-      label = .data$eje,
-      hjust = .data$hjust,
-      vjust = .data$vjust
-    ),
-    size = size_ejes / 3,
-    colour = color_ejes,
-    fontface = if ("ejes" %in% textos_negrita) "bold" else "plain",
-    lineheight = 0.95
-  )
+  draw_axis_labels_external <- isTRUE(usar_canvas)
+  if (!draw_axis_labels_external) {
+    p <- p + ggplot2::geom_text(
+      data = lab_axes_text,
+      ggplot2::aes(
+        x = .data$x,
+        y = .data$y,
+        label = .data$eje,
+        hjust = .data$hjust,
+        vjust = .data$vjust
+      ),
+      size = size_ejes / 3,
+      colour = color_ejes,
+      fontface = if ("ejes" %in% textos_negrita) "bold" else "plain",
+      lineheight = 0.95
+    )
+  }
 
   if (isTRUE(mostrar_niveles) && !is.null(level_lab)) {
     p <- p + ggplot2::geom_text(
@@ -1016,12 +1021,14 @@ graficar_radar <- function(
     color = ggplot2::guide_legend(
       ncol  = if (leyenda_posicion == "abajo") legend_n_por_fila else 1,
       byrow = TRUE,
+      reverse = isTRUE(invertir_leyenda),
       keywidth  = grid::unit(legend_key_cm, "cm"),
       keyheight = grid::unit(legend_key_cm, "cm")
     ),
     fill  = if (isTRUE(rellenar_poligono)) ggplot2::guide_legend(
       ncol  = if (leyenda_posicion == "abajo") legend_n_por_fila else 1,
       byrow = TRUE,
+      reverse = isTRUE(invertir_leyenda),
       keywidth  = grid::unit(legend_key_cm, "cm"),
       keyheight = grid::unit(legend_key_cm, "cm")
     ) else "none"
@@ -1062,9 +1069,11 @@ graficar_radar <- function(
         ) +
         ggplot2::guides(
           color = ggplot2::guide_legend(byrow = TRUE, ncol = legend_n_por_fila,
+                                        reverse = isTRUE(invertir_leyenda),
                                         keywidth  = grid::unit(legend_key_cm, "cm"),
                                         keyheight = grid::unit(legend_key_cm, "cm")),
           fill  = if (isTRUE(rellenar_poligono)) ggplot2::guide_legend(byrow = TRUE, ncol = legend_n_por_fila,
+                                                                       reverse = isTRUE(invertir_leyenda),
                                                                        keywidth  = grid::unit(legend_key_cm, "cm"),
                                                                        keyheight = grid::unit(legend_key_cm, "cm")) else "none"
         )
@@ -1103,6 +1112,110 @@ graficar_radar <- function(
         ),
         x = x, y = y, width = w, height = h,
         hjust = 0, vjust = 0
+      )
+    }
+
+    .measure_label_npc <- function(label, panel_w_npc, panel_h_npc) {
+      tg <- grid::textGrob(
+        label,
+        gp = grid::gpar(
+          fontsize = size_ejes,
+          fontface = if ("ejes" %in% textos_negrita) "bold" else "plain"
+        )
+      )
+
+      w_in <- suppressWarnings(grid::convertWidth(grid::grobWidth(tg), "in", valueOnly = TRUE))
+      h_in <- suppressWarnings(grid::convertHeight(grid::grobHeight(tg), "in", valueOnly = TRUE))
+
+      w_npc <- if (is.finite(w_in) && w_in > 0 && is.finite(ancho) && ancho > 0 && is.finite(panel_w_npc) && panel_w_npc > 0) {
+        w_in / (ancho * panel_w_npc)
+      } else {
+        lines_k <- strsplit(label, "\n", fixed = TRUE)[[1]]
+        chars_k <- max(nchar(lines_k, type = "width"), 1L)
+        min(0.28, 0.0085 * chars_k * (size_ejes / 10))
+      }
+
+      h_npc <- if (is.finite(h_in) && h_in > 0 && is.finite(alto) && alto > 0 && is.finite(panel_h_npc) && panel_h_npc > 0) {
+        h_in / (alto * panel_h_npc)
+      } else {
+        nlines_k <- length(strsplit(label, "\n", fixed = TRUE)[[1]])
+        min(0.14, 0.0180 * nlines_k * (size_ejes / 10))
+      }
+
+      list(
+        w = min(0.95, max(0.01, w_npc)),
+        h = min(0.95, max(0.01, h_npc))
+      )
+    }
+
+    .external_label_layout <- function(lbl_row, panel_w_npc, panel_h_npc) {
+      lbl_k <- as.character(lbl_row$eje %||% "")
+      if (!nzchar(lbl_k)) return(NULL)
+
+      ang_k <- suppressWarnings(as.numeric(lbl_row$.ang))
+      if (!is.finite(ang_k)) return(NULL)
+
+      dims <- .measure_label_npc(lbl_k, panel_w_npc = panel_w_npc, panel_h_npc = panel_h_npc)
+
+      x_corner <- ring_max_plot * radar_scale * cos(ang_k)
+      y_corner <- ring_max_plot * radar_scale * sin(ang_k)
+
+      slot_w_in <- if (is.finite(ancho) && ancho > 0 && is.finite(panel_w_npc) && panel_w_npc > 0) ancho * panel_w_npc else 1
+      slot_h_in <- if (is.finite(alto)  && alto  > 0 && is.finite(panel_h_npc) && panel_h_npc > 0) alto  * panel_h_npc else 1
+      square_in <- min(slot_w_in, slot_h_in)
+      square_w_npc <- min(1, square_in / slot_w_in)
+      square_h_npc <- min(1, square_in / slot_h_in)
+      pad_x_npc <- (1 - square_w_npc) * 0.5
+      pad_y_npc <- (1 - square_h_npc) * 0.5
+
+      x_plot_npc <- (x_corner + lim_xy) / (2 * lim_xy)
+      y_plot_npc <- (y_corner + lim_xy) / (2 * lim_xy)
+      x_npc <- pad_x_npc + x_plot_npc * square_w_npc
+      y_npc <- pad_y_npc + y_plot_npc * square_h_npc
+
+      cos_k <- cos(ang_k)
+      sin_k <- sin(ang_k)
+
+      hk <- dplyr::case_when(
+        cos_k > 0.25  ~ 0,
+        cos_k < -0.25 ~ 1,
+        TRUE          ~ 0.5
+      )
+      vk <- dplyr::case_when(
+        sin_k > 0.55  ~ 0,
+        sin_k < -0.55 ~ 1,
+        TRUE          ~ 0.5
+      )
+
+      gap_x <- max(0.006, min(0.020, dims$w * 0.18))
+      gap_y <- max(0.008, min(0.024, dims$h * 0.35))
+
+      if (hk <= 0.05) {
+        x_npc <- x_npc + gap_x
+      } else if (hk >= 0.95) {
+        x_npc <- x_npc - gap_x
+      }
+
+      if (vk <= 0.05) {
+        y_npc <- y_npc + gap_y
+      } else if (vk >= 0.95) {
+        y_npc <- y_npc - gap_y
+      }
+
+      left_edge   <- x_npc - hk * dims$w
+      right_edge  <- x_npc + (1 - hk) * dims$w
+      bottom_edge <- y_npc - vk * dims$h
+      top_edge    <- y_npc + (1 - vk) * dims$h
+
+      x_npc <- x_npc + max(0, 0.006 - left_edge) - max(0, right_edge - 0.994)
+      y_npc <- y_npc + max(0, 0.010 - bottom_edge) - max(0, top_edge - 0.990)
+
+      list(
+        label = lbl_k,
+        x = x_npc,
+        y = y_npc,
+        hjust = hk,
+        vjust = vk
       )
     }
 
@@ -1177,6 +1290,29 @@ graficar_radar <- function(
         hjust = 0, vjust = 0
       )
       if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_panel0, w_radar, panel_h)
+
+      if (draw_axis_labels_external && nrow(lab_axes_text)) {
+        for (k in seq_len(nrow(lab_axes_text))) {
+          pos_k <- .external_label_layout(
+            lbl_row = lab_axes_text[k, , drop = FALSE],
+            panel_w_npc = w_radar,
+            panel_h_npc = panel_h
+          )
+          if (is.null(pos_k)) next
+
+          canvas <- canvas + cowplot::draw_text(
+            pos_k$label,
+            x = pos_k$x * w_radar,
+            y = y_panel0 + pos_k$y * panel_h,
+            hjust = pos_k$hjust,
+            vjust = pos_k$vjust,
+            size = size_ejes,
+            colour = color_ejes,
+            fontface = if ("ejes" %in% textos_negrita) "bold" else "plain",
+            lineheight = 0.95
+          )
+        }
+      }
 
       # Tabla derecha con top/bot
       h_tab_avail <- panel_h - tabla_ph_margin_top - tabla_ph_margin_bot
@@ -1304,6 +1440,29 @@ graficar_radar <- function(
         hjust = 0, vjust = 0
       )
       if (debug_ph_bordes) canvas <- canvas + .ph_border(0, y_panel0, 1, panel_h)
+
+      if (draw_axis_labels_external && nrow(lab_axes_text)) {
+        for (k in seq_len(nrow(lab_axes_text))) {
+          pos_k <- .external_label_layout(
+            lbl_row = lab_axes_text[k, , drop = FALSE],
+            panel_w_npc = 1,
+            panel_h_npc = panel_h
+          )
+          if (is.null(pos_k)) next
+
+          canvas <- canvas + cowplot::draw_text(
+            pos_k$label,
+            x = pos_k$x,
+            y = y_panel0 + pos_k$y * panel_h,
+            hjust = pos_k$hjust,
+            vjust = pos_k$vjust,
+            size = size_ejes,
+            colour = color_ejes,
+            fontface = if ("ejes" %in% textos_negrita) "bold" else "plain",
+            lineheight = 0.95
+          )
+        }
+      }
     }
 
   # ---------------------------------------------------------------
@@ -1686,6 +1845,7 @@ graficar_radar <- function(
         color = ggplot2::guide_legend(
           ncol  = if (leyenda_posicion == "abajo") legend_n_por_fila else 1,
           byrow = TRUE,
+          reverse = isTRUE(invertir_leyenda),
           keywidth  = grid::unit(legend_key_cm, "cm"),
           keyheight = grid::unit(legend_key_cm, "cm")
         )
