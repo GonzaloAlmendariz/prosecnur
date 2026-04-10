@@ -22,9 +22,16 @@ execute:
 
 ```{r}
 #| include: false
-manual_dir <- normalizePath(dirname(knitr::current_input()), winslash = "/")
+current_input_path <- tryCatch(knitr::current_input(), error = function(e) "")
+manual_dir <- if (is.character(current_input_path) && length(current_input_path) == 1 && nzchar(current_input_path)) {
+  normalizePath(dirname(current_input_path), winslash = "/")
+} else {
+  normalizePath(getwd(), winslash = "/")
+}
+knitr::opts_knit$set(root.dir = manual_dir)
 manual_file <- function(...) file.path(manual_dir, "files_manuales", ...)
-manual_qmd <- basename(knitr::current_input())
+manual_input <- function(...) file.path(manual_dir, "insumos", ...)
+manual_qmd <- if (is.character(current_input_path) && length(current_input_path) == 1 && nzchar(current_input_path)) basename(current_input_path) else "guia_codificacion_aplicada.qmd"
 
 if (!requireNamespace("prosecnur", quietly = TRUE)) {
   stop("Instale o cargue `prosecnur` antes de renderizar esta guía.", call. = FALSE)
@@ -35,13 +42,13 @@ library(prosecnur)
 
 ```{r}
 #| include: false
-ej_dir <- manual_file("data_ejemplo", "codificacion")
+ej_dir <- manual_input()
 
-inst_demo <- leer_instrumento_xlsform(file.path(ej_dir, "instrumento_ejercicio.xlsx"))
-dat_demo  <- leer_datos(file.path(ej_dir, "datos_ejercicio.xlsx"), sheet = "main")
+inst_demo <- leer_instrumento_xlsform(file.path(ej_dir, "GIZ_INST.xlsx"))
+dat_demo  <- leer_datos(file.path(ej_dir, "GIZ_DATA_LIMPIA.xlsx"))
 
 fams_demo <- leer_familias_clasificar(
-  path = file.path(ej_dir, "familias_ejercicio_resuelta.xlsx"),
+  path = file.path(ej_dir, "GIZ_familiasv2.xlsx"),
   inst = inst_demo,
   dat  = dat_demo
 )
@@ -59,28 +66,45 @@ exportar_plantilla_codificacion_xlsx(
   inst      = inst_demo
 )
 
+sm_vars_demo <- fams_demo$select_multiple %>%
+  dplyr::filter(use) %>%
+  dplyr::pull(parent) %>%
+  unique()
+
+so_parent_vars_demo <- fams_demo$select_one %>%
+  dplyr::filter(use, modo_so == "padre") %>%
+  dplyr::pull(parent) %>%
+  unique()
+
+so_child_vars_demo <- fams_demo$select_one %>%
+  dplyr::filter(use, modo_so == "hijo") %>%
+  dplyr::pull(parent) %>%
+  unique()
+
+int_vars_demo <- character(0)
+
 path_data_demo <- tempfile("datos_adaptados_", fileext = ".xlsx")
 ppra_adaptar_data(
-  path_instrumento = file.path(ej_dir, "instrumento_ejercicio.xlsx"),
-  path_datos = file.path(ej_dir, "datos_ejercicio.xlsx"),
+  path_instrumento = file.path(ej_dir, "GIZ_INST.xlsx"),
+  path_datos = file.path(ej_dir, "GIZ_DATA_LIMPIA.xlsx"),
   path_plantilla = path_tpl_demo,
-  sm_vars = c("servicios"),
-  so_parent_vars = c("motivo"),
-  so_child_vars = c("satisfaccion"),
-  int_vars = c("edad"),
+  sm_vars = sm_vars_demo,
+  so_parent_vars = so_parent_vars_demo,
+  so_child_vars = so_child_vars_demo,
+  int_vars = int_vars_demo,
   out_path = path_data_demo,
-  path_familias = file.path(ej_dir, "familias_ejercicio_resuelta.xlsx")
+  path_familias = file.path(ej_dir, "GIZ_familiasv2.xlsx")
 )
 
 path_inst_demo <- tempfile("instrumento_adaptado_", fileext = ".xlsx")
 ppra_adaptar_instrumento(
-  path_instrumento_in = file.path(ej_dir, "instrumento_ejercicio.xlsx"),
+  path_instrumento_in = file.path(ej_dir, "GIZ_INST.xlsx"),
   path_data_adaptada = path_data_demo,
   path_instrumento_out = path_inst_demo,
-  sm_vars = c("servicios"),
-  so_parent_vars = c("motivo"),
-  so_child_vars = c("satisfaccion"),
-  integer_vars = c("edad"),
+  sm_vars = sm_vars_demo,
+  so_parent_vars = so_parent_vars_demo,
+  so_child_vars = so_child_vars_demo,
+  integer_vars = int_vars_demo,
   path_plantilla = path_tpl_demo
 )
 ```
@@ -199,7 +223,7 @@ que la ejecución técnica queda en manos del código.
 Este ejemplo usa archivos pequeños incluidos dentro de `files_manuales`.
 
 ```{r}
-list.files(manual_file("data_ejemplo", "codificacion"))
+list.files(manual_input())
 ```
 
 Resumen rápido de cada archivo:
@@ -310,12 +334,12 @@ library(prosecnur)
 
 # Leer el instrumento original.
 inst <- leer_instrumento_xlsform(
-  "files_manuales/data_ejemplo/codificacion/instrumento_ejercicio.xlsx"
+  "insumos/instrumento_ejercicio.xlsx"
 )
 
 # Leer la base original.
 dat <- leer_datos(
-  "files_manuales/data_ejemplo/codificacion/datos_ejercicio.xlsx",
+  "insumos/datos_ejercicio.xlsx",
   sheet = "main"
 )
 ```
@@ -460,7 +484,7 @@ a la columna definitiva (`text_col`).
 #| eval: false
 fams <- leer_familias_clasificar(
   # Archivo ya revisado o resuelto.
-  path = "files_manuales/data_ejemplo/codificacion/familias_ejercicio_resuelta.xlsx",
+  path = "insumos/familias_ejercicio_resuelta.xlsx",
 
   # Objetos base del flujo.
   inst = inst,
@@ -683,10 +707,10 @@ paquete cómo interpretar las distintas familias:
 #| eval: false
 ppra_adaptar_data(
   # Instrumento original del estudio.
-  path_instrumento = "files_manuales/data_ejemplo/codificacion/instrumento_ejercicio.xlsx",
+  path_instrumento = "insumos/instrumento_ejercicio.xlsx",
 
   # Datos originales.
-  path_datos = "files_manuales/data_ejemplo/codificacion/datos_ejercicio.xlsx",
+  path_datos = "insumos/datos_ejercicio.xlsx",
 
   # Plantilla ya editada o resuelta.
   path_plantilla = "plantilla_codificacion_ejercicio_resuelta.xlsx",
@@ -707,7 +731,7 @@ ppra_adaptar_data(
   out_path = "datos_adaptados_ejercicio.xlsx",
 
   # Hoja de familias que acompaña la lectura del flujo.
-  path_familias = "files_manuales/data_ejemplo/codificacion/familias_ejercicio_resuelta.xlsx"
+  path_familias = "insumos/familias_ejercicio_resuelta.xlsx"
 )
 ```
 
@@ -768,7 +792,7 @@ aparición en los datos y `"alphabetical"` las ordena alfabéticamente.
 #| eval: false
 ppra_adaptar_instrumento(
   # Instrumento original.
-  path_instrumento_in = "files_manuales/data_ejemplo/codificacion/instrumento_ejercicio.xlsx",
+  path_instrumento_in = "insumos/instrumento_ejercicio.xlsx",
 
   # Base ya transformada en el paso anterior.
   path_data_adaptada = "datos_adaptados_ejercicio.xlsx",

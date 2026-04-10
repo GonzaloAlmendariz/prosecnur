@@ -15,7 +15,8 @@
 #'         (`attr(, "measure")`).
 #'   \item Conversión de variables de fecha, hora y fecha-hora según los
 #'         metadatos del instrumento (`vars_fecha`, `vars_hora`, `vars_datetime`).
-#'   \item Renombrado de `_uuid` a `uuid` si fuese necesario.
+#'   \item Renombrado de columnas con prefijo `_` (e.g. `_uuid`, `_id`) a
+#'         nombres válidos en SPSS (sin el guion bajo inicial).
 #'   \item Escritura a disco en formato `.sav` mediante [haven::write_sav()].
 #'   \item Generación opcional de un archivo `.sps` mediante
 #'         [generar_spss_niveles()] para aplicar `VARIABLE LEVEL` y `FORMATS`.
@@ -159,10 +160,20 @@ reporte_spss <- function(data,
   }
 
   # ---------------------------------------------------------------------------
-  # 3) Renombrar _uuid a uuid si corresponde
+  # 3) Renombrar columnas que empiecen con "_" (no válidas en SPSS)
   # ---------------------------------------------------------------------------
-  if ("_uuid" %in% names(df) && !"uuid" %in% names(df)) {
-    names(df)[names(df) == "_uuid"] <- "uuid"
+  bad <- grepl("^_", names(df))
+  if (any(bad)) {
+    proposed <- sub("^_", "", names(df)[bad])
+    safe <- !(proposed %in% names(df)[!bad])
+    if (any(!safe)) {
+      warning(
+        "Al renombrar columnas con prefijo '_', las siguientes colisionan ",
+        "con columnas existentes y no se renombraron: ",
+        paste(names(df)[bad][!safe], collapse = ", ")
+      )
+    }
+    names(df)[bad][safe] <- proposed[safe]
   }
 
   # ---------------------------------------------------------------------------

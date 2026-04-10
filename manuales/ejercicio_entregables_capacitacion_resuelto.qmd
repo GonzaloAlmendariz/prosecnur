@@ -1,0 +1,243 @@
+---
+title: "Ejercicio de capacitación: entregables completos"
+subtitle: "Versión resuelta de referencia sobre el caso GIZ"
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+editor_options:
+  chunk_output_type: console
+---
+
+# Propósito
+
+Este archivo es la versión resuelta del ejercicio de capacitación. La lógica es
+la misma que en la versión para completar, pero con una propuesta concreta de
+parámetros y salidas.
+
+# Estructura esperada de la carpeta de trabajo
+
+Esta versión asume esta estructura:
+
+- `insumos/GIZ_INST_adaptado.xlsx`
+- `insumos/GIZ_data_adaptada.xlsx`
+- `insumos/GIZ_DATA_LIMPIA.xlsx`
+- `Outputs/2_Entregables/`
+
+# Paso 0. Instalar el paquete desde GitHub
+
+```{r}
+#| eval: false
+if (!requireNamespace("remotes", quietly = TRUE)) {
+  install.packages("remotes")
+}
+
+remotes::install_github("GonzaloAlmendariz/prosecnur")
+```
+
+# Setup
+
+```{r}
+current_input_path <- tryCatch(knitr::current_input(), error = function(e) "")
+root_dir <- if (is.character(current_input_path) && length(current_input_path) == 1 && nzchar(current_input_path)) {
+  normalizePath(dirname(current_input_path), winslash = "/")
+} else {
+  normalizePath(getwd(), winslash = "/")
+}
+
+knitr::opts_knit$set(root.dir = root_dir)
+
+library(prosecnur)
+library(readxl)
+library(dplyr)
+
+puede_enumeradores <- requireNamespace("quarto", quietly = TRUE)
+
+if (!puede_enumeradores) {
+  user_lib <- Sys.getenv("R_LIBS_USER")
+  if (!nzchar(user_lib)) {
+    user_lib <- file.path(path.expand("~"), "R", paste0(R.version$platform, "-", getRversion()[, 1:2]))
+  }
+  dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+  try(install.packages("quarto", lib = user_lib, repos = "https://cloud.r-project.org"), silent = TRUE)
+  .libPaths(unique(c(user_lib, .libPaths())))
+  puede_enumeradores <- requireNamespace("quarto", quietly = TRUE)
+}
+
+dir.create("Outputs/2_Entregables", recursive = TRUE, showWarnings = FALSE)
+```
+
+# Paso 1. Revisar los insumos
+
+```{r}
+survey <- read_excel("insumos/GIZ_INST_adaptado.xlsx", sheet = "survey")
+choices <- read_excel("insumos/GIZ_INST_adaptado.xlsx", sheet = "choices")
+data_cruda <- read_excel("insumos/GIZ_data_adaptada.xlsx")
+data_campo <- read_excel("insumos/GIZ_DATA_LIMPIA.xlsx")
+```
+
+```{r}
+nrow(survey)
+nrow(choices)
+nrow(data_cruda)
+ncol(data_cruda)
+```
+
+# Paso 2. Definir parámetros de reporte
+
+```{r}
+listas_ordinales <- character(0)
+
+vars_fecha <- character(0)
+
+vars_hora <- character(0)
+
+codigos_solo_si_presentes <- c(97, 98, 99)
+```
+
+# Paso 3. Construir `rp_inst`
+
+```{r}
+rp_inst <- reporte_instrumento(
+  path = "insumos/GIZ_INST_adaptado.xlsx",
+  listas_ordinales = listas_ordinales,
+  vars_fecha = vars_fecha,
+  vars_hora = vars_hora
+)
+```
+
+# Paso 4. Construir `rp_data`
+
+```{r}
+data_cruda <- read_excel("insumos/GIZ_data_adaptada.xlsx")
+
+rp_data <- reporte_data(
+  data = data_cruda,
+  instrumento = rp_inst
+)
+```
+
+ # Paso 4.1. Preparar una copia compatible con SPSS
+
+```{r}
+rp_data_spss <- rp_data
+
+if ("_id" %in% names(rp_data_spss)) {
+  names(rp_data_spss)[names(rp_data_spss) == "_id"] <- "id_registro"
+}
+
+if ("_uuid" %in% names(rp_data_spss)) {
+  names(rp_data_spss)[names(rp_data_spss) == "_uuid"] <- "uuid_registro"
+}
+```
+
+# Paso 5. Exportar el codebook
+
+```{r}
+reporte_codebook(
+  data = rp_data,
+  path_xlsx = "Outputs/2_Entregables/ejercicio_codebook_GIZ.xlsx",
+  codigos_solo_si_presentes = codigos_solo_si_presentes
+)
+```
+
+# Paso 6. Exportar la base para SPSS
+
+```{r}
+reporte_spss(
+  data = rp_data_spss,
+  path_sav = "Outputs/2_Entregables/ejercicio_GIZ_final.sav",
+  path_sps = "Outputs/2_Entregables/ejercicio_GIZ_final_niveles.sps"
+)
+```
+
+# Paso 7. Definir secciones y exportar frecuencias
+
+```{r}
+SECCIONES <- list(
+  "Perfil del servicio" = c("distrito", "servicio", "p1", "p2_recod"),
+  "Experiencia de atención" = c("p12", "p13", "p14", "p15")
+)
+
+numericas <- character(0)
+```
+
+```{r}
+reporte_frecuencias(
+  data = rp_data,
+  instrumento = rp_inst,
+  secciones = SECCIONES,
+  path_xlsx = "Outputs/2_Entregables/ejercicio_frecuencias_GIZ.xlsx",
+  codigos_solo_si_presentes = codigos_solo_si_presentes,
+  numericas = numericas
+)
+```
+
+# Paso 8. Exportar cruces
+
+```{r}
+cruces <- c("distrito")
+```
+
+```{r}
+reporte_cruces(
+  data = rp_data,
+  instrumento = rp_inst,
+  SECCIONES = SECCIONES,
+  cruces = cruces,
+  modo = "estandar",
+  path_xlsx = "Outputs/2_Entregables/ejercicio_cruces_GIZ.xlsx",
+  codigos_solo_si_presentes = codigos_solo_si_presentes,
+  numericas = numericas
+)
+```
+
+# Paso 9. Referencia para enumeradores
+
+En esta versión resuelta se usa la lógica operativa del ejemplo real de GIZ.
+
+```{r}
+col_enumerador <- "Enumerator_name"
+
+cols_corte <- c("servicio", "distrito")
+
+modalidad_reglas <- list(
+  list(
+    modalidad = "Telefónica",
+    servicio = "ULE",
+    distrito = c("Villa El Salvador", "Ate", "Rimac", "El Porvenir", "La Esperanza")
+  ),
+  list(
+    modalidad = "Telefónica",
+    servicio = "UPSEP",
+    distrito = c("Ate", "El Porvenir")
+  )
+)
+
+subtitulo_enumeradores <- "Encuesta GIZ — Resumen por modalidad, servicio y distrito"
+```
+
+```{r}
+if (puede_enumeradores) {
+  reporte_enumeradores(
+    data = data_campo,
+    col_enumerador = col_enumerador,
+    cols_corte = cols_corte,
+    modalidad_reglas = modalidad_reglas,
+    modalidad_default = "Presencial",
+    modalidades_esperadas = c("Presencial", "Telefónica"),
+    output_file = "Outputs/2_Entregables/ejercicio_enumeradores_GIZ.pdf",
+    titulo = "Producción de enumeradores",
+    subtitulo = subtitulo_enumeradores
+  )
+} else {
+  cat("No se pudo ejecutar `reporte_enumeradores()` porque el paquete de R `quarto` no estuvo disponible en este entorno.\n")
+}
+```
+
+# Paso 10. Verificación final
+
+```{r}
+list.files("Outputs/2_Entregables")
+```

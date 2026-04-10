@@ -22,9 +22,16 @@ execute:
 
 ```{r}
 #| include: false
-manual_dir <- normalizePath(dirname(knitr::current_input()), winslash = "/")
+current_input_path <- tryCatch(knitr::current_input(), error = function(e) "")
+manual_dir <- if (is.character(current_input_path) && length(current_input_path) == 1 && nzchar(current_input_path)) {
+  normalizePath(dirname(current_input_path), winslash = "/")
+} else {
+  normalizePath(getwd(), winslash = "/")
+}
+knitr::opts_knit$set(root.dir = manual_dir)
 manual_file <- function(...) file.path(manual_dir, "files_manuales", ...)
-manual_qmd <- basename(knitr::current_input())
+manual_input <- function(...) file.path(manual_dir, "insumos", ...)
+manual_qmd <- if (is.character(current_input_path) && length(current_input_path) == 1 && nzchar(current_input_path)) basename(current_input_path) else "guia_ppt_plan_aplicada.qmd"
 
 if (!requireNamespace("prosecnur", quietly = TRUE)) {
   stop("Instale o cargue `prosecnur` antes de renderizar esta guía.", call. = FALSE)
@@ -35,8 +42,8 @@ library(prosecnur)
 
 ```{r}
 #| include: false
-rp_data_demo <- readRDS(manual_file("data_ejemplo", "reportes", "rp_data.rds"))
-rp_inst_demo <- readRDS(manual_file("data_ejemplo", "reportes", "rp_inst.rds"))
+rp_data_demo <- readRDS(manual_input("rp_data.rds"))
+rp_inst_demo <- readRDS(manual_input("rp_inst.rds"))
 
 presets_demo <- list(
   base = list(
@@ -210,12 +217,12 @@ presentaciones de estudios concretos.
 
 Esta guía está pensada mirando especialmente dos referencias de trabajo reales:
 
-- [prueba_plan_ppt.qmd](/Users/gonzaloalmendariz/Documents/Pulso/Pruebas_Prosecnur/prueba_plan_ppt.qmd)
-- [ejecutar_surveymonkey_prosecnur.qmd](/Users/gonzaloalmendariz/Documents/Pulso/Pruebas_Prosecnur/ejecutar_surveymonkey_prosecnur.qmd)
+- `prueba_plan_ppt.qmd`
+- `ejecutar_surveymonkey_prosecnur.qmd`
 
 Además, la parte Word conversa directamente con:
 
-- [prueba_plan_word.qmd](/Users/gonzaloalmendariz/Documents/Pulso/Pruebas_Prosecnur/prueba_plan_word.qmd)
+- `prueba_plan_word.qmd`
 
 # Qué resuelve este sistema
 
@@ -266,18 +273,18 @@ sistema espera, y a partir de ahí todo funciona igual.
 
 # Antes de empezar
 
-En esta guía usamos un ejemplo ya preparado dentro de `files_manuales`.
+En esta guía se usa un ejemplo ya preparado dentro de `insumos/`.
 
 ```{r}
-list.files(manual_file("data_ejemplo", "reportes"))
+list.files(manual_input())
 ```
 
 La base mínima es:
 
 ```{r}
 #| eval: false
-rp_data <- readRDS("files_manuales/data_ejemplo/reportes/rp_data.rds")
-rp_inst <- readRDS("files_manuales/data_ejemplo/reportes/rp_inst.rds")
+rp_data <- readRDS("insumos/rp_data.rds")
+rp_inst <- readRDS("insumos/rp_inst.rds")
 ```
 
 Si todavía no tiene esos objetos, primero pase por la guía de entregables hasta

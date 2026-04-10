@@ -1,6 +1,6 @@
 ---
 title: "Ejercicio de capacitación: entregables completos"
-subtitle: "Caso aplicado OPS EESS, sin atajos y sin objetos ya resueltos"
+subtitle: "Versión para resolver sobre el caso GIZ, sin atajos y sin objetos ya preparados"
 format: html
 execute:
   echo: true
@@ -12,27 +12,31 @@ editor_options:
 
 # Propósito del ejercicio
 
-Este ejercicio está pensado para practicar la etapa de entregables con un caso
-más grande y más parecido a un flujo real de proyecto. El punto no es correr
-una plantilla ya resuelta, sino reconstruir la lógica completa desde:
+Este ejercicio está pensado para practicar la etapa de entregables de principio
+a fin, pero sin usar objetos ya resueltos como `rp_inst.rds` o `rp_data.rds`.
 
-- un instrumento adaptado amplio;
-- una base adaptada amplia;
-- decisiones metodológicas que todavía deben tomarse.
+La lógica esperada es esta:
 
-La referencia de trabajo es el caso `OPS EESS`, porque ofrece un instrumento y
-una base bastante más completos que los ejemplos pequeños del manual.
+- revisar el instrumento y la base;
+- decidir parámetros de reporte;
+- construir `rp_inst`;
+- construir `rp_data`;
+- exportar cada salida.
 
-# Regla central
+# Estructura esperada de la carpeta de trabajo
 
-En este ejercicio no se usan objetos ya preparados como `rp_inst.rds` o
-`rp_data.rds`. Todo debe construirse desde el XLSForm final y la base final.
+El ejercicio asume que quien lo desarrolla tiene una carpeta de trabajo con esta
+estructura mínima:
+
+- `insumos/GIZ_INST_adaptado.xlsx`
+- `insumos/GIZ_data_adaptada.xlsx`
+- `insumos/GIZ_DATA_LIMPIA.xlsx`
+- `salidas_capacitacion_entregables/`
+
+Si los archivos tienen otro nombre, basta con cambiarlo directamente en cada
+función.
 
 # Paso 0. Instalar el paquete desde GitHub
-
-Este bloque se deja al inicio porque forma parte del flujo de instalación que se
-necesita en una capacitación cuando el paquete todavía no está disponible en la
-máquina.
 
 ```{r}
 #| eval: false
@@ -46,41 +50,29 @@ remotes::install_github("GonzaloAlmendariz/prosecnur")
 # Setup
 
 ```{r}
+current_input_path <- tryCatch(knitr::current_input(), error = function(e) "")
+root_dir <- if (is.character(current_input_path) && length(current_input_path) == 1 && nzchar(current_input_path)) {
+  normalizePath(dirname(current_input_path), winslash = "/")
+} else {
+  normalizePath(getwd(), winslash = "/")
+}
+
+knitr::opts_knit$set(root.dir = root_dir)
+
 library(prosecnur)
 library(readxl)
 library(dplyr)
 
-dir.create(
-  "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables",
-  recursive = TRUE,
-  showWarnings = FALSE
-)
+dir.create("salidas_capacitacion_entregables", recursive = TRUE, showWarnings = FALSE)
 ```
 
-# Paso 1. Revisar los insumos del caso
-
-El ejercicio parte de estos dos archivos:
-
-- `/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_INST_FINAL.xlsx`
-- `/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_DATA_FINAL.xlsx`
-
-Antes de hacer cualquier salida, conviene mirar qué tan grande es el caso y qué
-tipo de variables contiene.
+# Paso 1. Revisar los insumos
 
 ```{r}
-survey <- read_excel(
-  "/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_INST_FINAL.xlsx",
-  sheet = "survey"
-)
-
-choices <- read_excel(
-  "/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_INST_FINAL.xlsx",
-  sheet = "choices"
-)
-
-data_cruda <- read_excel(
-  "/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_DATA_FINAL.xlsx"
-)
+survey <- read_excel("insumos/GIZ_INST_adaptado.xlsx", sheet = "survey")
+choices <- read_excel("insumos/GIZ_INST_adaptado.xlsx", sheet = "choices")
+data_cruda <- read_excel("insumos/GIZ_data_adaptada.xlsx")
+data_campo <- read_excel("insumos/GIZ_DATA_LIMPIA.xlsx")
 ```
 
 ```{r}
@@ -108,44 +100,39 @@ names(data_cruda)
 
 ```{r}
 data_cruda %>%
-  select(region, fecha_visita, hora_inicio, hora_fin, nombre_encuestador) %>%
-  slice(1:12)
+  slice(1:10)
 ```
 
 # Paso 2. Tomar decisiones antes de construir `rp_inst`
 
-Este es el primer punto que no se deja resuelto. Se pide revisar el
-instrumento, identificar escalas reales, ubicar variables temporales y decidir
-si conviene tratar algunos códigos especiales solo cuando estén presentes.
+Aquí no se deja nada resuelto. La idea es obligar a revisar el instrumento y
+decidir qué parámetros realmente corresponden al caso.
 
 ```{r}
 #| eval: false
 listas_ordinales <- c(
-  # Completar con los `list_name` que efectivamente representen una escala.
+  # Completar con los `list_name` que sí representan una escala.
 )
 
 vars_fecha <- c(
-  # Completar con variables de fecha.
+  # Completar solo si la base de trabajo tiene variables de fecha.
 )
 
 vars_hora <- c(
-  # Completar con variables de hora.
+  # Completar solo si la base de trabajo tiene variables de hora.
 )
 
 codigos_solo_si_presentes <- c(
-  # Completar con códigos especiales que convenga ocultar si no aparecen.
+  # Completar con códigos especiales que convenga mostrar solo cuando existan.
 )
 ```
 
-# Paso 3. Construir el instrumento de reporte
-
-Aquí se llena la ruta directamente dentro de la función, como en un flujo de
-trabajo aplicado.
+# Paso 3. Construir `rp_inst`
 
 ```{r}
 #| eval: false
 rp_inst <- reporte_instrumento(
-  path = "/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_INST_FINAL.xlsx",
+  path = "insumos/GIZ_INST_adaptado.xlsx",
   listas_ordinales = listas_ordinales,
   vars_fecha = vars_fecha,
   vars_hora = vars_hora
@@ -160,20 +147,15 @@ names(rp_inst)
 ```{r}
 #| eval: false
 rp_inst$survey %>%
-  select(name, type, list_name, measure_sugerida, label) %>%
-  filter(name %in% c("region", "p102", "p112", "fecha_visita", "hora_inicio", "hora_fin"))
+  select(name, type, measure_sugerida, label) %>%
+  filter(name %in% c("distrito", "servicio", "p1", "p2_recod", "p12", "p13"))
 ```
 
-# Paso 4. Construir la base para reporte
-
-La base también se prepara desde el XLSX y no desde un objeto previamente
-guardado.
+# Paso 4. Construir `rp_data`
 
 ```{r}
 #| eval: false
-data_cruda <- read_excel(
-  "/Users/gonzaloalmendariz/Documents/Pulso/OPS/OPS_DATA_FINAL.xlsx"
-)
+data_cruda <- read_excel("insumos/GIZ_data_adaptada.xlsx")
 
 rp_data <- reporte_data(
   data = data_cruda,
@@ -191,48 +173,56 @@ class(rp_data)
 attributes(rp_data$region)
 ```
 
-# Paso 5. Generar el codebook
+# Paso 4.1. Preparar una copia compatible con SPSS
 
-El objetivo es producir un libro de códigos útil para una entrega técnica real.
+En este caso conviene revisar si la base trae nombres que SPSS no acepta, por
+ejemplo variables que empiezan con guion bajo.
+
+```{r}
+#| eval: false
+rp_data_spss <- rp_data
+
+if ("_id" %in% names(rp_data_spss)) {
+  names(rp_data_spss)[names(rp_data_spss) == "_id"] <- "id_registro"
+}
+
+if ("_uuid" %in% names(rp_data_spss)) {
+  names(rp_data_spss)[names(rp_data_spss) == "_uuid"] <- "uuid_registro"
+}
+```
+
+# Paso 5. Generar el codebook
 
 ```{r}
 #| eval: false
 reporte_codebook(
   data = rp_data,
-  path_xlsx = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_codebook_OPS.xlsx",
+  path_xlsx = "salidas_capacitacion_entregables/ejercicio_codebook_GIZ.xlsx",
   codigos_solo_si_presentes = codigos_solo_si_presentes
 )
 ```
 
 # Paso 6. Generar la entrega para SPSS
 
-Aquí se pide producir tanto el `.sav` como la sintaxis `.sps`.
-
 ```{r}
 #| eval: false
 reporte_spss(
-  data = rp_data,
-  path_sav = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_OPS_final.sav",
-  path_sps = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_OPS_final_niveles.sps"
+  data = rp_data_spss,
+  path_sav = "salidas_capacitacion_entregables/ejercicio_GIZ_final.sav",
+  path_sps = "salidas_capacitacion_entregables/ejercicio_GIZ_final_niveles.sps"
 )
 ```
 
 # Paso 7. Definir secciones para frecuencias
 
-No se deja una lista resuelta. Cada persona debe proponer una estructura
-temática razonable para que el Excel final no sea solo una concatenación de
-tablas.
-
 ```{r}
 #| eval: false
 SECCIONES <- list(
   # Completar con bloques temáticos.
-  # "Perfil general" = c("region", "p102", ...),
-  # "Acceso y atención" = c("p112", ...)
 )
 
 numericas <- c(
-  # Completar si se desea resumir variables numéricas continuas.
+  # Completar si se desea resumir variables numéricas.
 )
 ```
 
@@ -242,16 +232,13 @@ reporte_frecuencias(
   data = rp_data,
   instrumento = rp_inst,
   secciones = SECCIONES,
-  path_xlsx = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_frecuencias_OPS.xlsx",
+  path_xlsx = "salidas_capacitacion_entregables/ejercicio_frecuencias_GIZ.xlsx",
   codigos_solo_si_presentes = codigos_solo_si_presentes,
   numericas = numericas
 )
 ```
 
 # Paso 8. Definir el cruce principal
-
-La variable de cruce no se entrega resuelta. Debe elegirse según la utilidad
-analítica del resultado, no solo por conveniencia técnica.
 
 ```{r}
 #| eval: false
@@ -268,7 +255,7 @@ reporte_cruces(
   SECCIONES = SECCIONES,
   cruces = cruces,
   modo = "estandar",
-  path_xlsx = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_cruces_OPS.xlsx",
+  path_xlsx = "salidas_capacitacion_entregables/ejercicio_cruces_GIZ.xlsx",
   codigos_solo_si_presentes = codigos_solo_si_presentes,
   numericas = numericas
 )
@@ -276,44 +263,36 @@ reporte_cruces(
 
 # Paso 9. Preparar el reporte de enumeradores
 
-Esta salida obliga a pensar el caso operativo como producción de campo. No se
-usa `rp_data`, sino la base como tabla de observaciones para resumir trabajo por
-enumerador.
+Este paso debe resolverse con la columna operativa que venga en la base de
+campo entregada para la capacitación. No se deja una variable prefijada porque
+puede cambiar según el caso.
 
 ```{r}
 #| eval: false
+col_enumerador <- "Enumerator_name"
+
 cols_corte <- c(
-  # Completar con cortes útiles para el seguimiento operativo.
+  # Completar con cortes útiles para gestión operativa.
 )
 
-subtitulo_enumeradores <- "Completar con una descripción breve del corte aplicado"
+subtitulo_enumeradores <- "Completar con un subtítulo breve y claro"
 ```
 
 ```{r}
 #| eval: false
 reporte_enumeradores(
-  data = data_cruda,
-  col_enumerador = "nombre_encuestador",
+  data = data_campo,
+  col_enumerador = col_enumerador,
   cols_corte = cols_corte,
-  output_file = "/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables/ejercicio_enumeradores_OPS.pdf",
+  output_file = "salidas_capacitacion_entregables/ejercicio_enumeradores_GIZ.pdf",
   titulo = "Producción de enumeradores",
   subtitulo = subtitulo_enumeradores
 )
 ```
 
-# Paso 10. Verificación de salidas
+# Paso 10. Verificación final
 
 ```{r}
 #| eval: false
-list.files("/Users/gonzaloalmendariz/Documents/Pulso/prosecnur/manuales/salidas_capacitacion_entregables")
+list.files("salidas_capacitacion_entregables")
 ```
-
-# Preguntas de cierre
-
-Al terminar el ejercicio, conviene discutir estas preguntas:
-
-1. ¿Qué listas ordinales generaron más duda y por qué?
-2. ¿La estructura de secciones elegida para frecuencias realmente ayuda a leer el estudio?
-3. ¿La variable de cruce escogida abre una lectura útil o solo multiplica tablas?
-4. ¿Los cortes del reporte de enumeradores sirven para gestión operativa real?
-5. ¿Qué otra salida faltaría si este caso pasara de anexos a productos editoriales mayores?

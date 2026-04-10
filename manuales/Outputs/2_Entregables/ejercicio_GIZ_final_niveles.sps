@@ -1,0 +1,59 @@
+VARIABLE LEVEL Enumerator_name (SCALE).
+VARIABLE LEVEL p6.1 p6.2 p6.3 (NOMINAL).
+VARIABLE LEVEL p6.4 p7.1 p7.2 (NOMINAL).
+VARIABLE LEVEL p7.3 p8.1 p8.2 (NOMINAL).
+VARIABLE LEVEL p8.3 p8.70 p8_recod.1 (NOMINAL).
+VARIABLE LEVEL p8_recod.2 p8_recod.3 p8_recod.4 (NOMINAL).
+VARIABLE LEVEL p8_recod.5 p8_recod.6 p8_recod.7 (NOMINAL).
+VARIABLE LEVEL p8_recod.70 p10_ule.1 p10_ule.2 (NOMINAL).
+VARIABLE LEVEL p10_ule.3 p10_ule.4 p10_ule.5 (NOMINAL).
+VARIABLE LEVEL p10_ule.70 p10_ule_recod.1 p10_ule_recod.2 (NOMINAL).
+VARIABLE LEVEL p10_ule_recod.3 p10_ule_recod.4 p10_ule_recod.5 (NOMINAL).
+VARIABLE LEVEL p10_ule_recod.70 p10_ciam.1 p10_ciam.2 (NOMINAL).
+VARIABLE LEVEL p10_ciam.3 p10_ciam.4 p10_ciam.5 (NOMINAL).
+VARIABLE LEVEL p10_ciam.70 p10_ciam_recod.1 p10_ciam_recod.2 (NOMINAL).
+VARIABLE LEVEL p10_ciam_recod.3 p10_ciam_recod.4 p10_ciam_recod.5 (NOMINAL).
+VARIABLE LEVEL p10_ciam_recod.70 p10_omaped.1 p10_omaped.2 (NOMINAL).
+VARIABLE LEVEL p10_omaped.3 p10_omaped.4 p10_omaped.5 (NOMINAL).
+VARIABLE LEVEL p10_omaped.6 p10_omaped.7 p10_omaped.70 (NOMINAL).
+VARIABLE LEVEL p10_omaped_recod.1 p10_omaped_recod.2 p10_omaped_recod.3 (NOMINAL).
+VARIABLE LEVEL p10_omaped_recod.4 p10_omaped_recod.5 p10_omaped_recod.6 (NOMINAL).
+VARIABLE LEVEL p10_omaped_recod.7 p10_omaped_recod.8 p10_omaped_recod.9 (NOMINAL).
+VARIABLE LEVEL p10_omaped_recod.70 p10_demuna.1 p10_demuna.2 (NOMINAL).
+VARIABLE LEVEL p10_demuna.3 p10_demuna.4 p10_demuna.5 (NOMINAL).
+VARIABLE LEVEL p10_demuna.70 p10_demuna_recod.1 p10_demuna_recod.2 (NOMINAL).
+VARIABLE LEVEL p10_demuna_recod.3 p10_demuna_recod.4 p10_demuna_recod.5 (NOMINAL).
+VARIABLE LEVEL p10_demuna_recod.6 p10_demuna_recod.70 p10_upsep.1 (NOMINAL).
+VARIABLE LEVEL p10_upsep.2 p10_upsep.3 p10_upsep.70 (NOMINAL).
+VARIABLE LEVEL p10_upsep_recod.1 p10_upsep_recod.2 p10_upsep_recod.3 (NOMINAL).
+VARIABLE LEVEL p10_upsep_recod.4 p10_upsep_recod.70 p17.1 (NOMINAL).
+VARIABLE LEVEL p26.1 p39.1 p39.2 (NOMINAL).
+VARIABLE LEVEL p39.3 p39.4 p39.5 (NOMINAL).
+VARIABLE LEVEL p39.6 p39.7 p39.8 (NOMINAL).
+VARIABLE LEVEL p39.9 p39.10 p39.11 (NOMINAL).
+VARIABLE LEVEL p39.70 p39.90 p39.96 (NOMINAL).
+VARIABLE LEVEL p39_recod.1 p39_recod.2 p39_recod.3 (NOMINAL).
+VARIABLE LEVEL p39_recod.4 p39_recod.5 p39_recod.6 (NOMINAL).
+VARIABLE LEVEL p39_recod.7 p39_recod.8 p39_recod.9 (NOMINAL).
+VARIABLE LEVEL p39_recod.10 p39_recod.11 p39_recod.12 (NOMINAL).
+VARIABLE LEVEL p39_recod.13 p39_recod.14 p39_recod.15 (NOMINAL).
+VARIABLE LEVEL p39_recod.16 p39_recod.70 p39_recod.90 (NOMINAL).
+VARIABLE LEVEL p39_recod.96 (NOMINAL).
+VARIABLE LEVEL status Pulso_code distrito (NOMINAL).
+VARIABLE LEVEL control_nombre control_distrito consent (NOMINAL).
+VARIABLE LEVEL filtro apoderado p1_a (NOMINAL).
+VARIABLE LEVEL p2_b_recod p1 p2_recod (NOMINAL).
+VARIABLE LEVEL p3 p3_recod p3_otro (NOMINAL).
+VARIABLE LEVEL p4 p4_recod p5 (NOMINAL).
+VARIABLE LEVEL p11 p12 p13 (NOMINAL).
+VARIABLE LEVEL p14 p15 p16 (NOMINAL).
+VARIABLE LEVEL p17 p18 p19 (NOMINAL).
+VARIABLE LEVEL p20 p21 p22 (NOMINAL).
+VARIABLE LEVEL p23 p24 p25 (NOMINAL).
+VARIABLE LEVEL p26 p27 p28 (NOMINAL).
+VARIABLE LEVEL p29 p30 p31 (NOMINAL).
+VARIABLE LEVEL p32 p33 p34 (NOMINAL).
+VARIABLE LEVEL p35 p36 p37 (NOMINAL).
+VARIABLE LEVEL p38 servicio (NOMINAL).
+FORMATS ALL (F8.0).
+EXECUTE.

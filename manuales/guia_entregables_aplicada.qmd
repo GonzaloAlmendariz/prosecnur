@@ -23,9 +23,16 @@ execute:
 
 ```{r}
 #| include: false
-manual_dir <- normalizePath(dirname(knitr::current_input()), winslash = "/")
+current_input_path <- tryCatch(knitr::current_input(), error = function(e) "")
+manual_dir <- if (is.character(current_input_path) && length(current_input_path) == 1 && nzchar(current_input_path)) {
+  normalizePath(dirname(current_input_path), winslash = "/")
+} else {
+  normalizePath(getwd(), winslash = "/")
+}
+knitr::opts_knit$set(root.dir = manual_dir)
 manual_file <- function(...) file.path(manual_dir, "files_manuales", ...)
-manual_qmd <- basename(knitr::current_input())
+manual_input <- function(...) file.path(manual_dir, "insumos", ...)
+manual_qmd <- if (is.character(current_input_path) && length(current_input_path) == 1 && nzchar(current_input_path)) basename(current_input_path) else "guia_entregables_aplicada.qmd"
 
 if (!requireNamespace("prosecnur", quietly = TRUE)) {
   stop("Instale o cargue `prosecnur` antes de renderizar esta guía.", call. = FALSE)
@@ -93,18 +100,14 @@ cat("```\n")
 
 ```{r}
 #| include: false
-rep_dir <- manual_file("data_ejemplo", "reportes")
+rep_dir <- manual_input()
 
-data_cruda_demo <- readxl::read_excel(file.path(rep_dir, "OPS_DATA_FINAL.xlsx"))
+data_cruda_demo <- readxl::read_excel(file.path(rep_dir, "GIZ_data_adaptada.xlsx"))
 rp_inst_demo <- reporte_instrumento(
-  path = file.path(rep_dir, "OPS_INST_FINAL.xlsx"),
-  listas_ordinales = c(
-    "poblacion_mensual", "trato_discriminatorio", "frecuencia",
-    "rango_atencion", "p103_recod_lista", "p118_recod_lista",
-    "p125_recod_lista"
-  ),
-  vars_fecha = "fecha_visita",
-  vars_hora = c("hora_inicio", "hora_fin")
+  path = file.path(rep_dir, "GIZ_INST_adaptado.xlsx"),
+  listas_ordinales = character(0),
+  vars_fecha = character(0),
+  vars_hora = character(0)
 )
 rp_data_demo <- reporte_data(data_cruda_demo, rp_inst_demo)
 
@@ -116,8 +119,8 @@ path_sps_demo <- tempfile("niveles_", fileext = ".sps")
 reporte_spss(rp_data_demo, path_sav = path_sav_demo, path_sps = path_sps_demo)
 
 secciones_demo <- list(
-  "Perfil general" = c("region", "p102", "p112"),
-  "Capacidad declarada" = c("p103_a_recod", "p103_b_recod", "p103_c_recod")
+  "Perfil del servicio" = c("distrito", "servicio", "p1", "p2_recod"),
+  "Experiencia de atención" = c("p12", "p13", "p14", "p15")
 )
 
 path_freq_demo <- tempfile("frecuencias_", fileext = ".xlsx")
@@ -133,7 +136,7 @@ reporte_cruces(
   data = rp_data_demo,
   instrumento = rp_inst_demo,
   SECCIONES = secciones_demo,
-  cruces = "region",
+  cruces = "distrito",
   modo = "estandar",
   path_xlsx = path_cruces_demo
 )
@@ -361,7 +364,7 @@ quieren documentar, tabular o exportar. Sin esos dos insumos, la etapa de
 reportes queda incompleta.
 
 ```{r}
-list.files(manual_file("data_ejemplo", "reportes"))
+list.files(manual_input())
 ```
 
 La lógica práctica del ejemplo es la siguiente:
@@ -399,12 +402,12 @@ library(prosecnur)
 library(readxl)
 
 # Leer la base cruda que después se convertirá en rp_data.
-data_cruda <- read_excel("files_manuales/data_ejemplo/reportes/OPS_DATA_FINAL.xlsx")
+data_cruda <- read_excel("insumos/OPS_DATA_FINAL.xlsx")
 
 # Construir el objeto instrumento que funcionará como diccionario.
 rp_inst <- reporte_instrumento(
   # Ruta al instrumento o XLSForm final.
-  path = "files_manuales/data_ejemplo/reportes/OPS_INST_FINAL.xlsx",
+  path = "insumos/OPS_INST_FINAL.xlsx",
 
   # Listas que deben tratarse como ordinales.
   listas_ordinales = c(
@@ -950,6 +953,80 @@ filtro permite excluirlos.
 forma presencial y telefónica, el reporte puede separarse por modalidad. Para
 eso se indica la columna que clasifica la modalidad o se definen reglas de
 clasificación.
+
+Cuando no existe una columna ya lista con la modalidad, `modalidad_reglas`
+permite construirla a partir de combinaciones de variables observadas en la
+base. La estructura esperada es una lista de reglas y cada regla se lee como:
+"si se cumple esta combinación de condiciones, asignar esta modalidad".
+
+```{r}
+#| eval: false
+modalidad_reglas <- list(
+  list(
+    modalidad = "Telefónica",
+    servicio = "ULE",
+    distrito = c("Villa El Salvador", "Ate", "Rimac", "El Porvenir", "La Esperanza")
+  ),
+  list(
+    modalidad = "Telefónica",
+    servicio = "UPSEP",
+    distrito = c("Ate", "El Porvenir")
+  )
+)
+```
+
+La lectura operativa de ese objeto es esta:
+
+- la primera regla dice: si `servicio == "ULE"` y además `distrito`
+  pertenece al conjunto indicado, clasificar el registro como
+  `"Telefónica"`;
+- la segunda regla dice: si `servicio == "UPSEP"` y además `distrito`
+  pertenece a `c("Ate", "El Porvenir")`, clasificar también como
+  `"Telefónica"`;
+- los registros que no entren en ninguna de esas reglas pasan a la modalidad
+  declarada en `modalidad_default`, por ejemplo `"Presencial"`.
+
+Conviene notar tres cosas para evitar confusiones:
+
+- cada elemento de la lista representa una regla completa;
+- dentro de una misma regla, todas las condiciones se leen en conjunto;
+- si una condición admite varios valores, esos valores se pasan como vector,
+  como en `distrito = c("Ate", "El Porvenir")`.
+
+Un uso completo puede verse así:
+
+```{r}
+#| eval: false
+modalidad_reglas <- list(
+  list(
+    modalidad = "Telefónica",
+    servicio = "ULE",
+    distrito = c("Villa El Salvador", "Ate", "Rimac", "El Porvenir", "La Esperanza")
+  ),
+  list(
+    modalidad = "Telefónica",
+    servicio = "UPSEP",
+    distrito = c("Ate", "El Porvenir")
+  )
+)
+
+reporte_enumeradores(
+  data = data_campo,
+  col_enumerador = "Enumerator_name",
+  cols_corte = c("servicio", "distrito"),
+  modalidad_reglas = modalidad_reglas,
+  modalidad_default = "Presencial",
+  modalidades_esperadas = c("Presencial", "Telefónica"),
+  output_file = "reporte_enumeradores.pdf",
+  titulo = "Producción de enumeradores",
+  subtitulo = "Resumen por modalidad, servicio y distrito"
+)
+```
+
+Si la base ya trae una columna limpia con la modalidad, conviene preferir
+`col_modalidad`. `modalidad_reglas` resulta más útil cuando la modalidad debe
+inferirse a partir de servicio, distrito, equipo o alguna otra combinación de
+campos operativos.
 
 En términos operativos, suele ser más útil generar este reporte al final del
 trabajo de campo, cuando ya sirve para revisar productividad, consistencia y
